@@ -1,0 +1,179 @@
+{
+  "info": {
+    "name": "Novus Lab Module",
+    "_postman_id": "novus-lab-collection-001",
+    "description": "Parameters / Ranges / Options / Results APIs. Use {{base_url}} (already in your Postman).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "item": [
+    {
+      "name": "Parameters",
+      "item": [
+        {
+          "name": "Create Parameter",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{base_url}}/api/parameters/:testId", "host": ["{{base_url}}"], "path": ["api","parameters",":testId"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Hemoglobin\",\n  \"type\": \"numeric\",\n  \"order\": 1,\n  \"unit\": \"g/dL\",\n  \"notes\": \"Common RBC parameter\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Parameter",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/parameters/:parameterId", "host": ["{{base_url}}"], "path": ["api","parameters",":parameterId"] },
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Hemoglobin (Hb)\",\n  \"unit\": \"g/dL\",\n  \"order\": 1\n}" }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Parameter",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/api/parameters/:parameterId", "host": ["{{base_url}}"], "path": ["api","parameters",":parameterId"] }
+          },
+          "response": []
+        },
+        {
+          "name": "List Parameters by Test",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/parameters/list/:testId", "host": ["{{base_url}}"], "path": ["api","parameters","list",":testId"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Ranges",
+      "item": [
+        {
+          "name": "Create Range",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/ranges/:parameterId", "host": ["{{base_url}}"], "path": ["api","ranges",":parameterId"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lowerLimit\": 26,\n  \"upperLimit\": 33,\n  \"criticalLow\": null,\n  \"criticalHigh\": null,\n  \"referenceRange\": \"Any\",\n  \"gender\": \"Both\",\n  \"normalValueHtml\": \"<p>26 - 33 pg</p>\",\n  \"specialConditionHtml\": \"\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Range",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/ranges/update/:rangeId", "host": ["{{base_url}}"], "path": ["api","ranges","update",":rangeId"] },
+            "body": { "mode": "raw", "raw": "{\n  \"lowerLimit\": 26,\n  \"upperLimit\": 34\n}" }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Range",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/api/ranges/:rangeId", "host": ["{{base_url}}"], "path": ["api","ranges",":rangeId"] }
+          },
+          "response": []
+        },
+        {
+          "name": "List Ranges by Parameter",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/ranges/list/:parameterId", "host": ["{{base_url}}"], "path": ["api","ranges","list",":parameterId"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Result Options",
+      "item": [
+        {
+          "name": "Create Option",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/options/:parameterId", "host": ["{{base_url}}"], "path": ["api","options",":parameterId"] },
+            "body": { "mode": "raw", "raw": "{ \"label\": \"Negative\", \"value\": \"negative\" }" }
+          },
+          "response": []
+        },
+        {
+          "name": "List Options",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/options/list/:parameterId", "host": ["{{base_url}}"], "path": ["api","options","list",":parameterId"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Option",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/api/options/:optionId", "host": ["{{base_url}}"], "path": ["api","options",":optionId"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Results",
+      "item": [
+        {
+          "name": "Create Patient Test Result",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/results", "host": ["{{base_url}}"], "path": ["api","results"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patientId\": 12,\n  \"testId\": 5,\n  \"orderId\": 101,\n  \"collectedAt\": \"2025-11-30T08:00:00Z\",\n  \"reportedById\": 3,\n  \"notes\": \"Routine CBC\",\n  \"parameters\": [\n    { \"parameterId\": 10, \"valueNumber\": 11.2, \"unit\": \"g/dL\" },\n    { \"parameterId\": 11, \"valueNumber\": 4.2, \"unit\": \"M/µL\" }\n  ]\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Patient Test Result by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/results/:id", "host": ["{{base_url}}"], "path": ["api","results",":id"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get HTML Report for Result",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/results/:id/html", "host": ["{{base_url}}"], "path": ["api","results",":id","html"] }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": { "type": "text/javascript", "exec": [] }
+    },
+    {
+      "listen": "test",
+      "script": { "type": "text/javascript", "exec": [] }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:5000", "type": "string" }
+  ]
+}

@@ -1,0 +1,150 @@
+import express from 'express';
+import dotenv from 'dotenv';
+import cors from 'cors';
+import cookieParser from "cookie-parser";
+import helmet from 'helmet';
+
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+
+
+
+
+// Routes
+import categoryRoutes from './modules/categories/category.routes.js';  
+import subcategoryRoutes from './modules/subcategories/subcategory.routes.js';  
+import patientRoutes from './modules/patients/patient.routes.js';  
+import packagesRoutes from './modules/packages/package.routes.js';  
+import spotlightRoutes from './modules/spotlight/spotlight.routes.js'; 
+import bannersRoutes from './modules/banners/banner.routes.js';  
+import vendorsRoutes from './modules/vendors/vendor.route.js'; 
+import vendorProfileRoutes from './modules/vendors/vendorProfile.routes.js';  
+import usersRoutes from './modules/users/user.routes.js';  
+import centersRoutes from './modules/centers/center.routes.js'; 
+import addressRoutes from './modules/address/address.routes.js';  
+import orderRoutes from './modules/orders/order.routes.js';  
+import couponsRoutes from './modules/coupons/coupon.routes.js';  
+import checkupRoutes from "./modules/checkup/checkup.routes.js";
+import prescriptionRoutes from "./modules/prescription/prescription.routes.js";
+import kpiRoutes from "./modules/dashboard/dashboard.routes.js";
+import paymentRoutes from "./modules/payments/payment.routes.js";
+import notificationRoutes from "./modules/notifications/notification.routes.js";
+import cartRoutes from "./modules/cart/cart.routes.js";
+import doctorRoutes from "./modules/doctor/doctor.routes.js";
+import slotRoutes from "./modules/slot/slot.routes.js";
+// Socket handler
+import locationSocketHandler from './modules/location/location.socket.js';
+import parameterRoutes from "./modules/parameters/parameters.routes.js";
+import resultRoutes from "./modules/results/results.routes.js";
+import rangeRoutes from "./modules/ranges/range.routes.js";
+
+import optionRoutes from "./modules/resultOptions/option.routes.js";
+import redis from './config/redis.js';
+
+
+
+dotenv.config();
+const PORT = process.env.PORT || 3000;
+
+const app = express();
+
+
+/* -------------------------
+   MIDDLEWARES
+---------------------------- */
+app.use(cookieParser());
+app.use(express.json());
+app.use(helmet());
+app.use(
+  cors({
+    origin: "http://localhost:4028",
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+app.use(express.urlencoded({ extended: true }));
+
+
+/* -------------------------
+   ROUTES
+---------------------------- */
+app.use('/api/categories', categoryRoutes);
+app.use('/api/subcategories', subcategoryRoutes);
+app.use('/api/patients', patientRoutes);
+app.use('/api/packages', packagesRoutes);
+app.use('/api/spotlight', spotlightRoutes);
+app.use('/api/banners', bannersRoutes);
+app.use('/api/vendors', vendorsRoutes);
+app.use('/api/vendor-profile', vendorProfileRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/centers', centersRoutes);
+app.use('/api/address', addressRoutes);
+
+app.use("/api/orders", orderRoutes);
+app.use("/api/coupons", couponsRoutes);
+app.use('/api/checkups', checkupRoutes);
+app.use('/api/prescription', prescriptionRoutes);
+app.use("/api/dashboard", kpiRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/carts', cartRoutes);
+app.use("/api/doctors", doctorRoutes);
+app.use("/api/slots", slotRoutes);
+
+
+app.use("/api/parameters", parameterRoutes);
+app.use("/api/ranges", rangeRoutes);
+app.use("/api/options", optionRoutes);
+app.use("/api/results", resultRoutes);
+
+
+
+// async function clearAllOrders() {
+//   try {
+//     const orderKeys = await redis.keys("order:*");
+//     const rejectKeys = await redis.keys("rejected:*");
+
+//     const all = [...orderKeys, ...rejectKeys];
+
+//     if (all.length) {
+//       await redis.del(all);
+//       console.log(`🧹 Deleted ${all.length} Redis order keys`);
+//     } else {
+//       console.log("✔ No order keys found to delete");
+//     }
+
+//   } catch (err) {
+//     console.error("clearAllOrders error:", err);
+//   }
+// }
+// clearAllOrders()
+
+// /* -------------------------
+//    HTTP + SOCKET.IO SETUP
+// ---------------------------- */
+// const httpServer = http.createServer(app); // ✔ ONLY ONE SERVER
+
+// const io = new SocketIOServer(httpServer, {
+//   cors: {
+//     origin: "*", // change to frontend domain later
+//     methods: ["GET", "POST"]
+//   }
+// });
+
+// // Attach socket instance to express for use inside controllers
+// app.set('io', io);
+
+// // Initialize socket logic
+// locationSocketHandler(io);
+
+// /* -------------------------
+//    START SERVER
+// ---------------------------- */
+// httpServer.listen(PORT, () =>
+//   console.log(`🚀 Server + Socket.IO running on port ${PORT}`)
+// );
+
+// export { io };
+export default app;

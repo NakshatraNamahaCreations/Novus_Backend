@@ -1,0 +1,743 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PrescriptionFileType {
+  IMAGE
+  PDF
+}
+
+enum PrescriptionStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+model Banner {
+  id            Int          @id @default(autoincrement())
+  imgUrl        String
+  subCategoryId Int?
+  subCategory   SubCategory? @relation(fields: [subCategoryId], references: [id])
+}
+
+model SpotlightBanner {
+  id            Int         @id @default(autoincrement())
+  imgUrl        String
+  subCategoryId Int
+  subCategory   SubCategory @relation(fields: [subCategoryId], references: [id])
+}
+
+model User {
+  id                    Int            @id @default(autoincrement())
+  name                  String
+  email                 String         @unique
+  phone                 String?
+  city                  String?
+  password              String
+  status                String         @default("active")
+  isActive              Boolean        @default(true)
+  role                  String
+  rights                Json
+  resetToken            String?
+  resetTokenExpiry      DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  reviewedPrescriptions Prescription[]
+}
+
+model Patient {
+  id                 Int       @id @default(autoincrement())
+  fullName           String?
+  initial            String?
+  dob                DateTime?
+  age                Int?
+  gender             String?
+  email              String?
+  height             String?
+  weight             String?
+  smokingHabit       String?
+  alcoholConsumption String?
+  exerciseFrequency  String?
+  bloodType          String?
+  contactNo          String?   @unique
+  status             String    @default("active")
+  otp                String?
+  otpExpiry          DateTime?
+  deviceToken        String?
+  relationship       String?
+  isPrimary          Boolean   @default(false)
+  primaryId          Int?
+  aadharNo           String?
+  address            String?
+  passportNo         String?
+  primary            Patient?  @relation("FamilyRelation", fields: [primaryId], references: [id])
+  familyMembers      Patient[] @relation("FamilyRelation")
+
+  addresses Address[]
+
+  orders        Order[]
+  couponUsages  CouponUsage[]
+  prescriptions Prescription[]
+  cart          Cart[]
+  cartItems     CartItem[]
+  orderMembers  OrderMember[]
+  VendorReview  VendorReview[]
+
+  testResults PatientTestResult[] // ✅ FIX added
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  NotificationLog NotificationLog[]
+}
+
+model Address {
+  id        Int      @id @default(autoincrement())
+  saveas    String?
+  landmark  String?
+  city      String
+  state     String
+  pincode   String
+  latitude  Float?
+  longitude Float?
+  address   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  patientId Int
+  patient   Patient @relation(fields: [patientId], references: [id])
+
+  orders Order[]
+}
+
+model Category {
+  id            Int             @id @default(autoincrement())
+  imgUrl        String?
+  name          String
+  order         Int?
+  type          String?
+  subCategories SubCategory[]
+  tests         Test[]
+  packages      HealthPackage[]
+}
+
+model SubCategory {
+  id               Int               @id @default(autoincrement())
+  catId            Int
+  imgUrl           String?
+  order            Int?
+  name             String
+  category         Category          @relation(fields: [catId], references: [id])
+  tests            Test[]
+  spotlightBanners SpotlightBanner[]
+  banners          Banner[]
+}
+
+enum ShowIn {
+  HOME
+  TEST
+  OFFER
+}
+
+model HealthPackage {
+  id           Int     @id @default(autoincrement())
+  name         String
+  description  String?
+  imgUrl       String?
+  actualPrice  Float
+  offerPrice   Float?
+  reportWithin Int?
+  reportUnit   String  @default("hours")
+  status       String  @default("active")
+
+  noOfParameter String?
+
+  discount            Float                @default(0)
+  showIn              ShowIn?              @default(TEST)
+  category            Category[]
+  checkupPackages     CheckupPackage[]
+  cartItems           CartItem[]
+  OrderCheckup        OrderCheckup[]
+  orderMemberPackages OrderMemberPackage[]
+
+  @@map("Checkup")
+}
+
+model Test {
+  id             Int     @id @default(autoincrement())
+  name           String
+  actualPrice    Float
+  offerPrice     Float?
+  discount       Float   @default(0)
+  cityWisePrice  Json?
+  gender         String?
+  imgUrl         String?
+  description    String?
+  contains       String?
+  numberOfTests  Int?
+  preparations   String?
+  sampleRequired String?
+  testType       String
+  categoryId     Int
+  subCategoryId  Int?
+  showIn         String?
+  title          String?
+  subtitle       String?
+  reportWithin   Int
+  reportUnit     String  @default("hours")
+  status         String  @default("active")
+
+  category    Category     @relation(fields: [categoryId], references: [id])
+  subCategory SubCategory? @relation(fields: [subCategoryId], references: [id])
+
+  centerPackages      CenterPackage[]      @relation("TestToCenterPackage")
+  checkupPackages     CheckupPackage[]
+  cartItems           CartItem[]
+  prescriptions       Prescription[]
+  parameters          TestParameter[] // ✅ FIX added
+  patientResults      PatientTestResult[] // ✅ FIX added
+  orderMemberPackages OrderMemberPackage[]
+
+  @@map("Package")
+}
+
+model CheckupPackage {
+  id        Int @id @default(autoincrement())
+  checkupId Int
+  testId    Int
+
+  checkup HealthPackage @relation(fields: [checkupId], references: [id])
+  test    Test          @relation(fields: [testId], references: [id])
+
+  @@map("CheckupPackage")
+}
+
+model Coupon {
+  id             Int       @id @default(autoincrement())
+  code           String    @unique
+  description    String?
+  discountType   String    @default("percentage")
+  discountValue  Float
+  minOrderAmount Float?
+  maxDiscount    Float?
+  startDate      DateTime?
+  expiryDate     DateTime?
+  usageLimit     Int?
+  perUserLimit   Int?
+  isActive       Boolean   @default(true)
+  autoApply      Boolean   @default(false)
+  createdBy      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  couponUsages CouponUsage[]
+}
+
+model CouponUsage {
+  id       Int      @id @default(autoincrement())
+  couponId Int
+  userId   Int
+  orderId  Int?
+  usedAt   DateTime @default(now())
+
+  coupon Coupon  @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  user   Patient @relation(fields: [userId], references: [id])
+}
+
+model Vendor {
+  id              Int               @id @default(autoincrement())
+  name            String
+  number          String            @unique
+  city            String?
+  category        String?
+  gender          String?
+  dob             DateTime?
+  age             Int?
+  pincode         Int?
+  radius          Int?
+  earnings        Float             @default(0)
+  address         String?
+  email           String?           @unique
+  password        String
+  status          String            @default("inactive")
+  block           Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  isOnline        Boolean           @default(false)
+  otp             String?
+  otpExpiry       DateTime?
+  overallRating   Float             @default(0) // ⭐ NEW
+  totalReviews    Int               @default(0) // ⭐ NEW
+  profile         VendorProfile?
+  orders          Order[]
+  history         EarningsHistory[]
+  locationHistory VendorLocation[]
+
+  reviews VendorReview[]
+}
+
+model VendorReview {
+  id        Int      @id @default(autoincrement())
+  vendorId  Int
+  patientId Int?
+  rating    Int // 1–5 stars
+  comment   String?
+  createdAt DateTime @default(now())
+
+  vendor  Vendor   @relation(fields: [vendorId], references: [id])
+  patient Patient? @relation(fields: [patientId], references: [id])
+}
+
+model VendorProfile {
+  id             Int     @id @default(autoincrement())
+  vendorId       Int     @unique
+  photoUrl       String?
+  clinicName     String?
+  specialization String?
+  experience     Int?
+  qualification  String?
+  bio            String?
+  vendor         Vendor  @relation(fields: [vendorId], references: [id])
+}
+
+model EarningsHistory {
+  id        Int      @id @default(autoincrement())
+  vendorId  Int
+  title     String
+  desc      String?
+  amount    Float
+  createdAt DateTime @default(now())
+
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+}
+
+model Center {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  city      String
+  lat       Float
+  long      Float
+  address   String
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  centerPackages CenterPackage[] @relation("CenterToCenterPackage")
+  orders         Order[]
+}
+
+model CenterPackage {
+  id       Int @id @default(autoincrement())
+  centerId Int
+  testId   Int
+
+  center Center @relation("CenterToCenterPackage", fields: [centerId], references: [id], onDelete: Cascade)
+  test   Test   @relation("TestToCenterPackage", fields: [testId], references: [id], onDelete: Cascade)
+
+  @@unique([centerId, testId])
+  @@map("CenterPackage")
+}
+
+model Order {
+  id              Int       @id @default(autoincrement())
+  orderNumber     String    @unique
+  merchantOrderId String?   @unique
+  centerId        Int?
+  vendorId        Int?
+  doctorId        Int?
+  patientId       Int
+  addressId       Int
+  isSelf          Boolean   @default(false)
+  totalAmount     Float
+  discount        Float?
+  finalAmount     Float?
+  paymentStatus   String?   @default("pending")
+  paymentMode     String?
+  status          String    @default("pending")
+  testType        String?
+  slot            String?
+  date            DateTime
+  documentImage   String?
+  orderType       String?
+  remarks         String?
+  trackingId      String?
+  reportUrl       String?
+  sampleCollected Boolean   @default(false)
+  reportReady     Boolean   @default(false)
+  isHomeSample    Boolean   @default(false)
+  cancelledBy     String?
+  cancelledAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  center        Center?        @relation(fields: [centerId], references: [id])
+  vendor        Vendor?        @relation(fields: [vendorId], references: [id])
+  patient       Patient        @relation(fields: [patientId], references: [id])
+  address       Address        @relation(fields: [addressId], references: [id], onDelete: Cascade)
+  doctor        Doctor?        @relation(fields: [doctorId], references: [id])
+  orderCheckups OrderCheckup[]
+  orderTracking OrderTracking?
+  orderMembers  OrderMember[]
+}
+
+model Doctor {
+  id        Int      @id @default(autoincrement())
+  name      String
+  number    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders Order[]
+}
+
+model OrderMember {
+  id        Int @id @default(autoincrement())
+  orderId   Int
+  patientId Int
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  orderMemberPackages OrderMemberPackage[]
+}
+
+model OrderMemberPackage {
+  id            Int  @id @default(autoincrement())
+  orderMemberId Int
+  packageId     Int?
+  testId        Int?
+
+  orderMember OrderMember @relation(fields: [orderMemberId], references: [id], onDelete: Cascade)
+
+  package HealthPackage? @relation(fields: [packageId], references: [id])
+  test    Test?          @relation(fields: [testId], references: [id])
+
+  @@map("OrderMemberPackage")
+}
+
+model VendorOrderRejection {
+  id        Int      @id @default(autoincrement())
+  vendorId  Int
+  orderId   Int
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+model OrderCheckup {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  checkupId Int
+  createdAt DateTime @default(now())
+
+  order   Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  checkup HealthPackage @relation(fields: [checkupId], references: [id])
+
+  @@unique([orderId, checkupId])
+  @@map("OrderCheckup")
+}
+
+model Prescription {
+  id           Int                  @id @default(autoincrement())
+  patientId    Int
+  reviewedById Int?
+  fileUrl      String
+  fileType     PrescriptionFileType
+  status       PrescriptionStatus   @default(PENDING_REVIEW)
+  remarks      String?
+  uploadedAt   DateTime             @default(now())
+  reviewedAt   DateTime?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  patient    Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  reviewedBy User?   @relation(fields: [reviewedById], references: [id])
+
+  testId Int?
+  test   Test? @relation(fields: [testId], references: [id])
+
+  @@map("Prescription")
+}
+
+model Payment {
+  id              Int       @id @default(autoincrement())
+  orderId         Int?
+  patientId       Int?
+  userId          Int?
+  centerId        Int?
+  paymentId       String    @unique
+  paymentMethod   String
+  paymentStatus   String    @default("PENDING")
+  amount          Float
+  paymentDate     DateTime  @default(now())
+  transactionNote String?
+  referenceId     String?
+  refundAmount    Float?
+  refundDate      DateTime?
+  refundReason    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Notification {
+  id               Int               @id @default(autoincrement())
+  title            String
+  message          String
+  type             String
+  audience         String
+  selectedPatients Json?
+  status           String            @default("draft")
+  scheduledAt      DateTime?
+  sentAt           DateTime?
+  imageUrl         String?
+  deepLink         String?
+  recipients       Int               @default(0)
+  openCount        Int               @default(0)
+  clickCount       Int               @default(0)
+  failureCount     Int               @default(0)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  logs             NotificationLog[]
+
+  @@map("notifications")
+}
+
+model NotificationLog {
+  id             Int       @id @default(autoincrement())
+  notificationId Int
+  patientId      Int?
+  type           String
+  status         String
+  deviceToken    String?
+  phoneNumber    String?
+  errorMessage   String?
+  sentAt         DateTime  @default(now())
+  openedAt       DateTime?
+  clickedAt      DateTime?
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  patient      Patient?     @relation(fields: [patientId], references: [id])
+
+  @@map("notification_logs")
+}
+
+model Cart {
+  id          Int      @id @default(autoincrement())
+  patientId   Int
+  subtotal    Float    @default(0)
+  discount    Float    @default(0)
+  finalAmount Float    @default(0)
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  patient   Patient    @relation(fields: [patientId], references: [id])
+  cartItems CartItem[]
+}
+
+model CartItem {
+  id         Int   @id @default(autoincrement())
+  cartId     Int
+  patientId  Int
+  offerPrice Float
+  testId     Int?
+  packageId  Int?
+
+  isSelected Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  cart    Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  test    Test?          @relation(fields: [testId], references: [id])
+  package HealthPackage? @relation(fields: [packageId], references: [id])
+  patient Patient        @relation(fields: [patientId], references: [id])
+
+  @@map("CartItem")
+}
+
+model OrderTracking {
+  id              Int       @id @default(autoincrement())
+  orderId         Int       @unique
+  vendorId        Int?
+  userLatitude    Float
+  userLongitude   Float
+  vendorLatitude  Float?
+  vendorLongitude Float?
+  vendorPath      Json?
+  isActive        Boolean   @default(true)
+  startTime       DateTime  @default(now())
+  endTime         DateTime?
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@map("order_tracking")
+}
+
+model VendorLocation {
+  id        Int      @id @default(autoincrement())
+  vendorId  Int
+  latitude  Float
+  longitude Float
+  createdAt DateTime @default(now())
+
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+
+  @@map("vendor_location")
+}
+
+model Slot {
+  id        Int     @id @default(autoincrement())
+  name      String? // optional: Morning / Afternoon / Evening
+  startTime String // example: "09:00 AM"
+  capacity  Int // how many orders per day
+  isActive  Boolean @default(true)
+
+  orderSlots OrderSlot[]
+}
+
+model OrderSlot {
+  id     Int      @id @default(autoincrement())
+  slotId Int
+  date   DateTime // date for bookings (no time)
+  count  Int      @default(0)
+
+  slot Slot @relation(fields: [slotId], references: [id])
+}
+
+model Venue {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  address   String?
+  city      String?
+  state     String?
+  pincode   String?
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  referenceCenters ReferenceCenter[]
+}
+
+model ReferenceCenter {
+  id                    Int     @id @default(autoincrement())
+  shortCode             String?
+  name                  String
+  contactName           String?
+  address               String?
+  email                 String?
+  altEmail              String?
+  mobile                String?
+  lat                   Float?
+  city                  String?
+  long                  Float?
+  billType              String? // Prepaid | Postpaid | etc
+  emailReportConfig     String? // With letterhead / Without letterhead
+  sendReportMail        Boolean @default(false)
+  sendBillMailToPatient Boolean @default(false)
+  paymentType           String? // Post Paid / Pre Paid / Credit etc
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venueId Int
+  venue   Venue @relation(fields: [venueId], references: [id])
+}
+
+/**
+ * ---------------------------------------------------------
+ * LAB PARAMETER MODELS
+ * ---------------------------------------------------------
+ */
+
+model TestParameter {
+  id       Int     @id @default(autoincrement())
+  testId   Int
+  name     String
+  type     String?
+  order    Int?
+  unit     String?
+  notes    String?
+  isActive Boolean @default(true)
+
+  test       Test              @relation(fields: [testId], references: [id], onDelete: Cascade)
+  ranges     ParameterRange[]
+  resultOpts ResultOption[]
+  results    ParameterResult[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ParameterRange {
+  id                   Int     @id @default(autoincrement())
+  parameterId          Int
+  lowerLimit           Float?
+  upperLimit           Float?
+  criticalLow          Float?
+  criticalHigh         Float?
+  referenceRange       String?
+  gender               String?
+  normalValueHtml      String?
+  specialConditionHtml String?
+
+  parameter TestParameter @relation(fields: [parameterId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ResultOption {
+  id          Int     @id @default(autoincrement())
+  parameterId Int
+  label       String
+  value       String?
+
+  parameter TestParameter @relation(fields: [parameterId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * ---------------------------------------------------------
+ * TEST RESULT STORAGE (PATIENT REPORTS)
+ * ---------------------------------------------------------
+ */
+
+model PatientTestResult {
+  id           Int       @id @default(autoincrement())
+  patientId    Int
+  testId       Int
+  orderId      Int?
+  collectedAt  DateTime?
+  reportedAt   DateTime?
+  reportedById Int?
+  status       String    @default("draft")
+  notes        String?
+  rawJson      Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  patient          Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  test             Test              @relation(fields: [testId], references: [id])
+  parameterResults ParameterResult[]
+}
+
+model ParameterResult {
+  id                  Int      @id @default(autoincrement())
+  patientTestResultId Int
+  parameterId         Int
+  valueText           String?
+  valueNumber         Float?
+  unit                String?
+  flag                String?
+  normalRangeText     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  patientTestResult PatientTestResult @relation(fields: [patientTestResultId], references: [id], onDelete: Cascade)
+  parameter         TestParameter     @relation(fields: [parameterId], references: [id])
+}

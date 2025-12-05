@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Package" ADD COLUMN     "discount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "numberOfTests" INTEGER;

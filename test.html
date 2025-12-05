@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Redis + Socket Dashboard</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    body { font-family: Arial; background:#f5f5f5; padding:20px; }
+    .box { background:white; padding:15px; border-radius:10px; margin-bottom:20px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding:8px; border-bottom:1px solid #ddd; }
+    th { background:#efefef; }
+  </style>
+</head>
+
+<body>
+
+<h1>🚀 Real-Time Redis + Socket Dashboard</h1>
+
+<div class="box">
+  <h2>🟢 Connected Vendors</h2>
+  <table id="vendorsTable">
+    <thead>
+      <tr>
+        <th>Vendor ID</th>
+        <th>Pincode</th>
+        <th>Latitude</th>
+        <th>Longitude</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="box">
+  <h2>🔵 Live Incoming Orders</h2>
+  <ul id="ordersList"></ul>
+</div>
+
+<script>
+const socket = io("http://localhost:5000");
+
+const vendors = {};
+
+function updateVendorsUI() {
+  const tbody = document.querySelector("#vendorsTable tbody");
+  tbody.innerHTML = "";
+  Object.values(vendors).forEach(v => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${v.vendorId}</td>
+        <td>${v.pincode}</td>
+        <td>${v.latitude}</td>
+        <td>${v.longitude}</td>
+        <td>${new Date(v.updatedAt).toLocaleTimeString()}</td>
+      </tr>
+    `;
+  });
+}
+
+socket.on("vendorLive", data => {
+  vendors[data.vendorId] = {
+    ...data,
+    updatedAt: Date.now()
+  };
+  updateVendorsUI();
+});
+
+socket.on("vendorJoin", data => {
+  vendors[data.vendorId] = {
+    ...data,
+    updatedAt: Date.now()
+  };
+  updateVendorsUI();
+});
+
+socket.on("orderNearby", order => {
+  document.getElementById("ordersList").innerHTML += `
+    <li>Nearby Order: ${JSON.stringify(order)}</li>
+  `;
+});
+
+socket.on("orderForPincode", order => {
+  document.getElementById("ordersList").innerHTML += `
+    <li>Pincode Match Order: ${JSON.stringify(order)}</li>
+  `;
+});
+
+socket.on("orderCreatedServer", order => {
+  document.getElementById("ordersList").innerHTML += `
+    <li>Order Created: ${JSON.stringify(order)}</li>
+  `;
+});
+</script>
+
+</body>
+</html>
