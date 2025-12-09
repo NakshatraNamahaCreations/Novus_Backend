@@ -4,14 +4,14 @@ const prisma = new PrismaClient();
 // Create Slot
 export const createSlot = async (req, res) => {
   try {
-    const { name, startTime, capacity } = req.body;
+    const { name, startTime,endTime, capacity } = req.body;
 
     if (!startTime || !capacity) {
       return res.status(400).json({ message: "startTime and capacity are required" });
     }
 
     const slot = await prisma.slot.create({
-      data: { name, startTime, capacity },
+      data: { name, startTime, capacity ,endTime},
     });
 
     res.status(201).json({ message: "Slot created", slot });
@@ -71,7 +71,8 @@ export const getSlotsByDate = async (req, res) => {
       return {
         id: slot.id,
         name:slot.name,
-        startTime: slot.startTime,    // For user app display
+        startTime: slot.startTime,  
+        endTime:slot.endTime,  // For user app display
         capacity: slot.capacity,
         booked,
         remaining: Math.max(0, slot.capacity - booked),
@@ -151,6 +152,8 @@ export const updateSlot = async (req, res) => {
       data: {
         name: name ?? slot.name,
         startTime: startTime ?? slot.startTime,
+        endTime: endTime ?? slot.endTime,
+
         capacity: capacity ?? slot.capacity,
         isActive: isActive ?? slot.isActive,
       },

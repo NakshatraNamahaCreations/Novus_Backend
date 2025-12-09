@@ -39,6 +39,16 @@ import resultRoutes from "./modules/results/results.routes.js";
 import rangeRoutes from "./modules/ranges/range.routes.js";
 
 import optionRoutes from "./modules/resultOptions/option.routes.js";
+import configRoutes from "./modules/config/config.routes.js";
+
+
+import cityRoutes from "./modules/city/city.routes.js";
+import referenceCenterRoutes from "./modules/referenceCenter/reference.routes.js";
+import diagnosticCenterRoutes from "./modules/diagnosticCenter/diagnosticCenter.routes.js";
+import esignatureRoutes from "./modules/esignature/esignature.route.js";
+
+
+
 import redis from './config/redis.js';
 
 
@@ -73,7 +83,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/categories', categoryRoutes);
 app.use('/api/subcategories', subcategoryRoutes);
 app.use('/api/patients', patientRoutes);
-app.use('/api/packages', packagesRoutes);
+app.use('/api/tests', packagesRoutes);
 app.use('/api/spotlight', spotlightRoutes);
 app.use('/api/banners', bannersRoutes);
 app.use('/api/vendors', vendorsRoutes);
@@ -93,12 +103,20 @@ app.use('/api/carts', cartRoutes);
 app.use("/api/doctors", doctorRoutes);
 app.use("/api/slots", slotRoutes);
 
+app.use('/api/cities', cityRoutes);
+app.use("/api/reference-centers", referenceCenterRoutes);
+app.use("/api/diagnostic-centers", diagnosticCenterRoutes);
+app.use("/api/esignatures", esignatureRoutes);
+
+
+
+
 
 app.use("/api/parameters", parameterRoutes);
 app.use("/api/ranges", rangeRoutes);
 app.use("/api/options", optionRoutes);
 app.use("/api/results", resultRoutes);
-
+app.use("/api/config/vendor-earnings", configRoutes);
 
 
 // async function clearAllOrders() {

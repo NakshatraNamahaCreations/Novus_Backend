@@ -33,8 +33,11 @@ export const addSubCategory = async (req, res) => {
 export const getAllSubCategories = async (req, res) => {
   try {
     const subCategories = await prisma.subCategory.findMany({
-      include: { category: true, packages: true },
+      include: { 
+        category: true
+      },
     });
+
     res.json(subCategories);
   } catch (error) {
     console.error("Error fetching subcategories:", error);
@@ -42,15 +45,20 @@ export const getAllSubCategories = async (req, res) => {
   }
 };
 
+
 // READ ONE
 export const getSubCategoryById = async (req, res) => {
   try {
     const subCategory = await prisma.subCategory.findUnique({
       where: { id: Number(req.params.id) },
-      include: { category: true, packages: true },
+      include: { 
+        category: true
+       
+      },
     });
 
-    if (!subCategory) return res.status(404).json({ error: "Subcategory not found" });
+    if (!subCategory)
+      return res.status(404).json({ error: "Subcategory not found" });
 
     res.json(subCategory);
   } catch (error) {
@@ -58,6 +66,7 @@ export const getSubCategoryById = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch subcategory" });
   }
 };
+
 
 // UPDATE
 export const updateSubCategory = async (req, res) => {
@@ -124,24 +133,24 @@ export const deleteSubCategory = async (req, res) => {
 };
 
 
-
-// READ ALL by Category ID
 export const getSubCategoriesByCategoryId = async (req, res) => {
   try {
     const { catId } = req.params;
 
     const subCategories = await prisma.subCategory.findMany({
       where: { catId: Number(catId) },
-      include: { category: true, packages: true },
+      include: {
+        category: true
+      }
     });
 
-    if (!subCategories || subCategories.length === 0) {
-      return res.status(404).json({ error: "No subcategories found for this category" });
+    if (subCategories.length === 0) {
+      return res.status(404).json({ error: "No subcategories found" });
     }
 
     res.json(subCategories);
   } catch (error) {
-    console.error("Error fetching subcategories by category:", error);
+    console.error("Error fetching subcategories:", error);
     res.status(500).json({ error: "Failed to fetch subcategories by category" });
   }
 };

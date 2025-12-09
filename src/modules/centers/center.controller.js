@@ -4,8 +4,6 @@ import jwt from "jsonwebtoken";
 
 const prisma = new PrismaClient();
 
-
-
 const JWT_SECRET = process.env.JWT_SECRET || "super_secret_key";
 
 // ✅ Center Login
@@ -70,37 +68,62 @@ export const logoutCenter = async (req, res) => {
   }
 };
 
-
 // ✅ CREATE Center
 export const createCenter = async (req, res) => {
   try {
-    const { name, email, password, city, lat, long, address, packageIds = [] } = req.body;
+    const {
+      name,
+      contactName,
+      venue,
+      address,
+      email,
+      alternativeEmail,
+      mobile,
+      billType,
+      account,
+      emailReportConfig,
+      sendReportToPatient = false,
+      sendBillToPatient = false,
+      paymentType = "PrePaid",
 
-    if (!name || !email || !password || !city || !lat || !long || !address) {
-      return res.status(400).json({ error: "All fields are required" });
+      city,
+      lat,
+      long,
+
+      packageIds = [],
+    } = req.body;
+
+    // Required fields based on UI
+    if (!name || !venue || !address) {
+      return res
+        .status(400)
+        .json({ error: "Name, Venue, and Address are required" });
     }
 
-    // Check if email already exists
-    const existing = await prisma.center.findUnique({ where: { email } });
-    if (existing) return res.status(400).json({ error: "Email already registered" });
+    // Email optional, but must be unique if provided
+    if (email) {
+      const exists = await prisma.center.findUnique({ where: { email } });
+      if (exists) {
+        return res.status(400).json({ error: "Email already registered" });
+      }
+    }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Validate packages
+    // Validate package IDs if provided
     if (packageIds.length > 0) {
-      const existingPackages = await prisma.package.findMany({
+      const validPackages = await prisma.package.findMany({
         where: { id: { in: packageIds.map(Number) } },
         select: { id: true },
       });
 
-      const existingIds = existingPackages.map((p) => p.id);
-      const invalidIds = packageIds.filter((pid) => !existingIds.includes(Number(pid)));
+      const validIds = validPackages.map((p) => p.id);
+      const invalidIds = packageIds.filter(
+        (pid) => !validIds.includes(Number(pid))
+      );
 
       if (invalidIds.length > 0) {
-        return res.status(400).json({
-          error: `Invalid package IDs: ${invalidIds.join(", ")}`,
-        });
+        return res
+          .status(400)
+          .json({ error: `Invalid package IDs: ${invalidIds.join(", ")}` });
       }
     }
 
@@ -108,12 +131,24 @@ export const createCenter = async (req, res) => {
     const center = await prisma.center.create({
       data: {
         name,
-        email,
-        password: hashedPassword,
-        city,
-        lat: parseFloat(lat),
-        long: parseFloat(long),
+        contactName,
+        venue,
         address,
+        email,
+        alternativeEmail,
+        mobile,
+        billType,
+        account,
+        emailReportConfig,
+
+        sendReportToPatient,
+        sendBillToPatient,
+        paymentType,
+
+        city: city || null,
+        lat: lat ? Number(lat) : null,
+        long: long ? Number(long) : null,
+
         centerPackages:
           packageIds.length > 0
             ? {
@@ -123,7 +158,8 @@ export const createCenter = async (req, res) => {
               }
             : undefined,
       },
-      include: { centerPackages: { include: { package: true } } },
+
+      include: { centerPackages: { include: { test: true } } },
     });
 
     res.status(201).json({ message: "Center created successfully", center });
@@ -136,56 +172,41 @@ export const createCenter = async (req, res) => {
 // ✅ GET ALL Centers with Pagination + Search
 export const getAllCenters = async (req, res) => {
   try {
-    // Get query parameters
-    const {
-      page = 1,
-      limit = 15,
-      search = "",
-    } = req.query;
+    const { page = 1, limit = 15, search = "" } = req.query;
 
+    const skip = (page - 1) * limit;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const take = parseInt(limit);
-
-    // Prisma where condition for search
     const where = search
       ? {
           OR: [
             { name: { contains: search, mode: "insensitive" } },
+            { venue: { contains: search, mode: "insensitive" } },
             { email: { contains: search, mode: "insensitive" } },
-          
+            { mobile: { contains: search, mode: "insensitive" } },
             { city: { contains: search, mode: "insensitive" } },
           ],
         }
       : {};
 
-    // Fetch total count
-    const totalCount = await prisma.center.count({ where });
+    const total = await prisma.center.count({ where });
 
-    // Fetch centers with pagination
     const centers = await prisma.center.findMany({
       where,
       include: {
-        centerPackages: {
-          include: { package: true },
-        },
+        centerPackages: { include: { test: true } },
       },
-      orderBy: { createdAt: "desc" },
-      skip,
-      take,
+      orderBy: { name: "asc" }, // Alphabetical
+      skip: Number(skip),
+      take: Number(limit),
     });
 
-    // Remove password field
-    const sanitized = centers.map(({ password, ...rest }) => rest);
-
-    // Send response with pagination meta
     res.json({
-      data: sanitized,
+      data: centers,
       meta: {
-        total: totalCount,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(totalCount / limit),
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
@@ -194,7 +215,6 @@ export const getAllCenters = async (req, res) => {
   }
 };
 
-
 // ✅ GET ONE Center
 export const getCenterById = async (req, res) => {
   try {
@@ -202,14 +222,12 @@ export const getCenterById = async (req, res) => {
 
     const center = await prisma.center.findUnique({
       where: { id: Number(id) },
-      include: { centerPackages: { include: { package: true } } },
+      include: { centerPackages: { include: { test: true } } },
     });
 
     if (!center) return res.status(404).json({ error: "Center not found" });
 
-    // Remove password before sending
-    const { password, ...safeCenter } = center;
-    res.json(safeCenter);
+    res.json(center);
   } catch (error) {
     console.error("Error fetching center:", error);
     res.status(500).json({ error: "Failed to fetch center" });
@@ -220,32 +238,70 @@ export const getCenterById = async (req, res) => {
 export const updateCenter = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, password, city, lat, long, address, packageIds = [] } = req.body;
 
-    const existing = await prisma.center.findUnique({ where: { id: Number(id) } });
+    const existing = await prisma.center.findUnique({
+      where: { id: Number(id) },
+    });
     if (!existing) return res.status(404).json({ error: "Center not found" });
 
-    let updatedPassword = existing.password;
-    if (password) {
-      updatedPassword = await bcrypt.hash(password, 10);
+    const {
+      name,
+      contactName,
+      venue,
+      address,
+      email,
+      alternativeEmail,
+      mobile,
+      billType,
+      account,
+      emailReportConfig,
+      sendReportToPatient,
+      sendBillToPatient,
+      paymentType,
+      city,
+      lat,
+      long,
+
+      packageIds = [],
+    } = req.body;
+
+    // Email unique check
+    if (email && email !== existing.email) {
+      const exists = await prisma.center.findUnique({ where: { email } });
+      if (exists) {
+        return res.status(400).json({ error: "Email already in use" });
+      }
     }
 
+    // Update center
     await prisma.center.update({
       where: { id: Number(id) },
       data: {
         name,
-        email,
-        password: updatedPassword,
-        city,
-        lat: parseFloat(lat),
-        long: parseFloat(long),
+        contactName,
+        venue,
         address,
+        email,
+        alternativeEmail,
+        mobile,
+        billType,
+        account,
+        emailReportConfig,
+        sendReportToPatient,
+        sendBillToPatient,
+        paymentType,
+        city,
+        lat: lat ? Number(lat) : null,
+        long: long ? Number(long) : null,
       },
     });
 
-    // Update packages if provided
-    if (packageIds && packageIds.length > 0) {
-      await prisma.centerPackage.deleteMany({ where: { centerId: Number(id) } });
+    // Update packages
+    if (packageIds.length > 0) {
+      await prisma.centerPackage.deleteMany({
+        where: { centerId: Number(id) },
+      });
+
       await prisma.centerPackage.createMany({
         data: packageIds.map((pid) => ({
           centerId: Number(id),
@@ -256,11 +312,10 @@ export const updateCenter = async (req, res) => {
 
     const updated = await prisma.center.findUnique({
       where: { id: Number(id) },
-      include: { centerPackages: { include: { package: true } } },
+      include: { centerPackages: { include: { test: true } } },
     });
 
-    const { password: pw, ...safeCenter } = updated;
-    res.json({ message: "Center updated successfully", center: safeCenter });
+    res.json({ message: "Center updated successfully", center: updated });
   } catch (error) {
     console.error("Error updating center:", error);
     res.status(500).json({ error: "Failed to update center" });
@@ -272,7 +327,9 @@ export const deleteCenter = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const existing = await prisma.center.findUnique({ where: { id: Number(id) } });
+    const existing = await prisma.center.findUnique({
+      where: { id: Number(id) },
+    });
     if (!existing) return res.status(404).json({ error: "Center not found" });
 
     await prisma.center.delete({ where: { id: Number(id) } });
@@ -294,7 +351,9 @@ export const getNearbyCenters = async (req, res) => {
     const distanceKm = parseFloat(radius);
 
     if (isNaN(userLat) || isNaN(userLong)) {
-      return res.status(400).json({ error: "Latitude and longitude are required" });
+      return res
+        .status(400)
+        .json({ error: "Latitude and longitude are required" });
     }
 
     const centers = await prisma.$queryRaw`

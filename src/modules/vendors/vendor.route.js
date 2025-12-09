@@ -9,12 +9,12 @@ import {
   updateVendor,
   deleteVendor,
   toggleBlockVendor,
-getVendorReviews,
-  getearningshistory,
-addVendorReview,
+  getVendorReviews,
+  getEarningsHistory,
+  addVendorReview,
   sendOtp,
   verifyOtp,
-  addVendorEarning
+  addVendorEarning,
 } from "./vendor.controller.js";
 
 const router = express.Router();
@@ -29,13 +29,11 @@ router.post("/send-otp", sendOtp);
 router.post("/earnings", addVendorEarning);
 router.post("/reviews", addVendorReview);
 
-
 // 📌 Verify OTP & Login
 router.post("/verify-otp", verifyOtp);
 
-router.get('/earnings-history/:vendorId', getearningshistory);
-router.get('/reviews/:vendorId', getVendorReviews);
-
+router.get("/earnings-history/:vendorId", getEarningsHistory);
+router.get("/reviews/:vendorId", getVendorReviews);
 
 // CRUD
 router.get("/", getAllVendors);

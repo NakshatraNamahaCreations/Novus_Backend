@@ -142,7 +142,7 @@ router.get("/chart", async (req, res) => {
       by: ["paymentDate"],
       where: {
         paymentDate: { gte: startDate },
-        paymentStatus: "SUCCESS",
+      
       },
       _sum: { amount: true },
       _count: { id: true },

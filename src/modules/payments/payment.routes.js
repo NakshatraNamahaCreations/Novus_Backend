@@ -1,104 +1,214 @@
-import express from "express";
-import { StandardCheckoutPayRequest, MetaInfo } from "pg-sdk-node";
-import phonepeClient from "../../config/phonepeClient.js";
-import { PrismaClient } from "@prisma/client";
-import { randomUUID } from "crypto";
+import express from 'express';
+import { body } from 'express-validator';
+import {
+  createPayment,
+  getAllPayments,
+  getPaymentById,
+  updatePaymentStatus,
+  processRefund,
+  getPaymentStatistics,
+  deletePayment
+} from './payment.controller.js';
+import {
+  addOrderPayment,
+  getOrderPaymentSummary
+} from '../orders/order.controller.js';
+import { getPaymentsByOrderId } from './payment.controller.js';
+import { getPaymentsByPatientId } from './payment.controller.js';
+
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
-router.post("/initiate", async (req, res) => {
-  try {
-    const { amount, userId } = req.body;
+// Payment validation rules
+const paymentValidation = [
+  body('amount').isFloat({ min: 1 }).withMessage('Amount must be greater than 0'),
+  body('paymentMethod').isIn(['CASH', 'CARD', 'UPI', 'NETBANKING', 'WALLET', 'CHEQUE', 'BANK_TRANSFER']).withMessage('Invalid payment method'),
+  body('paymentMode').optional().isIn(['ONLINE', 'OFFLINE']).withMessage('Invalid payment mode'),
+  body('currency').optional().isString().isLength({ min: 3, max: 3 }).withMessage('Currency must be 3 characters'),
+  body('referenceId').optional().isString(),
+  body('transactionNote').optional().isString().trim()
+];
 
-    if (!amount || !userId) {
-      return res.status(400).json({ success: false, message: "Amount and userId required" });
-    }
+const refundValidation = [
+  body('refundAmount').isFloat({ min: 1 }).withMessage('Refund amount must be greater than 0'),
+  body('refundReason').optional().isString().trim(),
+  body('refundReference').optional().isString().trim()
+];
 
-    const merchantOrderId = randomUUID();
-    const amountInPaise = Math.round(amount * 100);
+// Order payment validation
+const orderPaymentValidation = [
+  body('amount').isFloat({ min: 1 }).withMessage('Amount must be greater than 0'),
+  body('paymentMethod').isIn(['CASH', 'CARD', 'UPI', 'NETBANKING', 'WALLET', 'CHEQUE', 'BANK_TRANSFER']).withMessage('Invalid payment method'),
+  body('paymentMode').optional().isIn(['ONLINE', 'OFFLINE']).withMessage('Invalid payment mode')
+];
 
-  
-    const metaInfo = MetaInfo.builder()
-      .udf1(String(userId))
-      .build();
+// Public routes (for payment webhooks - no auth required)
+// router.post('/webhooks/:gateway', paymentWebhookHandler);
 
-    const request = StandardCheckoutPayRequest.builder()
-      .merchantOrderId(merchantOrderId)
-      .amount(amountInPaise)
-      .redirectUrl(`${process.env.PHONEPE_CALLBACK_URL}?orderId=${merchantOrderId}`)
-      .metaInfo(metaInfo)
-      .build();
+// Protected routes
+// ================= PAYMENT ROUTES =================
+router.route('/')
+  .post( paymentValidation, createPayment) // Create new payment
+  .get(  getAllPayments); // Get all payments (admin only)
 
-    // ⭐ THIS is the correct function
-    const response = await phonepeClient.pay(request);
+router.route('/statistics')
+  .get(  getPaymentStatistics); // Get payment statistics (admin only)
 
-    return res.json({
-      success: true,
-      redirectUrl: response.redirectUrl,
-      orderId: merchantOrderId
-    });
+router.route('/:id')
+  .get( getPaymentById) // Get payment by ID
+  .delete(  deletePayment); // Delete payment (admin only)
 
-  } catch (error) {
-    console.error("Payment Initiation Error:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
-  }
-});
+router.route('/:id/status')
+  .put(  updatePaymentStatus); // Update payment status (admin only)
 
-router.get("/callback", async (req, res) => {
-    // 1. Extract the Merchant Order ID from the query string
-    const { orderId } = req.query;
-   
+router.route('/:id/refund')
+  .post(  refundValidation, processRefund); // Process refund (admin only)
 
-    if (!orderId) {
-        // Redirect to a failure page if the order ID is missing or tampered with
-        console.error("Callback Error: Missing merchantOrderId");
-        return res.redirect("/payment-failed");
-    }
+// ================= ORDER PAYMENT ROUTES =================
+router.route('/orders/:orderId/payments')
+  .post( addOrderPayment) // Add payment to order
+  .get( getPaymentsByOrderId); // Get payments for order
 
-    let finalStatus = "FAILED";
+router.route('/orders/:orderId/payments/summary')
+  .get( getOrderPaymentSummary); // Get order payment summary
 
+// ================= PATIENT PAYMENT ROUTES =================
+router.route('/patients/:patientId/payments')
+  .get( getPaymentsByPatientId); // Get payments by patient ID
 
+// ================= VENDOR PAYMENT ROUTES =================
+router.route('/vendors/:vendorId/payments')
+  .get( async (req, res) => {
+    // Similar to patient payments but for vendors
     try {
-        // 2. Call the PhonePe Order Status API (This is the definitive check)
-        const statusResponse = await phonepeClient.getOrderStatus(orderId);
-        
-        console.log(statusResponse,"statusResponse")
-        // 3. Process the response
-        if ( statusResponse.state === 'COMPLETED') {
-            finalStatus = 'SUCCESS';
-            // phonepeTxnId = statusResponse.transactionId;
-        } else if (statusResponse.state === 'PAYMENT_PENDING' || statusResponse.state === 'FAILED') {
-             // Let a webhook handle the final PENDING resolution, but update the state based on the current check
-             finalStatus = statusResponse.state === 'PAYMENT_PENDING' ? 'PENDING' : 'FAILED';
-            //  phonepeTxnId = statusResponse.transactionId;
+      const { vendorId } = req.params;
+      
+      // Verify vendor authorization
+      if (req.user.vendorId !== parseInt(vendorId) && req.user.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized to access vendor payments'
+        });
+      }
+
+      const { page = 1, limit = 20 } = req.query;
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      const [payments, total] = await Promise.all([
+        prisma.payment.findMany({
+          where: { vendorId: parseInt(vendorId) },
+          include: {
+            order: {
+              select: {
+                id: true,
+                orderNumber: true,
+                finalAmount: true
+              }
+            },
+            patient: {
+              select: {
+                id: true,
+                fullName: true
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: parseInt(limit)
+        }),
+        prisma.payment.count({
+          where: { vendorId: parseInt(vendorId) }
+        })
+      ]);
+
+      // Calculate summary
+      const summary = await prisma.payment.aggregate({
+        where: { vendorId: parseInt(vendorId) },
+        _sum: {
+          amount: true,
+          refundAmount: true
         }
+      });
 
-        
-        
-        // 5. Redirect the user to the appropriate frontend page
-        if (finalStatus === 'SUCCESS') {
-
-          console.log("sucesss")
-            // Include orderId in redirect for frontend to display status
-            return res.redirect(`/payment-success?orderId=${orderId}`);
-        } else {
-          console.log("failure")
-            return res.redirect(`/payment-failed?orderId=${orderId}`);
+      res.json({
+        success: true,
+        payments,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / parseInt(limit))
+        },
+        summary: {
+          totalEarnings: summary._sum.amount || 0,
+          totalRefunds: summary._sum.refundAmount || 0,
+          netEarnings: (summary._sum.amount || 0) - (summary._sum.refundAmount || 0)
         }
-
+      });
     } catch (error) {
-        console.error(`Callback Processing Error for Order ${orderId}:`, error);
-
-        // Fallback: Ensure the order is marked as FAILED if the status check itself fails
-        await prisma.order.update({
-            where: { merchantOrderId: orderId },
-            data: { status: 'FAILED' },
-        }).catch(e => console.error("Prisma Fallback Update Failed:", e)); // Log error if even the fallback fails
-
-        return res.redirect(`/payment-failed?orderId=${orderId}`);
+      console.error('Get vendor payments error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching vendor payments',
+        error: error.message
+      });
     }
-});
+  });
 
+// ================= CENTER PAYMENT ROUTES =================
+router.route('/centers/:centerId/payments')
+  .get( async (req, res) => {
+    // Payments for a specific center (admin only)
+    try {
+      const { centerId } = req.params;
+      const { page = 1, limit = 20 } = req.query;
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      const [payments, total] = await Promise.all([
+        prisma.payment.findMany({
+          where: { centerId: parseInt(centerId) },
+          include: {
+            order: {
+              select: {
+                id: true,
+                orderNumber: true,
+                finalAmount: true
+              }
+            },
+            patient: {
+              select: {
+                id: true,
+                fullName: true
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: parseInt(limit)
+        }),
+        prisma.payment.count({
+          where: { centerId: parseInt(centerId) }
+        })
+      ]);
+
+      res.json({
+        success: true,
+        payments,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      });
+    } catch (error) {
+      console.error('Get center payments error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching center payments',
+        error: error.message
+      });
+    }
+  });
 
 export default router;

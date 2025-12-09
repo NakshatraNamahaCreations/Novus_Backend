@@ -18,7 +18,7 @@ export const bookSlot = async (slotId, orderDate) => {
   const dateOnly = new Date(dateObj);
   dateOnly.setHours(0, 0, 0, 0);
 
-  console.log("slotId", slotId);
+
   // 1. Fetch slot
   const slot = await prisma.slot.findUnique({
     where: { id: slotId },
@@ -283,9 +283,9 @@ export const createAdminOrder = async (req, res) => {
         
         totalAmount,
         finalAmount: totalAmount,
-        status: "confirmed",
-        paymentStatus: "paid",
-        paymentMode: "cash",
+     
+   
+    
         date: new Date(),
         isHomeSample: homeCollection,
 
@@ -902,15 +902,19 @@ export const getOrderById = async (req, res) => {
                     id: true,
                     name: true,
                     actualPrice: true,
+                    offerPrice:true,
                     sampleRequired: true,
                     preparations: true,
                     discount: true,
+                    testType:true
                   },
                 },
                 package: {
                   select: {
                     id: true,
                     name: true,
+                     actualPrice: true,
+                    offerPrice:true,
                     description: true,
                     imgUrl: true,
                   },
@@ -1359,6 +1363,299 @@ export const vendorUpdateOrderStatus = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update order status",
+    });
+  }
+};
+
+
+export const addOrderPayment = async (req, res) => {
+  try {
+   
+
+    const { orderId } = req.params;
+    const {
+      paymentMethod,
+      paymentMode,
+      amount,
+      currency = 'INR',
+      transactionNote,
+      referenceId,
+      gatewayResponse,
+      capturedAmount,
+      ipAddress
+    } = req.body;
+
+    // Get order with payments
+    const order = await prisma.order.findUnique({
+      where: { id: parseInt(orderId) },
+      include: {
+        payments: true,
+        patient: {
+          select: {
+            id: true,
+            fullName: true,
+            contactNo: true
+          }
+        },
+        vendor: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+   
+    // Calculate existing payments
+    const existingPaymentsTotal = order.payments.reduce((total, payment) => {
+      return total + (payment.amount || 0);
+    }, 0);
+
+    const balance = order.finalAmount - existingPaymentsTotal;
+
+    // Validate amount
+    if (amount > balance) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment amount exceeds order balance. Maximum allowed: ${balance}`
+      });
+    }
+
+    if (amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment amount must be greater than 0'
+      });
+    }
+
+    // Generate payment ID
+    const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Create payment
+    const payment = await prisma.payment.create({
+      data: {
+        orderId: parseInt(orderId),
+        patientId: order.patientId,
+        userId: req.user?.id,
+        vendorId: order.vendorId,
+        centerId: order.centerId,
+        paymentId,
+       paymentMethod: paymentMode?.toUpperCase(),  // Prisma ENUM
+                            
+
+        paymentStatus: 'CAPTURED',
+        amount,
+        currency,
+        paymentDate: new Date(),
+        transactionNote,
+        referenceId,
+        gatewayResponse,
+        capturedAmount: capturedAmount || amount,
+        ipAddress: ipAddress || req.ip,
+        createdById: req.user?.id
+      },
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    // Calculate new payment status
+    const newTotalPaid = existingPaymentsTotal + amount;
+    const newPaymentStatus = newTotalPaid >= order.finalAmount ? 'paid' :
+                           newTotalPaid > 0 ? 'partially_paid' : 'pending';
+
+    // Update order payment status
+    const updatedOrder = await prisma.order.update({
+      where: { id: parseInt(orderId) },
+      data: { paymentStatus: newPaymentStatus },
+      include: {
+        payments: {
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 5
+        }
+      }
+    });
+
+    // Update vendor earnings if applicable
+    if (order.vendorId && amount > 0) {
+      await prisma.vendor.update({
+        where: { id: order.vendorId },
+        data: {
+          earnings: { increment: amount }
+        }
+      });
+
+      // Create earnings history
+      await prisma.earningsHistory.create({
+        data: {
+          vendorId: order.vendorId,
+          title: 'Order Payment Received',
+          desc: `Payment of ${amount} ${currency} received for order ${order.orderNumber}`,
+          amount,
+          type: 'add',
+          balanceAfter: await prisma.vendor.findUnique({
+            where: { id: order.vendorId },
+            select: { earnings: true }
+          }).then(vendor => vendor.earnings),
+          createdById: req.user?.id
+        }
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Payment added to order successfully',
+      payment,
+      order: updatedOrder,
+      summary: {
+        orderTotal: order.finalAmount,
+        previousPaid: existingPaymentsTotal,
+        newPayment: amount,
+        totalPaid: newTotalPaid,
+        balance: order.finalAmount - newTotalPaid,
+        paymentStatus: newPaymentStatus
+      }
+    });
+  } catch (error) {
+    console.error('Add order payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error adding payment to order',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Get order payment summary
+ * @route   GET /api/orders/:orderId/payments/summary
+ * @access  Private (Admin/Patient/Vendor)
+ */
+export const getOrderPaymentSummary = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await prisma.order.findUnique({
+      where: { id: parseInt(orderId) },
+      select: {
+        id: true,
+        orderNumber: true,
+        totalAmount: true,
+        discount: true,
+        finalAmount: true,
+        paymentStatus: true,
+        patientId: true,
+        vendorId: true
+      }
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    // Check authorization
+    if (req.user.role !== 'admin') {
+      if (req.user.patientId && order.patientId !== req.user.patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized to access order payments'
+        });
+      }
+      if (req.user.vendorId && order.vendorId !== req.user.vendorId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized to access order payments'
+        });
+      }
+    }
+
+    // Get all payments for this order
+    const payments = await prisma.payment.findMany({
+      where: { orderId: parseInt(orderId) },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Calculate summary
+    const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
+    const totalRefunded = payments.reduce((sum, payment) => sum + (payment.refundAmount || 0), 0);
+    const netPaid = totalPaid - totalRefunded;
+    const balance = order.finalAmount - netPaid;
+
+    // Group by payment method
+    const paymentMethods = payments.reduce((acc, payment) => {
+      const method = payment.paymentMethod;
+      if (!acc[method]) {
+        acc[method] = {
+          method,
+          count: 0,
+          amount: 0
+        };
+      }
+      acc[method].count += 1;
+      acc[method].amount += payment.amount;
+      return acc;
+    }, {});
+
+    // Get recent payments
+    const recentPayments = payments.slice(0, 5).map(payment => ({
+      id: payment.id,
+      paymentId: payment.paymentId,
+      amount: payment.amount,
+      method: payment.paymentMethod,
+      status: payment.paymentStatus,
+      date: payment.paymentDate,
+      refundAmount: payment.refundAmount
+    }));
+
+    res.json({
+      success: true,
+      summary: {
+        order: {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          totalAmount: order.totalAmount,
+          discount: order.discount,
+          finalAmount: order.finalAmount,
+          paymentStatus: order.paymentStatus
+        },
+        payments: {
+          totalPaid,
+          totalRefunded,
+          netPaid,
+          balance,
+          isPaid: netPaid >= order.finalAmount,
+          isPartiallyPaid: netPaid > 0 && netPaid < order.finalAmount
+        },
+        byMethod: Object.values(paymentMethods),
+        recentPayments,
+        paymentCount: payments.length
+      }
+    });
+  } catch (error) {
+    console.error('Get order payment summary error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching order payment summary',
+      error: error.message
     });
   }
 };

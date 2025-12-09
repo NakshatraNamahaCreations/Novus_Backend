@@ -28,15 +28,28 @@ export const addCategory = async (req, res) => {
 // ✅ READ ALL
 export const getAllCategories = async (req, res) => {
   try {
+    const { type } = req.query;
+
+    const filter = {};
+
+    // If type exists → apply filter
+    if (type) {
+      filter.type = type;
+    }
+
     const categories = await prisma.category.findMany({
-      // include: { subCategories: true },
+      where: filter,
+      orderBy: { order: "asc" },
     });
+
     res.json(categories);
+
   } catch (error) {
     console.error("Error fetching categories:", error);
     res.status(500).json({ error: "Failed to fetch categories" });
   }
 };
+
 
 // ✅ READ ONE
 export const getCategoryById = async (req, res) => {

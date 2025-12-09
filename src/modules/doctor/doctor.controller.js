@@ -2,12 +2,27 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-/**
- * Create Doctor
- */
 export const createDoctor = async (req, res) => {
   try {
-    const { name, number } = req.body;
+    const {
+      initial,
+      name,
+      qualification,
+      specialityType,
+      speciality,
+      mobile,
+      landLine,
+      email,
+      venue,
+      refCenter,
+      source,
+      address,
+      otherInfo,
+      sendSms,
+      sendEmail,
+      consultingDoctor,
+      number,
+    } = req.body;
 
     if (!name || !number) {
       return res.status(400).json({ message: "Name and number are required" });
@@ -22,7 +37,25 @@ export const createDoctor = async (req, res) => {
     }
 
     const doctor = await prisma.doctor.create({
-      data: { name, number },
+      data: {
+        initial,
+        name,
+        qualification,
+        specialityType,
+        speciality,
+        mobile,
+        landLine,
+        email,
+        venue,
+        refCenter,
+        source,
+        address,
+        otherInfo,
+        sendSms: sendSms ?? false,
+        sendEmail: sendEmail ?? false,
+        consultingDoctor: consultingDoctor ?? false,
+        number,
+      },
     });
 
     res.status(201).json({ message: "Doctor created successfully", doctor });
@@ -33,13 +66,11 @@ export const createDoctor = async (req, res) => {
 };
 
 
-/**
- * Get All Doctors
- */
+
 export const getDoctors = async (req, res) => {
   try {
     const doctors = await prisma.doctor.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: { name: "asc" }, // 🔥 sort alphabetically
     });
 
     res.status(200).json({ doctors });
@@ -50,9 +81,6 @@ export const getDoctors = async (req, res) => {
 };
 
 
-/**
- * Get Doctor by ID
- */
 export const getDoctorById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -73,28 +101,27 @@ export const getDoctorById = async (req, res) => {
 };
 
 
-/**
- * Update Doctor
- */
 export const updateDoctor = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, number } = req.body;
 
-    const doctor = await prisma.doctor.findUnique({
+    const existingDoctor = await prisma.doctor.findUnique({
       where: { id: Number(id) },
     });
 
-    if (!doctor) {
+    if (!existingDoctor) {
       return res.status(404).json({ message: "Doctor not found" });
     }
 
     const updated = await prisma.doctor.update({
       where: { id: Number(id) },
-      data: { name, number },
+      data: { ...req.body }, // Automatically updates all fields
     });
 
-    res.status(200).json({ message: "Doctor updated successfully", doctor: updated });
+    res.status(200).json({
+      message: "Doctor updated successfully",
+      doctor: updated,
+    });
   } catch (error) {
     console.error("Update Doctor Error:", error);
     res.status(500).json({ message: "Internal Server Error" });
@@ -102,9 +129,7 @@ export const updateDoctor = async (req, res) => {
 };
 
 
-/**
- * Delete Doctor
- */
+
 export const deleteDoctor = async (req, res) => {
   try {
     const { id } = req.params;

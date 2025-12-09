@@ -47,7 +47,6 @@ router.get("/vendor/:vendorId/orders", getOrdersByVendor);
 router.get("/vendor/:vendorId/orders/histroy", getVendorOrdersBasic);
 
 
-
 router.post("/vendor/reject", rejectOrderByVendor);
 router.post("/vendor/accept", acceptOrderByVendor);
 router.patch("/vendor/status/:orderId", vendorUpdateOrderStatus);
