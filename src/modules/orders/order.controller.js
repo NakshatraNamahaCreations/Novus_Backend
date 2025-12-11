@@ -3,6 +3,7 @@ import { uploadToS3 } from "../../config/s3.js";
 import locationService from "../location/location.service.js";
 import { broadcastNewOrder } from "../../services/location.service.js";
 import redis from "../../config/redis.js";
+import dayjs from "dayjs";
 
 const prisma = new PrismaClient();
 
@@ -65,7 +66,7 @@ export const bookSlot = async (slotId, orderDate) => {
 export const createOrder = async (req, res) => {
   try {
     const {
-      orderType,
+      source,
       addressId,
       patientId,
       totalAmount,
@@ -81,6 +82,7 @@ export const createOrder = async (req, res) => {
       merchantOrderId,
       slotId,
       isHomeSample,
+      centerId
     } = req.body;
 
     if (!members || members.length === 0) {
@@ -105,7 +107,7 @@ export const createOrder = async (req, res) => {
     const order = await prisma.order.create({
       data: {
         orderNumber: "ORD-" + Date.now(),
-        orderType,
+        source,
         addressId,
         patientId,
         totalAmount,
@@ -120,9 +122,27 @@ export const createOrder = async (req, res) => {
         paymentStatus: paymentStatus || "pending",
         merchantOrderId,
         isHomeSample,
+        centerId
       },
     });
 
+ const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    await prisma.payment.create({
+      data: {
+        orderId: order.id,
+        patientId: patientId ,
+     paymentId,
+
+        paymentMethod:"UPI",
+        paymentMode:"ONLINE",
+        paymentStatus: "COMPLETED",
+        amount:finalAmount,
+        currency:'INR',
+        paymentDate: new Date(),
+       
+        
+      },
+    });
     /* ---------------------------------------------
        3️⃣ ADD MEMBERS (packages + tests)
     --------------------------------------------- */
@@ -239,95 +259,165 @@ export const createOrder = async (req, res) => {
   }
 };
 
+
 export const createAdminOrder = async (req, res) => {
   try {
     const {
       patientId,
       selectedTests,
       addressId,
-      homeCollection,
-      collectionCenterId,
+      homeCollection = false,
       registrationType,
-      referredBy,
       provisionalDiagnosis,
       notes,
-      remark
+      remark,
+      diagnosticCenterId,
+      refCenterId,
+      doctorId,
+      source,
+      centerId,
+      collectionCenterId,
+      totalAmount: bodyTotalAmount,
+      discount,
+      discountAmount,
+      finalAmount: bodyFinalAmount,
     } = req.body;
 
-    if (!patientId || !selectedTests || selectedTests.length === 0) {
+    // Basic validation
+    if (!patientId || !selectedTests || !Array.isArray(selectedTests) || selectedTests.length === 0) {
       return res.status(400).json({
         success: false,
         message: "Patient & tests required",
       });
     }
 
-    // generate order number
+    // Helper to cast ints or return null
+    const castInt = (v) =>
+      typeof v === "undefined" || v === null || v === "" ? null : Number(v);
+
+    // Generate unique order number
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const count = await prisma.order.count({
-      where: { orderNumber: { startsWith: `ORD${today}` } }
+      where: { orderNumber: { startsWith: `ORD${today}` } },
     });
-
     const orderNumber = `ORD${today}${String(count + 1).padStart(4, "0")}`;
-    const totalAmount = selectedTests.reduce((s, t) => s + Number(t.price), 0);
 
-    /* -----------------------------------------
-       1️⃣ CREATE ORDER
-    ------------------------------------------ */
-    const order = await prisma.order.create({
-      data: {
-        orderNumber,
-        patient: { connect: { id: Number(patientId) } },
-        address: { connect: { id: Number(addressId || 1) } },
+    // Compute totalAmount from selectedTests unless caller provided a totalAmount override
+    const computedTotal = selectedTests.reduce(
+      (s, t) => s + Number((t && (t.price ?? t.amount ?? t.total)) || 0),
+      0
+    );
+    const total = typeof bodyTotalAmount !== "undefined" && bodyTotalAmount !== null
+      ? Number(bodyTotalAmount)
+      : computedTotal;
 
-        orderType: registrationType,
-        
-        totalAmount,
-        finalAmount: totalAmount,
-     
-   
+    // Determine discount / final amounts
+    const discountAmt =
+      typeof discountAmount !== "undefined" && discountAmount !== null
+        ? Number(discountAmount)
+        : typeof discount !== "undefined" && discount !== null
+        ? Number(discount)
+        : 0;
+
+    const finalAmt =
+      typeof bodyFinalAmount !== "undefined" && bodyFinalAmount !== null
+        ? Number(bodyFinalAmount)
+        : Math.max(0, total - discountAmt);
+
+    // Validate selectedTests have valid ids
+    for (const t of selectedTests) {
+      const testId = Number(t.id ?? t.testId ?? t.packageId);
+      if (!testId || Number.isNaN(testId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Each selected test must have a valid id",
+        });
+      }
+    }
+
+    // Build data object for order.create
+    // Only include relation connect blocks when values are present
+    const dataToCreate = {
+      orderNumber,
+      patient: { connect: { id: Number(patientId) } },
+      orderType: registrationType ?? undefined,
+      totalAmount: Number(total),
+      discount: typeof discount !== "undefined" && discount !== null ? Number(discount) : undefined,
+      discountAmount: discountAmt !== undefined ? Number(discountAmt) : undefined,
+      finalAmount: Number(finalAmt),
+      diagnosticCenterId: castInt(diagnosticCenterId),
     
-        date: new Date(),
-        isHomeSample: homeCollection,
+      source: source ?? undefined,
+      date: new Date(),
+      isHomeSample: Boolean(homeCollection),
+      remarks: [provisionalDiagnosis, notes, remark].filter(Boolean).join(" | "),
+      // NOTE: address, doctor, center, refCenter are added conditionally below
+    };
 
-        remarks: [provisionalDiagnosis, notes, remark]
-          .filter(Boolean)
-          .join(" | "),
-      },
-    });
+    // Conditionally add optional relation connects
+    if (castInt(addressId)) {
+      dataToCreate.address = { connect: { id: Number(addressId) } };
+    }
+    if (castInt(doctorId)) {
+      dataToCreate.doctor = { connect: { id: Number(doctorId) } };
+    }
+    // if (castInt(centerId)) {
+    //   dataToCreate.center = { connect: { id: Number(centerId) } };
+    // }
+    if (castInt(refCenterId)) {
+      dataToCreate.refCenter = { connect: { id: Number(refCenterId) } };
+    }
 
-    /* -----------------------------------------
-       2️⃣ CREATE ORDER MEMBER (PRIMARY MEMBER)
-    ------------------------------------------ */
-    const orderMember = await prisma.orderMember.create({
-      data: {
-        orderId: order.id,
-        patientId: Number(patientId),
-     
-      },
-    });
+    // Create order, orderMember and orderMemberPackages in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.create({
+        data: dataToCreate,
+      });
 
-    /* -----------------------------------------
-       3️⃣ INSERT TESTS / PACKAGES LIKE CUSTOMER FLOW
-    ------------------------------------------ */
-
-    for (const test of selectedTests) {
-      await prisma.orderMemberPackage.create({
+      const orderMember = await tx.orderMember.create({
         data: {
-          orderMemberId: orderMember.id,
-          testId: Number(test.id), // correct relation
+          orderId: order.id,
+          patientId: Number(patientId),
         },
       });
-    }
+
+      // create orderMemberPackage rows
+      const packageCreates = selectedTests.map((test) => {
+        const testId = Number(test.id ?? test.testId ?? test.packageId);
+        return tx.orderMemberPackage.create({
+          data: {
+            orderMemberId: orderMember.id,
+            testId,
+          },
+        });
+      });
+
+      await Promise.all(packageCreates);
+
+      return { orderId: order.id };
+    });
+
+    // fetch created order with relations for response
+    const createdOrder = await prisma.order.findUnique({
+      where: { id: result.orderId },
+      include: {
+        patient: true,
+        address: true,
+        orderMembers: { include: { orderMemberPackages: true } },
+        doctor: true,
+        refCenter: true,
+        center: true,
+      },
+    });
 
     return res.json({
       success: true,
       message: "Order created successfully",
-      order,
+      order: createdOrder,
     });
-
   } catch (error) {
     console.error("Create order error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Order failed",
       error: error.message,
@@ -636,7 +726,7 @@ export const getOrdersByPatientId = async (req, res) => {
       where: {
         OR: [
           { patientId },
-          { orderMembers: { some: { patientId } } }, // order includes patient as member
+          { orderMembers: { some: { patientId } } },
         ],
       },
       include: {
@@ -652,9 +742,7 @@ export const getOrdersByPatientId = async (req, res) => {
         vendor: true,
 
         orderMembers: {
-          where: {
-            patientId: patientId,
-          },
+          where: { patientId },
           include: {
             patient: {
               select: {
@@ -664,7 +752,9 @@ export const getOrdersByPatientId = async (req, res) => {
                 contactNo: true,
               },
             },
-            packages: {
+
+            // FIXED RELATION
+            orderMemberPackages: {
               include: {
                 package: {
                   select: {
@@ -691,6 +781,7 @@ export const getOrdersByPatientId = async (req, res) => {
   }
 };
 
+
 export const getOrdersByPrimaryPatientId = async (req, res) => {
   try {
     const patientId = Number(req.params.patientId);
@@ -710,6 +801,7 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
         },
         address: true,
         vendor: true,
+
         orderMembers: {
           include: {
             patient: {
@@ -720,7 +812,9 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
                 contactNo: true,
               },
             },
-            packages: {
+
+            // FIXED: Correct relation name
+            orderMemberPackages: {
               include: {
                 package: {
                   select: {
@@ -746,6 +840,7 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch primary patient orders" });
   }
 };
+
 
 /* ------------------------- GET ALL ORDERS ------------------------- */
 export const getAllOrders = async (req, res) => {
@@ -1657,5 +1752,120 @@ export const getOrderPaymentSummary = async (req, res) => {
       message: 'Error fetching order payment summary',
       error: error.message
     });
+  }
+};
+
+export const getOrderReports = async (req, res) => {
+  try {
+    let {
+      date,
+      fromDate,
+      toDate,
+      centerId,
+      refCenterId,
+      doctorId,
+      diagnosticCenterId,
+      status,
+      source,
+      page = 1,
+      limit = 25,
+    } = req.query;
+
+    page = Number(page);
+    limit = Number(limit);
+
+    let where = {};
+
+    // -------------------------------------
+    // ✅ APPLY DATE FILTERS ONLY IF PROVIDED
+    // -------------------------------------
+
+    // 📌 Single Date
+    if (date && date !== "") {
+      const d = dayjs(date).startOf("day");
+      where.date = {
+        gte: d.toDate(),
+        lt: d.add(1, "day").toDate(),
+      };
+    }
+
+    // 📌 Date Range (fromDate + toDate)
+    if (fromDate && toDate && fromDate !== "" && toDate !== "") {
+      where.date = {
+        gte: dayjs(fromDate).startOf("day").toDate(),
+        lt: dayjs(toDate).endOf("day").toDate(),
+      };
+    }
+
+    // Remove empty date filter if created
+    if (where.date && Object.keys(where.date).length === 0) {
+      delete where.date;
+    }
+
+    // -------------------------------------
+    // ✅ OTHER FILTERS
+    // -------------------------------------
+    if (centerId) where.centerId = Number(centerId);
+    if (refCenterId) where.refCenterId = Number(refCenterId);
+    if (doctorId) where.doctorId = Number(doctorId);
+    if (diagnosticCenterId) where.diagnosticCenterId = Number(diagnosticCenterId);
+
+    if (status) where.status = status;
+    if (source) where.source = source;
+
+    // -------------------------------------
+    // ✅ FETCH PAGINATED ORDERS
+    // -------------------------------------
+    const orders = await prisma.order.findMany({
+      where,
+      include: {
+        patient: { select: { id: true, fullName: true, contactNo: true } },
+        center: { select: { id: true, name: true } },
+        refCenter: { select: { id: true, name: true } },
+        doctor: { select: { id: true, name: true } },
+        vendor: { select: { id: true, name: true } },
+        diagnosticCenter: { select: { id: true, name: true } },
+
+        orderCheckups: {
+          include: {
+            checkup: { select: { id: true, name: true } }
+          }
+        },
+
+        orderMembers: {
+          include: {
+            patient: { select: { fullName: true } },
+            orderMemberPackages: {
+              include: {
+                package: true,
+                test: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+
+      orderBy: { id: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    // -------------------------------------
+    // ✅ TOTAL COUNT (must use SAME where)
+    // -------------------------------------
+    const total = await prisma.order.count({ where });
+
+    return res.json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: orders,
+    });
+
+  } catch (error) {
+    console.error("Order report error:", error);
+    return res.status(500).json({ error: "Failed to fetch order reports" });
   }
 };

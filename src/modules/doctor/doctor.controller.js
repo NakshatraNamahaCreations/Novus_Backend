@@ -22,8 +22,10 @@ export const createDoctor = async (req, res) => {
       sendEmail,
       consultingDoctor,
       number,
+      patientId 
     } = req.body;
 
+    console.log("patientId",req.body)
     if (!name || !number) {
       return res.status(400).json({ message: "Name and number are required" });
     }
@@ -55,6 +57,7 @@ export const createDoctor = async (req, res) => {
         sendEmail: sendEmail ?? false,
         consultingDoctor: consultingDoctor ?? false,
         number,
+        patientId 
       },
     });
 
@@ -149,6 +152,37 @@ export const deleteDoctor = async (req, res) => {
     res.status(200).json({ message: "Doctor deleted successfully" });
   } catch (error) {
     console.error("Delete Doctor Error:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+
+export const getDoctorsByPatientId = async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    if (!patientId) {
+      return res.status(400).json({ message: "patientId is required" });
+    }
+
+    const doctors = await prisma.doctor.findMany({
+      where: {
+        patientId: Number(patientId), // filter by patientId
+      },
+      orderBy: {
+        name: "asc",
+      },
+    });
+
+    if (!doctors.length) {
+      return res.status(404).json({
+        message: "No doctors found for this patient",
+      });
+    }
+
+    res.status(200).json({ doctors });
+  } catch (error) {
+    console.error("Get Doctors By PatientId Error:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };

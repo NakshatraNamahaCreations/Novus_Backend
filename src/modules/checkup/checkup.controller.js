@@ -492,26 +492,35 @@ export const getHealthPackageById = async (req, res) => {
           include: {
             test: {
               include: {
-                _count: {
-                  select: { parameters: true }, // count parameters of each test
+                parameters: {
+                  select: {
+                    id: true,
+                    name: true,
+                    unit: true,
+                    notes: true,
+                    type: true,
+                    order: true
+                  }
                 },
-              },
-            },
-          },
-        },
-      },
+                _count: {
+                  select: { parameters: true }
+                }
+              }
+            }
+          }
+        }
+      }
     });
 
     if (!rawData) {
       return res.status(404).json({ error: "HealthPackage not found" });
     }
 
-    // Format the package
     const tests = rawData.checkupPackages.map((cp) => ({
       id: cp.test.id,
       name: cp.test.name,
-     
       parametersCount: cp.test._count.parameters,
+      parameters: cp.test.parameters || []
     }));
 
     const totalParameters = tests.reduce(
@@ -522,21 +531,21 @@ export const getHealthPackageById = async (req, res) => {
     const finalData = {
       id: rawData.id,
       name: rawData.name,
-      description:rawData.description,
-      actualPrice:rawData.actualPrice,
-      imgUrl:rawData.imgUrl,
-      discount:rawData.discount,
-       offerPrice:rawData.offerPrice,
-       testType:"PATHOLOGY",
+      description: rawData.description,
+      actualPrice: rawData.actualPrice,
+      imgUrl: rawData.imgUrl,
+      discount: rawData.discount,
+      offerPrice: rawData.offerPrice,
+      testType: "PATHOLOGY",
       category: rawData.category,
       tests,
       testCount: tests.length,
-      parameterCount: totalParameters, // ⭐ total parameter count
+      parameterCount: totalParameters
     };
 
     return res.json({
       success: true,
-      data: finalData,
+      data: finalData
     });
 
   } catch (error) {
@@ -544,6 +553,7 @@ export const getHealthPackageById = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch health package" });
   }
 };
+
 
 
 /* -------------------------------------------

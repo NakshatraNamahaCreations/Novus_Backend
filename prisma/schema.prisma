@@ -11,10 +11,12 @@ enum PrescriptionFileType {
   IMAGE
   PDF
 }
+
 enum Alignment {
   LEFT
   RIGHT
 }
+
 enum PrescriptionStatus {
   PENDING_REVIEW
   APPROVED
@@ -30,6 +32,7 @@ enum PaymentStatus {
   REFUNDED
   PARTIALLY_REFUNDED
   CANCELLED
+  COMPLETED
 }
 
 enum PaymentMethod {
@@ -45,6 +48,17 @@ enum PaymentMethod {
 enum PaymentMode {
   ONLINE
   OFFLINE
+}
+
+model Pincode {
+  id      Int     @id @default(autoincrement())
+  pincode String  @unique
+  city    String?
+  state   String?
+  area    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Banner {
@@ -86,10 +100,22 @@ model DiagnosticCenter {
   city   City @relation(fields: [cityId], references: [id])
 
   centers Center[]
+  orders  Order[] // ⭐ ADD THIS LINE
 
   createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ReportLayout {
+  id        Int      @id @default(autoincrement())
+  title     String?
+  headerImg String?
+  footerImg String?
+  alignment String   @default("CENTER") // LEFT CENTER RIGHT
+  isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -239,6 +265,7 @@ model Category {
   subCategories SubCategory[]
   tests         Test[]
   packages      HealthPackage[]
+  centers       CenterCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -376,9 +403,9 @@ model Coupon {
   createdById Int? // Track who created the coupon
   createdBy   User? @relation(fields: [createdById], references: [id])
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  orders       Order[]       @relation("OrderCouponRelation")
   couponUsages CouponUsage[]
 }
 
@@ -507,11 +534,52 @@ model Center {
   createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
 
-  orders   Order[]
-  payments Payment[]
+  orders      Order[]
+  payments    Payment[]
+  centerSlots CenterSlot[]
+  categories  CenterCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model CenterSlot {
+  id       Int @id @default(autoincrement())
+  centerId Int
+
+  name      String?
+  startTime String
+  endTime   String
+  capacity  Int     @default(0)
+  isActive  Boolean @default(true)
+
+  center Center @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  bookings CenterSlotBooking[]
+}
+
+model CenterCategory {
+  id         Int @id @default(autoincrement())
+  centerId   Int
+  categoryId Int
+
+  center   Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([centerId, categoryId])
+}
+
+model CenterSlotBooking {
+  id     Int      @id @default(autoincrement())
+  slotId Int
+  date   DateTime
+  count  Int      @default(0)
+
+  slot CenterSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  @@unique([slotId, date]) // one record per slot per date
 }
 
 model CenterPackage {
@@ -531,12 +599,14 @@ model Order {
   orderNumber     String  @unique
   merchantOrderId String? @unique
 
-  centerId    Int? // ⭐ where sample is collected
-  refCenterId Int? // ⭐ which doctor/hospital referred the patient
-  vendorId    Int?
-  doctorId    Int?
-  patientId   Int
-  addressId   Int
+  centerId           Int? // ⭐ where sample is collected
+  refCenterId        Int? // ⭐ which doctor/hospital referred the patient
+  vendorId           Int?
+  diagnosticCenterId Int?
+  doctorId           Int?
+  patientId          Int
+  addressId          Int?
+  source             String?
 
   isSelf          Boolean   @default(false)
   totalAmount     Float
@@ -559,6 +629,9 @@ model Order {
   isHomeSample    Boolean   @default(false)
   cancelledBy     String?
   cancelledAt     DateTime?
+  couponId        Int?
+  couponCode      String?
+  discountAmount  Float?
 
   createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
@@ -570,8 +643,11 @@ model Order {
   refCenter ReferenceCenter? @relation(fields: [refCenterId], references: [id])
   vendor    Vendor?          @relation(fields: [vendorId], references: [id])
   patient   Patient          @relation(fields: [patientId], references: [id])
-  address   Address          @relation(fields: [addressId], references: [id], onDelete: Cascade)
+  address   Address?         @relation(fields: [addressId], references: [id], onDelete: Cascade)
   doctor    Doctor?          @relation(fields: [doctorId], references: [id])
+  coupon    Coupon?          @relation("OrderCouponRelation", fields: [couponId], references: [id])
+
+  diagnosticCenter DiagnosticCenter? @relation(fields: [diagnosticCenterId], references: [id])
 
   orderCheckups OrderCheckup[]
   orderTracking OrderTracking?
@@ -595,6 +671,7 @@ model Doctor {
   source         String?
   address        String?
   otherInfo      String?
+  patientId      Int?
 
   sendSms          Boolean @default(false)
   sendEmail        Boolean @default(false)
@@ -612,20 +689,18 @@ model Doctor {
 }
 
 model ESignature {
-  id            Int        @id @default(autoincrement())
+  id            Int       @id @default(autoincrement())
   name          String
   qualification String?
   designation   String?
   signatureImg  String
-  categories    String[]   // multiple selected categories
-  alignment     Alignment  @default(LEFT)
-  isDefault     Boolean    @default(false)
+  categories    String[] // multiple selected categories
+  alignment     Alignment @default(LEFT)
+  isDefault     Boolean   @default(false)
 
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
-
-
 
 model OrderMember {
   id        Int @id @default(autoincrement())
@@ -639,12 +714,12 @@ model OrderMember {
 }
 
 model OrderMemberPackage {
-  id            Int  @id @default(autoincrement())
+  id            Int         @id @default(autoincrement())
   orderMemberId Int
   packageId     Int?
   testId        Int?
-
-  orderMember OrderMember @relation(fields: [orderMemberId], references: [id], onDelete: Cascade)
+  resultAdded   Boolean     @default(false)
+  orderMember   OrderMember @relation(fields: [orderMemberId], references: [id], onDelete: Cascade)
 
   package HealthPackage? @relation(fields: [packageId], references: [id])
   test    Test?          @relation(fields: [testId], references: [id])
@@ -1047,7 +1122,9 @@ model PatientTestResult {
   notes        String?
   rawJson      Json?
 
-  createdById Int? // ⭐ ADDED: Track who created the test result
+  reportHtml String? // ⭐ REQUIRED for radiology reports
+
+  createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
 
   createdAt DateTime @default(now())

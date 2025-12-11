@@ -66,7 +66,7 @@ export const createPayment = async (req, res) => {
         paymentId,
         paymentMethod,
         paymentMode,
-        paymentStatus: 'CAPTURED', // Default for manual payments
+        paymentStatus: 'COMPLETED', // Default for manual payments
         amount,
         currency,
         paymentDate: new Date(),
@@ -217,9 +217,9 @@ export const getAllPayments = async (req, res) => {
 
     // Date range filter
     if (startDate || endDate) {
-      where.paymentDate = {};
-      if (startDate) where.paymentDate.gte = new Date(startDate);
-      if (endDate) where.paymentDate.lte = new Date(endDate);
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) where.createdAt.lte = new Date(endDate);
     }
 
     // Search filter

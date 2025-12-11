@@ -5,11 +5,14 @@ import {
   getDoctorById,
   updateDoctor,
   deleteDoctor,
+  getDoctorsByPatientId
 } from "./doctor.controller.js";
 
 const router = express.Router();
 
 router.post("/", createDoctor);
+router.get("/patient/:patientId", getDoctorsByPatientId);
+
 router.get("/", getDoctors);
 router.get("/:id", getDoctorById);
 router.put("/:id", updateDoctor);

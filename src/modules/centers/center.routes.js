@@ -6,8 +6,12 @@ import {
   updateCenter,
   deleteCenter,
   getNearbyCenters,
-  loginCenter,
-  logoutCenter
+
+  assignCategoriesToCenter,
+createCenterSlot,
+getCenterSlots,
+updateCenterSlot,
+deleteCenterSlot
 } from "./center.controller.js";
 
 const router = express.Router();
@@ -15,10 +19,18 @@ const router = express.Router();
 
 router.get("/nearby", getNearbyCenters);
 
-router.post("/login", loginCenter);
-router.post("/logout", logoutCenter);
 // CREATE
 router.post("/", createCenter);
+router.post("/:id/categories", assignCategoriesToCenter);
+router.post("/:id/slots", createCenterSlot);
+router.get("/:id/slots", getCenterSlots);
+
+router.put("/slot/:slotId", updateCenterSlot);
+router.delete("/slot/:slotId", deleteCenterSlot);
+
+
+
+
 
 // READ ALL
 router.get("/", getAllCenters);

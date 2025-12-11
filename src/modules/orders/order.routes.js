@@ -16,7 +16,8 @@ import {
   acceptOrderByVendor,
   vendorUpdateOrderStatus,
   getVendorOrdersBasic,
-  updateAssignvendor
+  updateAssignvendor,
+  getOrderReports
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
 
@@ -34,6 +35,8 @@ router.post(
 );
 router.get("/", getAllOrders);
 router.post("/create-admin", createAdminOrder);
+router.get("/order-reports", getOrderReports);
+
 
 router.get("/:id", getOrderById);
 router.put("/:id/vendor-status", updateOrderStatus);
@@ -45,7 +48,6 @@ router.get("/by-patient/:patientId", getOrdersByPatientId);
 router.get("/by-primary/:patientId", getOrdersByPrimaryPatientId);
 router.get("/vendor/:vendorId/orders", getOrdersByVendor);
 router.get("/vendor/:vendorId/orders/histroy", getVendorOrdersBasic);
-
 
 router.post("/vendor/reject", rejectOrderByVendor);
 router.post("/vendor/accept", acceptOrderByVendor);
