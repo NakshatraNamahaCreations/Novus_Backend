@@ -35,6 +35,13 @@ export const getAllNotifications = async (req, res) => {
             select: {
               logs: { where: { status: "sent" } }
             }
+          },
+          createdBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
           }
         }
       }),
@@ -46,7 +53,7 @@ export const getAllNotifications = async (req, res) => {
       return {
         ...n,
         recipients: sent,
-        openRate: sent > 0 ? Math.round((0 / sent) * 100) + "%" : "-",
+        openRate: sent > 0 ? Math.round((n.openCount / sent) * 100) + "%" : "0%",
       };
     });
 
@@ -71,7 +78,6 @@ export const getAllNotifications = async (req, res) => {
   }
 };
 
-
 export const getNotificationById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -90,7 +96,14 @@ export const getNotificationById = async (req, res) => {
             }
           },
           orderBy: { sentAt: 'desc' },
-          take: 50 // Limit logs for performance
+          take: 50
+        },
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
         }
       }
     });
@@ -129,6 +142,9 @@ export const createNotification = async (req, res) => {
       imageUrl,
       deepLink
     } = req.body;
+
+    // Get user ID from request (assuming you have auth middleware)
+    const userId = req.user?.id;
 
     // Validation
     if (!title || !message || !type || !audience) {
@@ -170,12 +186,14 @@ export const createNotification = async (req, res) => {
         status: schedule ? 'scheduled' : 'draft',
         scheduledAt: schedule && scheduledAt ? new Date(scheduledAt) : null,
         imageUrl: imageUrl || null,
-        deepLink: deepLink || null
+        deepLink: deepLink || null,
+        createdById: userId // Add creator ID
       }
     });
-
+    
+    
     // If not scheduled, send immediately
-    if (!schedule) {
+    if (!scheduledAt) {
       await sendNotificationImmediately(notification);
     }
 
@@ -213,7 +231,7 @@ export const updateNotification = async (req, res) => {
     }
 
     // Don't allow updates to sent notifications
-    if (existingNotification.status === 'sent') {
+    if (existingNotification.status === 'sent' || existingNotification.status === 'partial') {
       return res.status(400).json({
         success: false,
         error: "Cannot update already sent notifications"
@@ -256,6 +274,8 @@ export const deleteNotification = async (req, res) => {
       });
     }
 
+   
+
     await prisma.notification.delete({
       where: { id: parseInt(id) }
     });
@@ -289,12 +309,7 @@ export const sendNotificationNow = async (req, res) => {
       });
     }
 
-    if (notification.status === 'sent') {
-      return res.status(400).json({
-        success: false,
-        error: "Notification is already sent"
-      });
-    }
+  
 
     // Send notification immediately
     await sendNotificationImmediately(notification);
@@ -318,7 +333,78 @@ export const sendNotificationNow = async (req, res) => {
     console.error("Error sending notification:", error);
     res.status(500).json({ 
       success: false,
-      error: "Failed to send notification" 
+      error: "Failed to send notification",
+      message: error.message 
+    });
+  }
+};
+
+export const resendNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { sendToFailedOnly = false } = req.body;
+
+    const notification = await prisma.notification.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        logs: {
+          where: sendToFailedOnly ? { status: 'failed' } : undefined,
+          select: { patientId: true }
+        }
+      }
+    });
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        error: "Notification not found"
+      });
+    }
+
+    if (notification.status !== 'sent' && notification.status !== 'partial') {
+      return res.status(400).json({
+        success: false,
+        error: "Only sent or partially sent notifications can be resent"
+      });
+    }
+
+    let patientIds = [];
+    if (sendToFailedOnly && notification.logs.length > 0) {
+      patientIds = notification.logs.map(log => log.patientId);
+    }
+
+    // Create a new notification record for resend (to maintain history)
+    const resendNotification = await prisma.notification.create({
+      data: {
+        title: `[RESEND] ${notification.title}`,
+        message: notification.message,
+        type: notification.type,
+        audience: notification.audience,
+        selectedPatients: patientIds.length > 0 ? patientIds : notification.selectedPatients,
+        status: 'draft',
+        imageUrl: notification.imageUrl,
+        deepLink: notification.deepLink,
+        originalNotificationId: notification.id,
+        isResend: true,
+        createdById: req.user?.id // Track who initiated the resend
+      }
+    });
+
+    // Send the notification
+    await sendNotificationImmediately(resendNotification);
+
+    res.json({
+      success: true,
+      message: sendToFailedOnly ? "Notification resent to failed recipients" : "Notification resent successfully",
+      notification: resendNotification
+    });
+
+  } catch (error) {
+    console.error("Error resending notification:", error);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to resend notification",
+      message: error.message 
     });
   }
 };
@@ -339,19 +425,18 @@ export const duplicateNotification = async (req, res) => {
     }
 
     // Create a duplicate with draft status
-    const { id: originalId, createdAt, updatedAt, sentAt, ...duplicateData } = originalNotification;
-    
     const duplicateNotification = await prisma.notification.create({
       data: {
-        ...duplicateData,
-        title: `${duplicateData.title} (Copy)`,
+        title: `${originalNotification.title} (Copy)`,
+        message: originalNotification.message,
+        type: originalNotification.type,
+        audience: originalNotification.audience,
+        selectedPatients: originalNotification.selectedPatients,
         status: 'draft',
         scheduledAt: null,
-        sentAt: null,
-        recipients: 0,
-        openCount: 0,
-        clickCount: 0,
-        failureCount: 0
+        imageUrl: originalNotification.imageUrl,
+        deepLink: originalNotification.deepLink,
+        createdById: req.user?.id
       }
     });
 
@@ -372,6 +457,7 @@ export const duplicateNotification = async (req, res) => {
 
 export const getNotificationStats = async (req, res) => {
   try {
+    // Get counts by status
     const totalSent = await prisma.notification.count({
       where: { status: 'sent' }
     });
@@ -384,23 +470,52 @@ export const getNotificationStats = async (req, res) => {
       where: { status: 'draft' }
     });
 
-    // Calculate average open rate (you would need to track this properly)
+    const totalFailed = await prisma.notification.count({
+      where: { status: 'failed' }
+    });
+
+    const totalPartial = await prisma.notification.count({
+      where: { status: 'partial' }
+    });
+
+    // Calculate total recipients and opens
     const sentNotifications = await prisma.notification.findMany({
-      where: { status: 'sent' },
-      select: { recipients: true, openCount: true }
+      where: { 
+        OR: [
+          { status: 'sent' },
+          { status: 'partial' }
+        ]
+      },
+      select: { 
+        recipients: true, 
+        openCount: true,
+        logs: {
+          where: { status: 'sent' },
+          select: { id: true }
+        }
+      }
     });
 
     const totalRecipients = sentNotifications.reduce((sum, n) => sum + n.recipients, 0);
+    const totalLogs = sentNotifications.reduce((sum, n) => sum + n.logs.length, 0);
     const totalOpens = sentNotifications.reduce((sum, n) => sum + n.openCount, 0);
+    
     const averageOpenRate = totalRecipients > 0 ? Math.round((totalOpens / totalRecipients) * 100) : 0;
+    const successRate = totalLogs > 0 ? Math.round(((totalLogs - sentNotifications.reduce((sum, n) => sum + (n.recipients - n.logs.length), 0)) / totalLogs) * 100) : 0;
 
     res.json({
       success: true,
       stats: {
+        total: totalSent + totalScheduled + totalDrafts + totalFailed + totalPartial,
         totalSent,
         totalScheduled,
         totalDrafts,
-        averageOpenRate: averageOpenRate + '%'
+        totalFailed,
+        totalPartial,
+        totalRecipients,
+        totalOpens,
+        averageOpenRate: averageOpenRate + '%',
+        successRate: successRate + '%'
       }
     });
 
@@ -413,104 +528,160 @@ export const getNotificationStats = async (req, res) => {
   }
 };
 
-// Helper function to send notification immediately
-const sendNotificationImmediately = async (notification) => {
-  try {
-    // Get target patients based on audience
-    let patients = [];
-    
-    if (notification.audience === 'all') {
-      patients = await prisma.patient.findMany({
-        where: { status: 'active' },
-        select: { id: true, contactNo: true, deviceToken: true }
-      });
-    } else if (notification.audience === 'new_patients') {
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      
-      patients = await prisma.patient.findMany({
-        where: { 
-          status: 'active',
-          createdAt: { gte: thirtyDaysAgo }
-        },
-        select: { id: true, contactNo: true, deviceToken: true }
-      });
-    } else if (notification.audience === 'selected_patients' && notification.selectedPatients) {
-      patients = await prisma.patient.findMany({
-        where: { 
-          id: { in: notification.selectedPatients },
-          status: 'active'
-        },
-        select: { id: true, contactNo: true, deviceToken: true }
-      });
-    }
+export const sendNotificationImmediately = async (notification) => {
+  let patients = [];
+  let patientIds = [];
 
-    let successCount = 0;
-    let failureCount = 0;
+  if (notification.audience === "all") {
+    patients = await prisma.patient.findMany({
+      where: { status: "active" },
+      select: {
+        id: true,
+        contactNo: true,
+        patientDevices: { select: { fcmToken: true } }
+      }
+    });
+    patientIds = patients.map(p => p.id);
+  }
 
-    // Send notifications based on type
-    for (const patient of patients) {
-      try {
-        if (notification.type === 'push' && patient.deviceToken) {
-          await sendPushNotification({
-            token: patient.deviceToken,
-            title: notification.title,
-            body: notification.message,
-            image: notification.imageUrl,
-            data: { deepLink: notification.deepLink }
-          });
-        } else if (notification.type === 'whatsapp' && patient.contactNo) {
-          await sendWhatsAppMessage({
+  if (notification.audience === "selected_patients" && notification.selectedPatients) {
+    patients = await prisma.patient.findMany({
+      where: {
+        id: { in: notification.selectedPatients },
+        status: "active"
+      },
+      select: {
+        id: true,
+        contactNo: true,
+        patientDevices: { select: { fcmToken: true } }
+      }
+    });
+    patientIds = patients.map(p => p.id);
+  }
+
+  let success = 0;
+  let failed = 0;
+  
+
+  for (const patient of patients) {
+    try {
+      /* ================= PUSH ================= */
+      if (
+        (notification.type === "push" || notification.type === "both") &&
+        patient.patientDevices?.length
+      ) {
+        for (const device of patient.patientDevices) {
+          console.log("device.fcmToken",device.fcmToken)
+          try {
+            const result = await sendPushNotification({
+              token: device.fcmToken,
+              title: notification.title,
+              body: notification.message,
+              image: notification.imageUrl,
+              data: { deepLink: notification.deepLink }
+            });
+
+            await prisma.notificationLog.create({
+              data: {
+                notificationId: notification.id,
+                patientId: patient.id,
+                type: "push",
+                status: result.success ? "sent" : "failed",
+                deviceToken: device.fcmToken,
+                errorMessage: result.errorMessage,
+                isResend: notification.isResend || false
+              }
+            });
+
+            if (result.success) {
+              success++;
+            } else {
+              failed++;
+            }
+          } catch (err) {
+            await prisma.notificationLog.create({
+              data: {
+                notificationId: notification.id,
+                patientId: patient.id,
+                type: "push",
+                status: "failed",
+                deviceToken: device.fcmToken,
+                errorMessage: err.message,
+                isResend: notification.isResend || false
+              }
+            });
+            failed++;
+          }
+        }
+      }
+
+      /* ================= WHATSAPP ================= */
+      if (
+        (notification.type === "whatsapp" || notification.type === "both") &&
+        patient.contactNo
+      ) {
+        try {
+          const result = await sendWhatsAppMessage({
             to: patient.contactNo,
             message: notification.message
           });
+
+          await prisma.notificationLog.create({
+            data: {
+              notificationId: notification.id,
+              patientId: patient.id,
+              type: "whatsapp",
+              status: result.success ? "sent" : "failed",
+              phoneNumber: patient.contactNo,
+              errorMessage: result.errorMessage,
+              isResend: notification.isResend || false
+            }
+          });
+
+          if (result.success) {
+            success++;
+          } else {
+            failed++;
+          }
+        } catch (err) {
+          await prisma.notificationLog.create({
+            data: {
+              notificationId: notification.id,
+              patientId: patient.id,
+              type: "whatsapp",
+              status: "failed",
+              phoneNumber: patient.contactNo,
+              errorMessage: err.message,
+              isResend: notification.isResend || false
+            }
+          });
+          failed++;
         }
-
-        // Log successful delivery
-        await prisma.notificationLog.create({
-          data: {
-            notificationId: notification.id,
-            patientId: patient.id,
-            type: notification.type,
-            status: 'sent',
-            deviceToken: notification.type === 'push' ? patient.deviceToken : null,
-            phoneNumber: notification.type === 'whatsapp' ? patient.contactNo : null
-          }
-        });
-
-        successCount++;
-
-      } catch (error) {
-        console.error(`Failed to send notification to patient ${patient.id}:`, error);
-        
-        // Log failure
-        await prisma.notificationLog.create({
-          data: {
-            notificationId: notification.id,
-            patientId: patient.id,
-            type: notification.type,
-            status: 'failed',
-            deviceToken: notification.type === 'push' ? patient.deviceToken : null,
-            phoneNumber: notification.type === 'whatsapp' ? patient.contactNo : null,
-            errorMessage: error.message
-          }
-        });
-
-        failureCount++;
       }
+
+    } catch (err) {
+      failed++;
+      console.error("Notification failed:", err.message);
     }
-
-    // Update notification with delivery stats
-    await prisma.notification.update({
-      where: { id: notification.id },
-      data: {
-        recipients: successCount,
-        failureCount: failureCount
-      }
-    });
-
-  } catch (error) {
-    console.error("Error in sendNotificationImmediately:", error);
-    throw error;
   }
+
+  // Determine final status
+  let finalStatus = 'sent';
+  if (failed > 0 && success > 0) {
+    finalStatus = 'partial';
+  } else if (failed > 0 && success === 0) {
+    finalStatus = 'failed';
+  }
+
+  await prisma.notification.update({
+    where: { id: notification.id },
+    data: {
+      recipients: success,
+      failureCount: failed,
+      status: finalStatus,
+      sentAt: new Date()
+    }
+  });
+
+  return { success, failed, patientIds };
 };

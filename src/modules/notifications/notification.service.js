@@ -1,57 +1,89 @@
-// src/modules/notifications/notification.service.js
 
-// Mock function for push notifications (integrate with your push service)
-export const sendPushNotification = async ({ token, title, body, image, data }) => {
-  // Integrate with your push notification service (Firebase, OneSignal, etc.)
-  console.log('Sending push notification:', { token, title, body });
-  
-  // Example with Firebase Admin SDK:
-  /*
-  const message = {
-    token: token,
-    notification: {
-      title: title,
-      body: body,
-      image: image
-    },
-    data: data || {}
-  };
 
+import axios from "axios";
+import admin from "../../config/firebase.js";
+import { PrismaClient } from "@prisma/client";
+import { WHATSAPP_TEMPLATES } from "../../templates/whatsapp.templates.js";
+import { WhatsAppMessage } from "../../utils/whatsapp.js";
+const prisma = new PrismaClient();
+
+export const sendPushNotification = async ({
+  token,
+  title,
+  body,
+  image,
+  data
+}) => {
   try {
+    const message = {
+      token,
+      notification: {
+        title: String(title),
+        body: String(body),
+        ...(image ? { image: String(image) } : {})
+      },
+      data: data
+        ? Object.fromEntries(
+            Object.entries(data).map(([k, v]) => [k, String(v)])
+          )
+        : {}
+    };
+
     const response = await admin.messaging().send(message);
-    return response;
-  } catch (error) {
-    console.error('Error sending push notification:', error);
-    throw error;
-  }
-  */
 
-  // Mock success for demo
-  return { success: true, messageId: 'mock-message-id' };
+    console.log("response",response)
+
+    // ✅ SUCCESS
+    return {
+      success: true,
+      messageId: response
+    };
+
+  } catch (error) {
+    console.error("FCM ERROR:", error.code, error.message);
+
+    // 🚨 Auto-remove invalid tokens
+    if (
+      error.code === "messaging/registration-token-not-registered" ||
+      error.code === "messaging/invalid-registration-token"
+    ) {
+      await prisma.patientDevice.deleteMany({
+        where: { fcmToken: token }
+      });
+    }
+
+    return {
+      success: false,
+      errorCode: error.code,
+      errorMessage: error.message
+    };
+  }
 };
 
-// Mock function for WhatsApp messages (integrate with WhatsApp Business API)
+
+// WHATSAPP (mock for now)
 export const sendWhatsAppMessage = async ({ to, message }) => {
-  // Integrate with WhatsApp Business API or Twilio
-  console.log('Sending WhatsApp message:', { to, message });
-  
-  // Example with Twilio:
-  /*
-  const client = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  
   try {
-    const response = await client.messages.create({
-      body: message,
-      from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
-      to: `whatsapp:${to}`
-    });
-    return response;
-  } catch (error) {
-    console.error('Error sending WhatsApp message:', error);
-    throw error;
-  }
-  */
+   const template = WHATSAPP_TEMPLATES.OTP;
 
-  // Mock success for demo
-  return { success: true, sid: 'mock-whatsapp-sid' };
+    const result = await WhatsAppMessage({
+      phone:to,
+      templateId: template.templateId,
+      message: template.message,
+      variables: template.mapVariables({ name, otp }),
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error(
+      "WHATSAPP ERROR:",
+      error.response?.data || error.message
+    );
+
+    return {
+      success: false,
+      error: error.response?.data || error.message
+    };
+  }
 };
+

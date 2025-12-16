@@ -4,6 +4,7 @@ import redis from "../config/redis.js";
 
 import vendorSocket from "./vendor.socket.js";
 import orderSocket from "./order.socket.js";
+import locationSocket from "../modules/location/location.socket.js";
 
 export default async function setupSockets(httpServer, app) {
   // Create pub/sub clients (redis adapter)
@@ -30,7 +31,7 @@ export default async function setupSockets(httpServer, app) {
 
     vendorSocket(io, socket);
     orderSocket(io, socket);
-
+    locationSocket(io, socket);
     socket.on("disconnect", () => {
       console.log("Socket disconnected:", socket.id);
     });

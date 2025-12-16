@@ -17,7 +17,8 @@ import {
   vendorUpdateOrderStatus,
   getVendorOrdersBasic,
   updateAssignvendor,
-  getOrderReports
+  getOrderReports,
+  getOrdersExpiringSoon
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
 
@@ -36,6 +37,8 @@ router.post(
 router.get("/", getAllOrders);
 router.post("/create-admin", createAdminOrder);
 router.get("/order-reports", getOrderReports);
+router.get("/expiring", getOrdersExpiringSoon);
+
 
 
 router.get("/:id", getOrderById);

@@ -49,7 +49,7 @@ import esignatureRoutes from "./modules/esignature/esignature.route.js";
 import reportlayoutsRoutes from "./modules/reportLayout/reportLayout.routes.js"
 import pgRoutes from "./modules/payments/pg.routes.js"
 import pincodeRoutes from "./modules/pincode/pincode.routes.js";
-
+import "./modules/notifications/notification.scheduler.js";
 
 import redis from './config/redis.js';
 
@@ -144,30 +144,4 @@ app.use("/api/config/vendor-earnings", configRoutes);
 // }
 // clearAllOrders()
 
-// /* -------------------------
-//    HTTP + SOCKET.IO SETUP
-// ---------------------------- */
-// const httpServer = http.createServer(app); // ✔ ONLY ONE SERVER
-
-// const io = new SocketIOServer(httpServer, {
-//   cors: {
-//     origin: "*", // change to frontend domain later
-//     methods: ["GET", "POST"]
-//   }
-// });
-
-// // Attach socket instance to express for use inside controllers
-// app.set('io', io);
-
-// // Initialize socket logic
-// locationSocketHandler(io);
-
-// /* -------------------------
-//    START SERVER
-// ---------------------------- */
-// httpServer.listen(PORT, () =>
-//   console.log(`🚀 Server + Socket.IO running on port ${PORT}`)
-// );
-
-// export { io };
 export default app;

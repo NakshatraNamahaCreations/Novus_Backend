@@ -22,21 +22,86 @@ export const ResultService = {
       ranges[0]
     );
   },
+  update: async (id, payload) => {
+    const existing = await prisma.patientTestResult.findUnique({
+      where: { id },
+    });
+
+    if (!existing) throw new Error("Result not found");
+
+    const isRadiology = payload.testType === "RADIOLOGY";
+
+    // UPDATE MAIN RESULT
+    const updated = await prisma.patientTestResult.update({
+      where: { id },
+      data: {
+        reportHtml: payload.reportHtml ?? existing.reportHtml,
+        reportedById: payload.reportedById,
+        reportedAt: new Date(),
+        status: "reported",
+       
+      },
+    });
+
+    // RADIOLOGY DONE
+    if (isRadiology) return ResultService.fetchById(id);
+
+    // PATHOLOGY → Update parameters
+    if (payload.parameters?.length) {
+      await prisma.parameterResult.deleteMany({
+        where: { patientTestResultId: id },
+      });
+
+      const patient = await prisma.patient.findUnique({
+        where: { id: existing.patientId },
+      });
+
+      const rows = [];
+
+      for (const p of payload.parameters) {
+        const range = await ResultService.findRange(p.parameterId, patient);
+        const flag = ResultService.evaluateFlag(p.valueNumber, range);
+
+        rows.push({
+          patientTestResultId: id,
+          parameterId: p.parameterId,
+          valueNumber: p.valueNumber ?? null,
+          valueText: p.valueText ?? null,
+          unit: p.unit ?? null,
+          flag,
+          normalRangeText:
+            range?.referenceRange ||
+            `${range?.lowerLimit ?? "-"} - ${range?.upperLimit ?? "-"}`,
+        });
+      }
+
+      await prisma.parameterResult.createMany({ data: rows });
+    }
+
+    return ResultService.fetchById(id);
+  },
   findByOrderAndTest: (orderId, testId) =>
     prisma.patientTestResult.findFirst({
-      where: {
-        orderId,
-        testId,
-      },
+      where: { orderId, testId },
       include: {
         patient: {
-          select:{
-            id:true,
-            fullName:true
-          }
+          select: { id: true, fullName: true },
         },
         test: true,
-        parameterResults: true,
+
+        // ⭐ INCLUDE PARAMETER WITH NAME
+        parameterResults: {
+          include: {
+            parameter: {
+              select: {
+                id: true,
+                name: true, // 👈 GET PARAMETER NAME
+
+                type: true, // optional
+              },
+            },
+          },
+        },
       },
     }),
 
@@ -81,7 +146,7 @@ export const ResultService = {
         reportedAt: new Date(),
         reportedById: payload.reportedById,
         status: "reported",
-        rawJson: payload,
+       
         reportHtml: payload.reportHtml || null,
       },
     });
@@ -148,7 +213,278 @@ export const ResultService = {
       include: {
         patient: true,
         test: true,
-        parameterResults: true,
+        parameterResults: {
+          include: {
+            parameter: {
+              select: {
+                id: true,
+                name: true, // 👈 GET PARAMETER NAME
+              },
+            },
+          },
+        },
       },
     }),
+  getDefaultLayout: () =>
+    prisma.reportLayout.findFirst({
+      where: { isDefault: true },
+    }),
+
+ generatePrintableHtml: (report, layout = null, signature = null) => {
+  const withLetterhead = !!layout;
+
+  const isRadiology = !!report.reportHtml && report.reportHtml !== "";
+  const isPathology = report.parameterResults?.length > 0;
+
+  const today = new Date(report.reportedAt).toLocaleString();
+
+  // Pathology rows
+  const parameterRows = isPathology
+    ? report.parameterResults
+        .map(
+          (p) => `
+        <tr>
+          <td>${p.parameter?.name || "–"}</td>
+          <td>${p.valueNumber ?? p.valueText ?? "–"}</td>
+          <td>${p.unit ?? ""}</td>
+          <td>${p.normalRangeText ?? "–"}</td>
+          <td><span class="flag ${p.flag?.toLowerCase()}">${p.flag || ""}</span></td>
+        </tr>
+      `
+        )
+        .join("")
+    : "";
+
+  // Header
+  const headerHtml = withLetterhead
+    ? `
+      <div class="header-img-box">
+        <img src="${layout.headerImg}" class="header-img" />
+      </div>
+    `
+    : `
+      <div class="header"></div>
+    `;
+
+  // Footer
+  const footerHtml = withLetterhead
+    ? `
+      <div class="footer-img-box">
+        <img src="${layout.footerImg}" class="footer-img" />
+      </div>
+    `
+    : `
+      <div class="footer">
+        This is a computer-generated report. No signature is required.
+      </div>
+    `;
+
+  // ⭐ SIGNATURE BLOCK
+  const signatureHtml = signature
+    ? `
+      <div class="signature-area" style="text-align: right; margin-top: 50px;">
+        <img src="${signature.signatureImg}" style="height: 80px; object-fit: contain;" />
+        <p style="font-weight: bold; margin: 4px 0;">${signature.name}</p>
+        <p style="margin: 2px 0;">${signature.qualification || ""}</p>
+        <p style="margin: 2px 0;">${signature.designation || ""}</p>
+      </div>
+    `
+    : `
+      <div class="signature-area" style="text-align: right; margin-top: 50px;">
+        <p><b>Reported By:</b> ${report.reportedById ? "Authorised Personnel" : "System"}</p>
+        <p>__________________________</p>
+      </div>
+    `;
+
+  return `
+  <html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Report - ${report.test.name}</title>
+
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        color: #222;
+      }
+
+      html, body {
+        background: white !important;
+        width: 100% !important;
+      }
+
+   .page {
+  padding: 24px 36px;
+  max-width: 794px; /* A4 width */
+  margin: 0 auto;
+}
+.header-img-box {
+  margin-bottom: 16px;
+}
+.footer-img-box {
+  margin-top: 40px;
+}
+
+
+      .header-img-box, .footer-img-box {
+        overflow: hidden;
+        width: 100%;
+        text-align: center;
+      }
+
+      .header-img {
+        width: 100%;
+        display: block;
+      }
+
+      .footer-img {
+        width: 100%;
+        display: block;
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 2px solid #1e40af;
+        padding-bottom: 12px;
+        margin-bottom: 20px;
+      }
+
+    .patient-box {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  padding: 16px 18px;
+  border-radius: 8px;
+  margin-bottom: 24px;
+}
+
+.patient-box h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #1e3a8a;
+}
+
+
+      .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px 20px;
+        font-size: 13px;
+      }
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e3a8a;
+  margin: 28px 0 10px;
+  padding-left: 10px;
+  border-left: 4px solid #1e40af;
+}
+
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+
+      th {
+        background: #1e3a8a;
+        color: white;
+        text-align: left;
+        padding: 8px;
+        font-size: 13px;
+      }
+
+      td {
+        padding: 8px;
+        border-bottom: 1px solid #e5e7eb;
+        font-size: 13px;
+      }
+
+      .flag.normal { color: #16a34a; font-weight: bold; }
+      .flag.high { color: #dc2626; font-weight: bold; }
+      .flag.low { color: #ca8a04; font-weight: bold; }
+      .flag.critical_high { color: #b91c1c; font-weight: bold; }
+      .flag.critical_low { color: #b45309; font-weight: bold; }
+      .flag.na { color: #6b7280; }
+
+      .radiology-box {
+        padding: 15px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        background: #f9fafb;
+        margin-top: 12px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .footer {
+        text-align: center;
+        font-size: 11px;
+        color: #6b7280;
+        margin-top: 40px;
+        padding-top: 10px;
+        border-top: 1px solid #d1d5db;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="page">
+
+      ${headerHtml}
+
+      <div class="patient-box">
+        <h3>Patient Information</h3>
+        <div class="info-grid">
+          <div><b>Name:</b> ${report.patient.fullName}</div>
+          <div><b>Test:</b> ${report.test.name}</div>
+          <div><b>Reported At:</b> ${today}</div>
+          <div><b>Patient ID:</b> ${report.patientId}</div>
+        </div>
+      </div>
+
+      ${
+        isPathology
+          ? `
+      <div class="section-title">Pathology Results</div>
+
+      <table>
+        <tr>
+          <th>Parameter</th>
+          <th>Value</th>
+          <th>Unit</th>
+          <th>Normal Range</th>
+          <th>Flag</th>
+        </tr>
+        ${parameterRows}
+      </table>
+      `
+          : ""
+      }
+
+      ${
+        isRadiology
+          ? `
+      <div class="section-title">Radiology Report</div>
+      <div class="radiology-box">${report.reportHtml}</div>
+      `
+          : ""
+      }
+
+      <!-- SIGNATURE -->
+      ${signatureHtml}
+
+      ${footerHtml}
+
+    </div>
+  </body>
+  </html>
+  `;
+},
+
 };

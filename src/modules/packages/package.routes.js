@@ -15,7 +15,8 @@ import {
   getCategoriesForTemplate,
   simpleBulkUpload,
   validateBulkUpload,
-  getHomeMostBooked
+  getHomeMostBooked,
+  getSpotlightTests
 } from "./package.controller.js";
 
 const router = express.Router();
@@ -27,6 +28,8 @@ router.get("/search", searchTestsGrouped);
 router.get("/most-booked-tests", getHomeMostBooked);
 
 router.get("/", getAllTests);
+router.get("/spotlight", getSpotlightTests);
+
 router.get("/:id", getTestById);
 router.put("/:id", upload.single("image"), updateTest);
 router.delete("/:id", deleteTest);

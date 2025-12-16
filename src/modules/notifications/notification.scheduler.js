@@ -1,6 +1,8 @@
 
 import cron from 'node-cron';
-import prisma from '../../config/prisma.js';
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 import { sendNotificationImmediately } from './notification.controller.js';
 
 // Run every minute to check for scheduled notifications

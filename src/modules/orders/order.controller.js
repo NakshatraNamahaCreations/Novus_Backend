@@ -19,7 +19,6 @@ export const bookSlot = async (slotId, orderDate) => {
   const dateOnly = new Date(dateObj);
   dateOnly.setHours(0, 0, 0, 0);
 
-
   // 1. Fetch slot
   const slot = await prisma.slot.findUnique({
     where: { id: slotId },
@@ -82,7 +81,7 @@ export const createOrder = async (req, res) => {
       merchantOrderId,
       slotId,
       isHomeSample,
-      centerId
+      centerId,
     } = req.body;
 
     if (!members || members.length === 0) {
@@ -122,25 +121,25 @@ export const createOrder = async (req, res) => {
         paymentStatus: paymentStatus || "pending",
         merchantOrderId,
         isHomeSample,
-        centerId
+        centerId,
       },
     });
 
- const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const paymentId = `PAY-${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
     await prisma.payment.create({
       data: {
         orderId: order.id,
-        patientId: patientId ,
-     paymentId,
+        patientId: patientId,
+        paymentId,
 
-        paymentMethod:"UPI",
-        paymentMode:"ONLINE",
+        paymentMethod: "UPI",
+        paymentMode: "ONLINE",
         paymentStatus: "COMPLETED",
-        amount:finalAmount,
-        currency:'INR',
+        amount: finalAmount,
+        currency: "INR",
         paymentDate: new Date(),
-       
-        
       },
     });
     /* ---------------------------------------------
@@ -216,7 +215,9 @@ export const createOrder = async (req, res) => {
 
     const io = req.app.get("io");
 
-    if (io && isToday && testType === "Pathology") {
+    if (io && isToday && testType === "PATHOLOGY") {
+
+      console.log("today")
       await broadcastNewOrder(io, {
         id: order.id,
         slot,
@@ -259,7 +260,6 @@ export const createOrder = async (req, res) => {
   }
 };
 
-
 export const createAdminOrder = async (req, res) => {
   try {
     const {
@@ -284,7 +284,12 @@ export const createAdminOrder = async (req, res) => {
     } = req.body;
 
     // Basic validation
-    if (!patientId || !selectedTests || !Array.isArray(selectedTests) || selectedTests.length === 0) {
+    if (
+      !patientId ||
+      !selectedTests ||
+      !Array.isArray(selectedTests) ||
+      selectedTests.length === 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Patient & tests required",
@@ -307,9 +312,10 @@ export const createAdminOrder = async (req, res) => {
       (s, t) => s + Number((t && (t.price ?? t.amount ?? t.total)) || 0),
       0
     );
-    const total = typeof bodyTotalAmount !== "undefined" && bodyTotalAmount !== null
-      ? Number(bodyTotalAmount)
-      : computedTotal;
+    const total =
+      typeof bodyTotalAmount !== "undefined" && bodyTotalAmount !== null
+        ? Number(bodyTotalAmount)
+        : computedTotal;
 
     // Determine discount / final amounts
     const discountAmt =
@@ -342,15 +348,21 @@ export const createAdminOrder = async (req, res) => {
       patient: { connect: { id: Number(patientId) } },
       orderType: registrationType ?? undefined,
       totalAmount: Number(total),
-      discount: typeof discount !== "undefined" && discount !== null ? Number(discount) : undefined,
-      discountAmount: discountAmt !== undefined ? Number(discountAmt) : undefined,
+      discount:
+        typeof discount !== "undefined" && discount !== null
+          ? Number(discount)
+          : undefined,
+      discountAmount:
+        discountAmt !== undefined ? Number(discountAmt) : undefined,
       finalAmount: Number(finalAmt),
       diagnosticCenterId: castInt(diagnosticCenterId),
-    
+
       source: source ?? undefined,
       date: new Date(),
       isHomeSample: Boolean(homeCollection),
-      remarks: [provisionalDiagnosis, notes, remark].filter(Boolean).join(" | "),
+      remarks: [provisionalDiagnosis, notes, remark]
+        .filter(Boolean)
+        .join(" | "),
       // NOTE: address, doctor, center, refCenter are added conditionally below
     };
 
@@ -426,7 +438,6 @@ export const createAdminOrder = async (req, res) => {
 };
 
 
-
 export const acceptOrderByVendor = async (req, res) => {
   try {
     const { orderId, vendorId } = req.body;
@@ -441,7 +452,7 @@ export const acceptOrderByVendor = async (req, res) => {
     const io = req.app.get("io");
 
     /* --------------------------------------------------------
-       🔥 STEP 1 — Get order details (slot + date)
+       STEP 1 — Get order details
     ---------------------------------------------------------*/
     const orderDetails = await prisma.order.findUnique({
       where: { id: Number(orderId) },
@@ -454,9 +465,7 @@ export const acceptOrderByVendor = async (req, res) => {
     });
 
     if (!orderDetails)
-      return res
-        .status(404)
-        .json({ success: false, message: "Order not found" });
+      return res.status(404).json({ success: false, message: "Order not found" });
 
     if (orderDetails.vendorId)
       return res
@@ -464,7 +473,7 @@ export const acceptOrderByVendor = async (req, res) => {
         .json({ success: false, message: "Order already accepted" });
 
     /* --------------------------------------------------------
-       🔥 STEP 2 — Check slot conflict (same vendor, same date & slot)
+       STEP 2 — Slot conflict check
     ---------------------------------------------------------*/
     const conflict = await prisma.order.findFirst({
       where: {
@@ -478,14 +487,15 @@ export const acceptOrderByVendor = async (req, res) => {
     if (conflict) {
       return res.status(400).json({
         success: false,
-        message: `You already accepted another job for this same date & slot`,
+        message: "You already accepted another job for this slot",
       });
     }
 
     /* --------------------------------------------------------
-       🔥 STEP 3 — Atomic order acceptance
+       STEP 3 — Atomic transaction (ORDER + EARNINGS)
     ---------------------------------------------------------*/
     const result = await prisma.$transaction(async (tx) => {
+      // 1️⃣ Recheck order
       const existing = await tx.order.findUnique({
         where: { id: Number(orderId) },
         select: { vendorId: true },
@@ -495,7 +505,8 @@ export const acceptOrderByVendor = async (req, res) => {
         throw new Error("Order already accepted");
       }
 
-      return await tx.order.update({
+      // 2️⃣ Accept order
+      const updatedOrder = await tx.order.update({
         where: { id: Number(orderId) },
         data: {
           vendorId: Number(vendorId),
@@ -506,25 +517,59 @@ export const acceptOrderByVendor = async (req, res) => {
           address: true,
         },
       });
+
+      // 3️⃣ Get earning config (latest or first)
+      const earningConfig = await tx.vendorEarningConfig.findFirst({
+        orderBy: { createdAt: "desc" },
+      });
+
+      const baseAmount = earningConfig?.baseAmount || 0;
+
+      // 4️⃣ Fetch vendor current earnings
+      const vendor = await tx.vendor.findUnique({
+        where: { id: Number(vendorId) },
+        select: { earnings: true },
+      });
+
+      const newBalance = (vendor?.earnings || 0) + baseAmount;
+
+      // 5️⃣ Update vendor balance
+      await tx.vendor.update({
+        where: { id: Number(vendorId) },
+        data: { earnings: newBalance },
+      });
+
+      // 6️⃣ Insert earnings history
+      if (baseAmount > 0) {
+        await tx.earningsHistory.create({
+          data: {
+            vendorId: Number(vendorId),
+            title: "Order Accepted",
+            desc: `Base earning for accepting order #${orderId}`,
+            amount: baseAmount,
+            type: "order_earning",
+            balanceAfter: newBalance,
+          },
+        });
+      }
+
+      return updatedOrder;
     });
 
     /* --------------------------------------------------------
-       🔥 STEP 4 — Remove from Redis pending pool
+       STEP 4 — Remove from Redis
     ---------------------------------------------------------*/
     await redis.del(`order:${orderId}`);
 
     /* --------------------------------------------------------
-       🔥 STEP 5 — Notify vendor + remove from other vendors
+       STEP 5 — Socket notifications
     ---------------------------------------------------------*/
-
-    // Notify THIS vendor
     io.to(`vendor_${vendorId}`).emit("orderAccepted", {
       orderId,
       vendorId,
       order: result,
     });
 
-    // Notify ALL vendors → remove job from job list
     io.emit("orderRemoved", { orderId });
 
     return res.json({
@@ -539,6 +584,7 @@ export const acceptOrderByVendor = async (req, res) => {
     });
   }
 };
+
 
 /* ------------------------- VENDOR ACCEPTS AND STARTS JOB ------------------------- */
 export const vendorStartJob = async (req, res) => {
@@ -724,10 +770,7 @@ export const getOrdersByPatientId = async (req, res) => {
 
     const orders = await prisma.order.findMany({
       where: {
-        OR: [
-          { patientId },
-          { orderMembers: { some: { patientId } } },
-        ],
+        OR: [{ patientId }, { orderMembers: { some: { patientId } } }],
       },
       include: {
         patient: {
@@ -781,16 +824,27 @@ export const getOrdersByPatientId = async (req, res) => {
   }
 };
 
-
 export const getOrdersByPrimaryPatientId = async (req, res) => {
   try {
     const patientId = Number(req.params.patientId);
+    const { reportReady } = req.query;
 
+    const reportReadyBool =
+      reportReady === "true"
+        ? true
+        : reportReady === "false"
+        ? false
+        : undefined; // no filter if not provided
     const orders = await prisma.order.findMany({
-      where: {
-        patientId: patientId, // ONLY primary patient
-      },
-      include: {
+      where: { patientId, reportReady: reportReadyBool },
+      select: {
+        id: true,
+        merchantOrderId: true,
+        paymentStatus: true,
+        status: true,
+        reportReady: true,
+        isHomeSample: true,
+        sampleCollected: true,
         patient: {
           select: {
             id: true,
@@ -799,11 +853,20 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
             contactNo: true,
           },
         },
+
         address: true,
-        vendor: true,
+
+        vendor: {
+          select: {
+            id: true,
+            name: true,
+            number: true,
+          },
+        },
 
         orderMembers: {
-          include: {
+          select: {
+            id: true,
             patient: {
               select: {
                 id: true,
@@ -812,8 +875,6 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
                 contactNo: true,
               },
             },
-
-            // FIXED: Correct relation name
             orderMemberPackages: {
               include: {
                 package: {
@@ -826,10 +887,23 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
                     imgUrl: true,
                   },
                 },
+                test: {
+                  select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    actualPrice: true,
+                    offerPrice: true,
+                    imgUrl: true,
+                    testType:true
+                  },
+                },
               },
             },
           },
         },
+
+        createdAt: true,
       },
       orderBy: { createdAt: "desc" },
     });
@@ -840,7 +914,6 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch primary patient orders" });
   }
 };
-
 
 /* ------------------------- GET ALL ORDERS ------------------------- */
 export const getAllOrders = async (req, res) => {
@@ -979,45 +1052,66 @@ export const getOrderById = async (req, res) => {
         /* --------------------------------------------------------------
            🔥 Members + their tests + their packages
         -------------------------------------------------------------- */
-        orderMembers: {
-          include: {
-            patient: {
-              select: {
-                id: true,
-                fullName: true,
-                gender: true,
-                contactNo: true,
-              },
-            },
+      orderMembers: {
+  include: {
+    patient: {
+      select: {
+        id: true,
+        fullName: true,
+        contactNo: true,
+        gender:true
+      },
+    },
+    orderMemberPackages: {
+      include: {
+        // Standalone test booking
+        test: {
+          select: {
+            id: true,
+            name: true,
+            actualPrice: true,
+            offerPrice: true,
+            discount: true,
+            testType: true,
+            sampleRequired: true,
+            preparations: true,
+          },
+        },
 
-            orderMemberPackages: {
+        // Health checkup package booking
+        package: {
+          select: {
+            id: true,
+            name: true,
+            actualPrice: true,
+            offerPrice: true,
+            description: true,
+            imgUrl: true,
+            testType: true,
+            noOfParameter: true,
+
+            // ✅ THIS IS THE IMPORTANT PART
+            checkupPackages: {
               include: {
                 test: {
                   select: {
                     id: true,
                     name: true,
+                    testType: true,
                     actualPrice: true,
-                    offerPrice:true,
+                    offerPrice: true,
                     sampleRequired: true,
-                    preparations: true,
-                    discount: true,
-                    testType:true
-                  },
-                },
-                package: {
-                  select: {
-                    id: true,
-                    name: true,
-                     actualPrice: true,
-                    offerPrice:true,
-                    description: true,
-                    imgUrl: true,
                   },
                 },
               },
             },
           },
         },
+      },
+    },
+  },
+},
+
       },
     });
 
@@ -1045,17 +1139,26 @@ export const getOrderById = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, paymentStatus, sampleCollected, reportReady, reportUrl } =
-      req.body;
+    const {
+      status,
+      paymentStatus,
+      sampleCollected,
+      reportReady,
+      reportUrl,
+    } = req.body;
 
     const order = await prisma.order.update({
       where: { id: Number(id) },
       data: {
-        status,
-        paymentStatus,
-        sampleCollected: sampleCollected === "true",
-        reportReady: reportReady === "true",
-        reportUrl,
+        ...(status && { status }),
+        ...(paymentStatus && { paymentStatus }),
+        ...(sampleCollected !== undefined && {
+          sampleCollected: sampleCollected === "true" || sampleCollected === true,
+        }),
+        ...(reportReady !== undefined && {
+          reportReady: reportReady === "true" || reportReady === true,
+        }),
+        ...(reportUrl && { reportUrl }),
       },
     });
 
@@ -1065,17 +1168,16 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
+
 export const updateAssignvendor = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vendorId } =
-      req.body;
+    const { vendorId } = req.body;
 
     const order = await prisma.order.update({
       where: { id: Number(id) },
       data: {
         vendorId,
-      
       },
     });
 
@@ -1248,7 +1350,6 @@ export const getOrdersByVendor = async (req, res) => {
       totalOrders: orders.length,
       orders,
     });
-
   } catch (error) {
     console.error("Error fetching vendor orders:", error);
     return res.status(500).json({
@@ -1257,7 +1358,6 @@ export const getOrdersByVendor = async (req, res) => {
     });
   }
 };
-
 
 export const getVendorOrdersBasic = async (req, res) => {
   try {
@@ -1316,7 +1416,7 @@ export const getVendorOrdersBasic = async (req, res) => {
         createdAt: true,
         status: true,
         testType: true,
-        finalAmount:true,
+        finalAmount: true,
 
         orderMembers: {
           take: 1, // Only first member
@@ -1360,7 +1460,6 @@ export const getVendorOrdersBasic = async (req, res) => {
       totalPages: Math.ceil(totalCount / take),
       orders,
     });
-
   } catch (error) {
     console.error("Error fetching basic vendor orders:", error);
     return res.status(500).json({
@@ -1370,12 +1469,10 @@ export const getVendorOrdersBasic = async (req, res) => {
   }
 };
 
-
 export const vendorUpdateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
     const { status, vendorId } = req.body;
-    
 
     if (!status || !vendorId) {
       return res.status(400).json({
@@ -1462,22 +1559,19 @@ export const vendorUpdateOrderStatus = async (req, res) => {
   }
 };
 
-
 export const addOrderPayment = async (req, res) => {
   try {
-   
-
     const { orderId } = req.params;
     const {
       paymentMethod,
       paymentMode,
       amount,
-      currency = 'INR',
+      currency = "INR",
       transactionNote,
       referenceId,
       gatewayResponse,
       capturedAmount,
-      ipAddress
+      ipAddress,
     } = req.body;
 
     // Get order with payments
@@ -1489,26 +1583,25 @@ export const addOrderPayment = async (req, res) => {
           select: {
             id: true,
             fullName: true,
-            contactNo: true
-          }
+            contactNo: true,
+          },
         },
         vendor: {
           select: {
             id: true,
-            name: true
-          }
-        }
-      }
+            name: true,
+          },
+        },
+      },
     });
 
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: 'Order not found'
+        message: "Order not found",
       });
     }
 
-   
     // Calculate existing payments
     const existingPaymentsTotal = order.payments.reduce((total, payment) => {
       return total + (payment.amount || 0);
@@ -1520,19 +1613,21 @@ export const addOrderPayment = async (req, res) => {
     if (amount > balance) {
       return res.status(400).json({
         success: false,
-        message: `Payment amount exceeds order balance. Maximum allowed: ${balance}`
+        message: `Payment amount exceeds order balance. Maximum allowed: ${balance}`,
       });
     }
 
     if (amount <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Payment amount must be greater than 0'
+        message: "Payment amount must be greater than 0",
       });
     }
 
     // Generate payment ID
-    const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const paymentId = `PAY-${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
 
     // Create payment
     const payment = await prisma.payment.create({
@@ -1543,10 +1638,9 @@ export const addOrderPayment = async (req, res) => {
         vendorId: order.vendorId,
         centerId: order.centerId,
         paymentId,
-       paymentMethod: paymentMode?.toUpperCase(),  // Prisma ENUM
-                            
+        paymentMethod: paymentMode?.toUpperCase(), // Prisma ENUM
 
-        paymentStatus: 'CAPTURED',
+        paymentStatus: "CAPTURED",
         amount,
         currency,
         paymentDate: new Date(),
@@ -1555,23 +1649,27 @@ export const addOrderPayment = async (req, res) => {
         gatewayResponse,
         capturedAmount: capturedAmount || amount,
         ipAddress: ipAddress || req.ip,
-        createdById: req.user?.id
+        createdById: req.user?.id,
       },
       include: {
         createdBy: {
           select: {
             id: true,
             name: true,
-            email: true
-          }
-        }
-      }
+            email: true,
+          },
+        },
+      },
     });
 
     // Calculate new payment status
     const newTotalPaid = existingPaymentsTotal + amount;
-    const newPaymentStatus = newTotalPaid >= order.finalAmount ? 'paid' :
-                           newTotalPaid > 0 ? 'partially_paid' : 'pending';
+    const newPaymentStatus =
+      newTotalPaid >= order.finalAmount
+        ? "paid"
+        : newTotalPaid > 0
+        ? "partially_paid"
+        : "pending";
 
     // Update order payment status
     const updatedOrder = await prisma.order.update({
@@ -1580,11 +1678,11 @@ export const addOrderPayment = async (req, res) => {
       include: {
         payments: {
           orderBy: {
-            createdAt: 'desc'
+            createdAt: "desc",
           },
-          take: 5
-        }
-      }
+          take: 5,
+        },
+      },
     });
 
     // Update vendor earnings if applicable
@@ -1592,30 +1690,32 @@ export const addOrderPayment = async (req, res) => {
       await prisma.vendor.update({
         where: { id: order.vendorId },
         data: {
-          earnings: { increment: amount }
-        }
+          earnings: { increment: amount },
+        },
       });
 
       // Create earnings history
       await prisma.earningsHistory.create({
         data: {
           vendorId: order.vendorId,
-          title: 'Order Payment Received',
+          title: "Order Payment Received",
           desc: `Payment of ${amount} ${currency} received for order ${order.orderNumber}`,
           amount,
-          type: 'add',
-          balanceAfter: await prisma.vendor.findUnique({
-            where: { id: order.vendorId },
-            select: { earnings: true }
-          }).then(vendor => vendor.earnings),
-          createdById: req.user?.id
-        }
+          type: "add",
+          balanceAfter: await prisma.vendor
+            .findUnique({
+              where: { id: order.vendorId },
+              select: { earnings: true },
+            })
+            .then((vendor) => vendor.earnings),
+          createdById: req.user?.id,
+        },
       });
     }
 
     res.status(201).json({
       success: true,
-      message: 'Payment added to order successfully',
+      message: "Payment added to order successfully",
       payment,
       order: updatedOrder,
       summary: {
@@ -1624,15 +1724,15 @@ export const addOrderPayment = async (req, res) => {
         newPayment: amount,
         totalPaid: newTotalPaid,
         balance: order.finalAmount - newTotalPaid,
-        paymentStatus: newPaymentStatus
-      }
+        paymentStatus: newPaymentStatus,
+      },
     });
   } catch (error) {
-    console.error('Add order payment error:', error);
+    console.error("Add order payment error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error adding payment to order',
-      error: error.message
+      message: "Error adding payment to order",
+      error: error.message,
     });
   }
 };
@@ -1656,29 +1756,29 @@ export const getOrderPaymentSummary = async (req, res) => {
         finalAmount: true,
         paymentStatus: true,
         patientId: true,
-        vendorId: true
-      }
+        vendorId: true,
+      },
     });
 
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: 'Order not found'
+        message: "Order not found",
       });
     }
 
     // Check authorization
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       if (req.user.patientId && order.patientId !== req.user.patientId) {
         return res.status(403).json({
           success: false,
-          message: 'Not authorized to access order payments'
+          message: "Not authorized to access order payments",
         });
       }
       if (req.user.vendorId && order.vendorId !== req.user.vendorId) {
         return res.status(403).json({
           success: false,
-          message: 'Not authorized to access order payments'
+          message: "Not authorized to access order payments",
         });
       }
     }
@@ -1686,12 +1786,18 @@ export const getOrderPaymentSummary = async (req, res) => {
     // Get all payments for this order
     const payments = await prisma.payment.findMany({
       where: { orderId: parseInt(orderId) },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: "desc" },
     });
 
     // Calculate summary
-    const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
-    const totalRefunded = payments.reduce((sum, payment) => sum + (payment.refundAmount || 0), 0);
+    const totalPaid = payments.reduce(
+      (sum, payment) => sum + payment.amount,
+      0
+    );
+    const totalRefunded = payments.reduce(
+      (sum, payment) => sum + (payment.refundAmount || 0),
+      0
+    );
     const netPaid = totalPaid - totalRefunded;
     const balance = order.finalAmount - netPaid;
 
@@ -1702,7 +1808,7 @@ export const getOrderPaymentSummary = async (req, res) => {
         acc[method] = {
           method,
           count: 0,
-          amount: 0
+          amount: 0,
         };
       }
       acc[method].count += 1;
@@ -1711,14 +1817,14 @@ export const getOrderPaymentSummary = async (req, res) => {
     }, {});
 
     // Get recent payments
-    const recentPayments = payments.slice(0, 5).map(payment => ({
+    const recentPayments = payments.slice(0, 5).map((payment) => ({
       id: payment.id,
       paymentId: payment.paymentId,
       amount: payment.amount,
       method: payment.paymentMethod,
       status: payment.paymentStatus,
       date: payment.paymentDate,
-      refundAmount: payment.refundAmount
+      refundAmount: payment.refundAmount,
     }));
 
     res.json({
@@ -1730,7 +1836,7 @@ export const getOrderPaymentSummary = async (req, res) => {
           totalAmount: order.totalAmount,
           discount: order.discount,
           finalAmount: order.finalAmount,
-          paymentStatus: order.paymentStatus
+          paymentStatus: order.paymentStatus,
         },
         payments: {
           totalPaid,
@@ -1738,19 +1844,19 @@ export const getOrderPaymentSummary = async (req, res) => {
           netPaid,
           balance,
           isPaid: netPaid >= order.finalAmount,
-          isPartiallyPaid: netPaid > 0 && netPaid < order.finalAmount
+          isPartiallyPaid: netPaid > 0 && netPaid < order.finalAmount,
         },
         byMethod: Object.values(paymentMethods),
         recentPayments,
-        paymentCount: payments.length
-      }
+        paymentCount: payments.length,
+      },
     });
   } catch (error) {
-    console.error('Get order payment summary error:', error);
+    console.error("Get order payment summary error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching order payment summary',
-      error: error.message
+      message: "Error fetching order payment summary",
+      error: error.message,
     });
   }
 };
@@ -1808,7 +1914,8 @@ export const getOrderReports = async (req, res) => {
     if (centerId) where.centerId = Number(centerId);
     if (refCenterId) where.refCenterId = Number(refCenterId);
     if (doctorId) where.doctorId = Number(doctorId);
-    if (diagnosticCenterId) where.diagnosticCenterId = Number(diagnosticCenterId);
+    if (diagnosticCenterId)
+      where.diagnosticCenterId = Number(diagnosticCenterId);
 
     if (status) where.status = status;
     if (source) where.source = source;
@@ -1828,8 +1935,8 @@ export const getOrderReports = async (req, res) => {
 
         orderCheckups: {
           include: {
-            checkup: { select: { id: true, name: true } }
-          }
+            checkup: { select: { id: true, name: true } },
+          },
         },
 
         orderMembers: {
@@ -1863,9 +1970,87 @@ export const getOrderReports = async (req, res) => {
       totalPages: Math.ceil(total / limit),
       data: orders,
     });
-
   } catch (error) {
     console.error("Order report error:", error);
     return res.status(500).json({ error: "Failed to fetch order reports" });
+  }
+};
+
+export const getOrdersExpiringSoon = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const now = dayjs();
+    const next30Min = now.add(30, "minute");
+
+    // 1️⃣ Count total orders
+    const totalOrders = await prisma.order.count({
+      where: {
+        vendorId: null,
+        status: "pending",
+        source: "app",
+        isHomeSample: true,
+        slot: { not: null },
+      },
+    });
+
+    // 2️⃣ Fetch orders with pagination
+    const orders = await prisma.order.findMany({
+      where: {
+        vendorId: null,
+        status: "pending",
+        source: "app",
+        isHomeSample: true,
+        slot: { not: null },
+      },
+      include: {
+        patient: {
+          select: {
+            id: true,
+            fullName: true,
+            contactNo: true,
+          },
+        },
+        address: true,
+      },
+      orderBy: {
+        date: 'asc', // Sort by date ascending
+      },
+      skip,
+      take: limitNum,
+    });
+
+    // 3️⃣ Calculate time left for each order
+    const ordersWithTimeLeft = orders.map(order => {
+      const slotDateTime = dayjs(
+        `${dayjs(order.date).format("YYYY-MM-DD")} ${order.slot}`,
+        "YYYY-MM-DD hh:mm A"
+      );
+      const minsLeft = slotDateTime.diff(now, "minute");
+      
+      return {
+        ...order,
+        minsLeft
+      };
+    });
+
+    res.json({
+      success: true,
+      orders: ordersWithTimeLeft,
+      total: totalOrders,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalOrders / limitNum),
+    });
+
+  } catch (error) {
+    console.error("Expiring orders error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch expiring orders",
+    });
   }
 };

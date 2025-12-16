@@ -6,7 +6,8 @@ import {
   getHealthPackageById,
   updateHealthPackage,
   deleteHealthPackage,
-  getHealthPackagesByCategory
+  getHealthPackagesByCategory,
+  getSpotlightHealthPackages
 } from "./checkup.controller.js";
 
 const router = express.Router();
@@ -14,6 +15,8 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.post("/", upload.single("image"), addHealthPackage);
 router.get("/", getAllHealthPackages);
+router.get("/spotlight", getSpotlightHealthPackages);
+
 router.get("/category/:categoryId", getHealthPackagesByCategory);
 
 router.get("/:id", getHealthPackageById);

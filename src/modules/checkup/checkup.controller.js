@@ -63,7 +63,9 @@ export const addHealthPackage = async (req, res) => {
       reportWithin,
       reportUnit,
       noOfParameter,
-      categoryId
+      categoryId,
+      alsoKnowAs,
+      spotlight
     } = req.body;
 
     if (!name || !actualPrice) {
@@ -80,6 +82,15 @@ export const addHealthPackage = async (req, res) => {
     const rawOffer = calculateOfferPrice(actual, disc, offerPrice);
     const finalOfferPrice = roundLabPrice(rawOffer);
 
+
+    let finalSpotlight = false;
+    if (spotlight !== undefined) {
+      if (typeof spotlight === "boolean") {
+        finalSpotlight = spotlight;
+      } else if (typeof spotlight === "string") {
+        finalSpotlight = spotlight === "true";
+      }
+    }
     const healthPackage = await prisma.healthPackage.create({
       data: {
         name,
@@ -92,7 +103,9 @@ export const addHealthPackage = async (req, res) => {
         reportWithin: Number(reportWithin),
         reportUnit,
         noOfParameter,
-        categoryId: categoryId ? Number(categoryId) : null
+        categoryId: categoryId ? Number(categoryId) : null,
+        alsoKnowAs,
+           spotlight: finalSpotlight
       }
     });
 
@@ -139,8 +152,9 @@ export const updateHealthPackage = async (req, res) => {
       selectedTests,
       reportWithin,
       reportUnit,
-      noOfParameter,
-      categoryId
+      spotlight,
+      categoryId,
+      alsoKnowAs
     } = req.body;
 
     // Fetch existing package
@@ -174,6 +188,18 @@ export const updateHealthPackage = async (req, res) => {
     /* -------------------------------------------
        UPDATE PACKAGE DATA
     -------------------------------------------- */
+// --- SPOTLIGHT NORMALIZATION ---
+let finalSpotlight = existing.spotlight;
+
+if (spotlight !== undefined) {
+  if (typeof spotlight === "boolean") {
+    finalSpotlight = spotlight;
+  } else if (typeof spotlight === "string") {
+    finalSpotlight = spotlight === "true";
+  }
+}
+
+
     const updated = await prisma.healthPackage.update({
       where: { id: Number(id) },
       data: {
@@ -188,8 +214,11 @@ export const updateHealthPackage = async (req, res) => {
           ? Number(reportWithin)
           : existing.reportWithin,
         reportUnit: reportUnit ?? existing.reportUnit,
-        noOfParameter: noOfParameter ?? existing.noOfParameter,
-        categoryId: categoryId ? Number(categoryId) : existing.categoryId
+        
+        categoryId: categoryId ? Number(categoryId) : existing.categoryId,
+        alsoKnowAs:alsoKnowAs ?? existing.alsoKnowAs,
+        spotlight: finalSpotlight
+
       }
     });
 
@@ -329,8 +358,10 @@ export const getAllHealthPackages = async (req, res) => {
         reportWithin: pkg.reportWithin,
         reportUnit: pkg.reportUnit,
         discount: pkg.discount,
+        categoryId:pkg.categoryId,
         category: pkg.category,
-       testType:"PATHOLOGY",
+        alsoKnowAs:pkg.alsoKnowAs,
+        testType:"PATHOLOGY",
         tests,
         testCount: tests.length,
         parameterCount: totalParameters,
@@ -356,6 +387,116 @@ export const getAllHealthPackages = async (req, res) => {
   } catch (error) {
     console.error("Error fetching packages:", error);
     return res.status(500).json({ error: "Failed to fetch health packages" });
+  }
+};
+
+export const getSpotlightHealthPackages = async (req, res) => {
+  try {
+    const { search = "", page = 1, limit = 10 } = req.query;
+
+    const currentPage = Number(page) || 1;
+    const pageSize = Number(limit) || 10;
+
+    /* -------------------------------------------
+       WHERE CONDITION (SPOTLIGHT + SEARCH)
+    -------------------------------------------- */
+    const whereCondition = {
+      spotlight: true, // ⭐ ONLY SPOTLIGHT PACKAGES
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: "insensitive" } },
+          { category: { name: { contains: search, mode: "insensitive" } } }
+        ]
+      })
+    };
+
+    /* -------------------------------------------
+       1️⃣ COUNT TOTAL RESULTS
+    -------------------------------------------- */
+    const totalCount = await prisma.healthPackage.count({
+      where: whereCondition
+    });
+
+    const totalPages = Math.ceil(totalCount / pageSize);
+
+    /* -------------------------------------------
+       2️⃣ FETCH DATA
+    -------------------------------------------- */
+    const rawData = await prisma.healthPackage.findMany({
+      where: whereCondition,
+      skip: (currentPage - 1) * pageSize,
+      take: pageSize,
+      orderBy: { id: "desc" },
+
+      include: {
+        category: { select: { id: true, name: true } },
+        checkupPackages: {
+          include: {
+            test: {
+              include: {
+                _count: { select: { parameters: true } }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    /* -------------------------------------------
+       3️⃣ FORMAT RESPONSE
+    -------------------------------------------- */
+    const data = rawData.map((pkg) => {
+      const tests = pkg.checkupPackages.map((cp) => ({
+        id: cp.test.id,
+        name: cp.test.name,
+        parametersCount: cp.test._count.parameters
+      }));
+
+      const totalParameters = tests.reduce(
+        (sum, t) => sum + t.parametersCount,
+        0
+      );
+
+      return {
+        id: pkg.id,
+        name: pkg.name,
+        imgUrl: pkg.imgUrl,
+        description: pkg.description,
+        actualPrice: pkg.actualPrice,
+        offerPrice: pkg.offerPrice,
+        discount: pkg.discount,
+        reportWithin: pkg.reportWithin,
+        reportUnit: pkg.reportUnit,
+        categoryId: pkg.categoryId,
+        category: pkg.category,
+        alsoKnowAs: pkg.alsoKnowAs,
+        spotlight: true,
+        testType: "PATHOLOGY",
+        tests,
+        testCount: tests.length,
+        parameterCount: totalParameters
+      };
+    });
+
+    /* -------------------------------------------
+       4️⃣ RESPONSE
+    -------------------------------------------- */
+    return res.json({
+      success: true,
+      pagination: {
+        total: totalCount,
+        page: currentPage,
+        limit: pageSize,
+        totalPages,
+        hasNextPage: currentPage < totalPages,
+        hasPrevPage: currentPage > 1
+      },
+      data
+    });
+
+  } catch (error) {
+    console.error("Error fetching spotlight packages:", error);
+    return res.status(500).json({ error: "Failed to fetch spotlight packages" });
   }
 };
 

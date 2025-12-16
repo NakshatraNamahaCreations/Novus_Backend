@@ -166,6 +166,110 @@ export const getCart = async (req, res) => {
   }
 };
 
+export const getAllCarts = async (req, res) => {
+  try {
+    let {
+      page = 1,
+      limit = 10,
+      search = "",
+      fromDate,
+      toDate,
+      status
+    } = req.query;
+
+    page = Number(page);
+    limit = Number(limit);
+    const skip = (page - 1) * limit;
+
+    const where = {};
+
+    // ✅ Status filter
+    if (status) {
+      where.status = status;
+    }
+
+    // ✅ Search by patient name / phone
+    if (search) {
+      where.patient = {
+        OR: [
+          {
+            fullName: {
+              contains: search,
+              mode: "insensitive"
+            }
+          },
+          {
+            contactNo: {
+              contains: search,
+              mode: "insensitive"
+            }
+          }
+        ]
+      };
+    }
+
+    // ✅ Date-wise filter
+    if (fromDate || toDate) {
+      where.createdAt = {};
+
+      if (fromDate) {
+        where.createdAt.gte = new Date(fromDate);
+      }
+
+      if (toDate) {
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt.lte = end;
+      }
+    }
+
+    // ✅ Fetch carts
+    const carts = await prisma.cart.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      include: {
+        patient: {
+          select: {
+            id: true,
+            fullName: true,
+            contactNo: true,
+            age: true
+          }
+        },
+        cartItems: {
+          include: {
+            test: true,
+            package: true
+          }
+        }
+      }
+    });
+
+    // ✅ Total count
+    const total = await prisma.cart.count({ where });
+
+    return res.json({
+      success: true,
+      data: carts,
+      meta: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        total,
+        perPage: limit
+      }
+    });
+
+  } catch (err) {
+    console.error("GET ALL CARTS ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch carts"
+    });
+  }
+};
+
 
 /* -------------------------------------------------------
    🔴 3. Remove Item

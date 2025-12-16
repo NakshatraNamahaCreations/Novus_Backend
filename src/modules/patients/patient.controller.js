@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
+import { sendOtpSms } from "../../utils/sendOtpSms.js";
 
 const prisma = new PrismaClient();
 
@@ -103,26 +104,27 @@ export const loginOrRegister = async (req, res) => {
 
     const otp = generateOtp();
     const otpExpiry = dayjs().add(5, "minute").toDate();
+
     let patient = await prisma.patient.findFirst({
       where: { contactNo },
     });
 
     if (patient) {
-      // 🔁 Update OTP only
       await prisma.patient.update({
         where: { id: patient.id },
         data: { otp, otpExpiry },
       });
 
+      await sendOtpSms(contactNo, otp);
+
       return res.json({
         message: "OTP sent successfully",
         contactNo,
-        otp,
         isNew: false,
+          otp:otp
       });
     }
 
-    // ➕ Create new patient
     patient = await prisma.patient.create({
       data: {
         contactNo,
@@ -133,11 +135,13 @@ export const loginOrRegister = async (req, res) => {
       },
     });
 
+    await sendOtpSms(contactNo, otp);
+
     return res.json({
       message: "Account created & OTP sent",
       contactNo,
-      otp,
       isNew: true,
+      otp:otp
     });
   } catch (error) {
     console.error("Error login/register:", error);
@@ -145,38 +149,10 @@ export const loginOrRegister = async (req, res) => {
   }
 };
 
-// RESEND OTP
-export const resendOtp = async (req, res) => {
-  try {
-    const { contactNo } = req.body;
-    if (!contactNo)
-      return res.status(400).json({ error: "Contact number required" });
-
-    const patient = await prisma.patient.findUnique({ where: { contactNo } });
-    if (!patient) return res.status(404).json({ error: "Patient not found" });
-
-    const otp = generateOtp();
-    const otpExpiry = dayjs().add(5, "minute").toDate();
-
-    await prisma.patient.update({
-      where: { contactNo },
-      data: { otp, otpExpiry },
-    });
-
-    console.log(`Resent OTP for ${contactNo}: ${otp}`);
-
-    res.json({ message: "OTP resent successfully", contactNo });
-  } catch (error) {
-    console.error("Error resending OTP:", error);
-    res.status(500).json({ error: "Failed to resend OTP" });
-  }
-};
-
 export const verifyOtp = async (req, res) => {
   try {
-    const { contactNo, otp } = req.body;
+    const { contactNo, otp, fcmToken, platform } = req.body;
 
-    // ⭐ FIX: use findFirst() because contactNo is NOT unique
     const patient = await prisma.patient.findFirst({
       where: { contactNo },
     });
@@ -193,18 +169,75 @@ export const verifyOtp = async (req, res) => {
       return res.status(400).json({ error: "OTP expired" });
     }
 
-    // Clear OTP after success
+    // ✅ Clear OTP
     await prisma.patient.update({
-      where: { id: patient.id }, // ⭐ MUST use id here
+      where: { id: patient.id },
       data: { otp: null, otpExpiry: null },
     });
 
-    return res.json({ message: "Login successful", patient });
+    // ✅ SAVE / UPDATE DEVICE (IMPORTANT)
+    if (fcmToken) {
+      await prisma.patientDevice.upsert({
+        where: { fcmToken },
+        update: {
+          patientId: patient.id,
+          platform: platform || "unknown",
+        },
+        create: {
+          patientId: patient.id,
+          fcmToken,
+          platform: platform || "unknown",
+        },
+      });
+    }
+
+    return res.json({
+      message: "Login successful",
+      patient: patient,
+    });
   } catch (error) {
     console.error("Error verifying OTP:", error);
     return res.status(500).json({ error: "Failed to verify OTP" });
   }
 };
+
+// RESEND OTP
+export const resendOtp = async (req, res) => {
+  try {
+    const { contactNo } = req.body;
+    if (!contactNo) {
+      return res.status(400).json({ error: "Contact number required" });
+    }
+
+    const patient = await prisma.patient.findUnique({
+      where: { contactNo },
+    });
+
+    if (!patient) {
+      return res.status(404).json({ error: "Patient not found" });
+    }
+
+    const otp = generateOtp();
+    const otpExpiry = dayjs().add(5, "minute").toDate();
+
+    await prisma.patient.update({
+      where: { contactNo },
+      data: { otp, otpExpiry },
+    });
+
+    await sendOtpSms(contactNo, otp);
+
+    return res.json({
+      message: "OTP resent successfully",
+      contactNo,
+      otp:otp
+    });
+  } catch (error) {
+    console.error("Error resending OTP:", error);
+    return res.status(500).json({ error: "Failed to resend OTP" });
+  }
+};
+
 
 // UPDATE PROFILE
 export const updateProfile = async (req, res) => {
@@ -375,7 +408,21 @@ export const deleteFamilyMember = async (req, res) => {
 
 // LOGOUT (just placeholder, no session handling yet)
 export const logout = async (req, res) => {
-  res.json({ message: "Logged out successfully" });
+  try {
+    const { fcmToken } = req.body;
+
+    if (!fcmToken) {
+      return res.status(400).json({ error: "FCM token required" });
+    }
+
+    await prisma.patientDevice.delete({
+      where: { fcmToken },
+    });
+
+    return res.json({ message: "Logged out successfully" });
+  } catch (err) {
+    return res.status(500).json({ error: "Logout failed" });
+  }
 };
 
 // UPDATE STATUS

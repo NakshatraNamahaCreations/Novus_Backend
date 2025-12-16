@@ -7,13 +7,15 @@ import {
   checkoutCart,
   deleteCartCompletely,
   deleteAllItemsByPatient,
-  updateMemberSelection
+  updateMemberSelection,
+  getAllCarts
 } from "./cart.controller.js";
 
 const router = Router();
 
 // 🛒 Add item
 router.post("/add", addToCart);
+router.get("/", getAllCarts);
 router.put("/member/select", updateMemberSelection);
 
 

@@ -8,7 +8,8 @@ import {
   deleteNotification,
   sendNotificationNow,
   duplicateNotification,
-  getNotificationStats
+  getNotificationStats,
+  resendNotification
 } from './notification.controller.js';
 
 const router = express.Router();
@@ -36,5 +37,6 @@ router.post('/:id/send', sendNotificationNow);
 
 // POST /api/notifications/:id/duplicate - Duplicate notification
 router.post('/:id/duplicate', duplicateNotification);
+router.post('/:id/resend', resendNotification);
 
 export default router;

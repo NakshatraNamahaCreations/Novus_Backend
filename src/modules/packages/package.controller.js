@@ -1,9 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
-import csv from 'csv-parser';
-import { Readable } from 'stream';
-import fs from 'fs';
-import path from'path' ;
+import csv from "csv-parser";
+import { Readable } from "stream";
+import fs from "fs";
+import path from "path";
 
 const prisma = new PrismaClient();
 
@@ -33,7 +33,7 @@ export const addTest = async (req, res) => {
       gender,
       description,
       contains,
-   
+
       preparations,
       sampleRequired,
       testType,
@@ -42,9 +42,11 @@ export const addTest = async (req, res) => {
       reportWithin,
       reportUnit,
       showIn,
-      title,
-      subtitle
+      alsoKnowAs,
+      spotlight
     } = req.body;
+
+
 
     // Upload image (optional)
     let imgUrl = null;
@@ -57,7 +59,11 @@ export const addTest = async (req, res) => {
     const finalDiscount = discount ? parseFloat(discount) : 0;
 
     // Step 1: calculate discounted or input offer price
-    const calculatedOffer = calculateOfferPrice(actual, finalDiscount, offerPrice);
+    const calculatedOffer = calculateOfferPrice(
+      actual,
+      finalDiscount,
+      offerPrice
+    );
 
     // Step 2: round to nearest 50
     const finalOfferPrice = roundLabPrice(calculatedOffer);
@@ -65,9 +71,10 @@ export const addTest = async (req, res) => {
     // Parse cityWisePrice (optional)
     let parsedCityWisePrice = null;
     if (cityWisePrice) {
-      parsedCityWisePrice = typeof cityWisePrice === "string"
-        ? JSON.parse(cityWisePrice)
-        : cityWisePrice;
+      parsedCityWisePrice =
+        typeof cityWisePrice === "string"
+          ? JSON.parse(cityWisePrice)
+          : cityWisePrice;
     }
 
     // Validate category
@@ -87,19 +94,31 @@ export const addTest = async (req, res) => {
       }
     }
 
+    // --- SPOTLIGHT NORMALIZATION ---
+let finalSpotlight = false; // default
+
+if (spotlight !== undefined) {
+  if (typeof spotlight === "boolean") {
+    finalSpotlight = spotlight;
+  } else if (typeof spotlight === "string") {
+    finalSpotlight = spotlight === "true";
+  }
+}
+
+
     // Create Test
     const test = await prisma.test.create({
       data: {
         name,
         actualPrice: actual,
-        offerPrice: finalOfferPrice,   // 👈 FINAL PRICE AFTER ROUNDING
+        offerPrice: finalOfferPrice, // 👈 FINAL PRICE AFTER ROUNDING
         discount: finalDiscount,
         cityWisePrice: parsedCityWisePrice,
         gender,
         imgUrl,
         description,
         contains,
-    
+
         preparations,
         sampleRequired,
         testType,
@@ -108,19 +127,18 @@ export const addTest = async (req, res) => {
         reportWithin: Number(reportWithin),
         reportUnit,
         showIn,
-        title,
-        subtitle
+        alsoKnowAs,
+      spotlight: finalSpotlight
+
       },
     });
 
     res.status(201).json(test);
-
   } catch (error) {
     console.error("Error creating test:", error);
     res.status(500).json({ error: "Failed to create test" });
   }
 };
-
 
 export const getAllTests = async (req, res) => {
   try {
@@ -130,7 +148,7 @@ export const getAllTests = async (req, res) => {
       search = "",
       categoryId,
       subCategoryId,
-      testType
+      testType,
     } = req.query;
 
     page = Number(page);
@@ -150,6 +168,7 @@ export const getAllTests = async (req, res) => {
     if (subCategoryId) filter.subCategoryId = Number(subCategoryId);
     if (testType) filter.testType = testType;
 
+    console.log("filter", filter);
     // TOTAL COUNT
     const total = await prisma.test.count({
       where: filter,
@@ -160,16 +179,16 @@ export const getAllTests = async (req, res) => {
       where: filter,
       include: {
         category: {
-          select:{
-            id:true,
-            name:true,
-            type:true
-          }
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
         },
         subCategory: true,
-         _count: {
+        _count: {
           select: {
-            parameters: true,   // returns how many parameters the test has
+            parameters: true, // returns how many parameters the test has
           },
         },
       },
@@ -189,13 +208,95 @@ export const getAllTests = async (req, res) => {
       totalPages: Math.ceil(total / limit),
       data: tests,
     });
-
   } catch (error) {
     console.error("Error fetching tests:", error);
     res.status(500).json({ error: "Failed to fetch tests" });
   }
 };
 
+export const getSpotlightTests = async (req, res) => {
+  try {
+    let {
+      page = 1,
+      limit = 10,
+      search = "",
+      categoryId,
+      subCategoryId,
+      testType,
+    } = req.query;
+
+    page = Number(page);
+    limit = Number(limit);
+
+    /* -------------------------------------------
+       BUILD FILTER (SPOTLIGHT ONLY)
+    -------------------------------------------- */
+    const filter = {
+      spotlight: true // ⭐ IMPORTANT
+    };
+
+    if (search.trim() !== "") {
+      filter.name = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    if (categoryId) filter.categoryId = Number(categoryId);
+    if (subCategoryId) filter.subCategoryId = Number(subCategoryId);
+    if (testType) filter.testType = testType;
+
+    /* -------------------------------------------
+       TOTAL COUNT
+    -------------------------------------------- */
+    const total = await prisma.test.count({
+      where: filter,
+    });
+
+    /* -------------------------------------------
+       FETCH DATA
+    -------------------------------------------- */
+    const tests = await prisma.test.findMany({
+      where: filter,
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+        subCategory: true,
+        _count: {
+          select: {
+            parameters: true,
+          },
+        },
+      },
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    /* -------------------------------------------
+       RESPONSE
+    -------------------------------------------- */
+    return res.json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: tests,
+    });
+
+  } catch (error) {
+    console.error("Error fetching spotlight tests:", error);
+    return res.status(500).json({ error: "Failed to fetch spotlight tests" });
+  }
+};
 
 export const searchTestsGrouped = async (req, res) => {
   try {
@@ -255,7 +356,6 @@ export const searchTestsGrouped = async (req, res) => {
       success: true,
       data: grouped,
     });
-
   } catch (error) {
     console.error("Error grouping tests:", error);
     return res.status(500).json({
@@ -264,9 +364,6 @@ export const searchTestsGrouped = async (req, res) => {
     });
   }
 };
-
-
-
 
 export const getTestById = async (req, res) => {
   try {
@@ -281,11 +378,9 @@ export const getTestById = async (req, res) => {
 
       include: {
         category: {
-         select:{
-          name:true,
-
-         }
-          
+          select: {
+            name: true,
+          },
         },
         subCategory: true,
 
@@ -294,28 +389,24 @@ export const getTestById = async (req, res) => {
           orderBy: { order: "asc" },
           include: {
             ranges: {
-              select:{
-                id:true,
-                lowerLimit:true,
-                upperLimit:true,
-                criticalLow:true,
-                criticalHigh:true,
+              select: {
+                id: true,
+                lowerLimit: true,
+                upperLimit: true,
+                criticalLow: true,
+                criticalHigh: true,
 
-                referenceRange:true,
-                gender:true,
-                normalValueHtml:true,
-                specialConditionHtml:true
-
-
-
-              }
+                referenceRange: true,
+                gender: true,
+                normalValueHtml: true,
+                specialConditionHtml: true,
+              },
             },
-           
           },
         },
-         _count: {
+        _count: {
           select: {
-            parameters: true,   // returns how many parameters the test has
+            parameters: true, // returns how many parameters the test has
           },
         },
       },
@@ -326,13 +417,11 @@ export const getTestById = async (req, res) => {
     }
 
     res.json(test);
-
   } catch (error) {
     console.error("Error fetching test:", error);
     res.status(500).json({ error: "Failed to fetch test" });
   }
 };
-
 
 export const updateTest = async (req, res) => {
   try {
@@ -347,17 +436,17 @@ export const updateTest = async (req, res) => {
       gender,
       description,
       contains,
-
+    spotlight,
       preparations,
       sampleRequired,
       testType,
       categoryId,
       subCategoryId,
       showIn,
-      title,
-      subtitle
+      alsoKnowAs,
     } = req.body;
 
+    console.log("spotlight",spotlight)
     const existing = await prisma.test.findUnique({
       where: { id: Number(id) },
     });
@@ -379,7 +468,11 @@ export const updateTest = async (req, res) => {
     const finalDiscount = discount ? parseFloat(discount) : existing.discount;
 
     // Step 1: calculate discount/applied price
-    const calculatedOffer = calculateOfferPrice(actual, finalDiscount, offerPrice);
+    const calculatedOffer = calculateOfferPrice(
+      actual,
+      finalDiscount,
+      offerPrice
+    );
 
     // Step 2: round to nearest 50
     const finalOfferPrice = roundLabPrice(calculatedOffer);
@@ -387,9 +480,10 @@ export const updateTest = async (req, res) => {
     // --- CITY WISE PRICE ---
     let parsedCityWisePrice = existing.cityWisePrice;
     if (cityWisePrice) {
-      parsedCityWisePrice = typeof cityWisePrice === "string"
-        ? JSON.parse(cityWisePrice)
-        : cityWisePrice;
+      parsedCityWisePrice =
+        typeof cityWisePrice === "string"
+          ? JSON.parse(cityWisePrice)
+          : cityWisePrice;
     }
 
     // --- CATEGORY VALIDATION ---
@@ -398,7 +492,8 @@ export const updateTest = async (req, res) => {
       const category = await prisma.category.findUnique({
         where: { id: Number(categoryId) },
       });
-      if (!category) return res.status(400).json({ error: "Invalid categoryId" });
+      if (!category)
+        return res.status(400).json({ error: "Invalid categoryId" });
       finalCategoryId = category.id;
     }
 
@@ -408,9 +503,22 @@ export const updateTest = async (req, res) => {
       const subCategory = await prisma.subCategory.findUnique({
         where: { id: Number(subCategoryId) },
       });
-      if (!subCategory) return res.status(400).json({ error: "Invalid subCategoryId" });
+      if (!subCategory)
+        return res.status(400).json({ error: "Invalid subCategoryId" });
       finalSubCategoryId = subCategory.id;
     }
+
+    // --- SPOTLIGHT NORMALIZATION ---
+let finalSpotlight = existing.spotlight;
+
+if (spotlight !== undefined) {
+  if (typeof spotlight === "boolean") {
+    finalSpotlight = spotlight;
+  } else if (typeof spotlight === "string") {
+    finalSpotlight = spotlight === "true";
+  }
+}
+
 
     // --- UPDATE TEST ---
     const updated = await prisma.test.update({
@@ -418,27 +526,27 @@ export const updateTest = async (req, res) => {
       data: {
         name: name || existing.name,
         actualPrice: actual,
-        offerPrice: finalOfferPrice,  // ← final rounded price
+        offerPrice: finalOfferPrice, // ← final rounded price
         discount: finalDiscount,
         cityWisePrice: parsedCityWisePrice,
         gender: gender || existing.gender,
         imgUrl,
         description: description || existing.description,
         contains: contains || existing.contains,
-       
+
         preparations: preparations || existing.preparations,
         sampleRequired: sampleRequired || existing.sampleRequired,
         testType: testType || existing.testType,
         showIn: showIn || existing.showIn,
-        title: title || existing.title,
-        subtitle: subtitle || existing.subtitle,
+        alsoKnowAs: alsoKnowAs || existing.alsoKnowAs,
+     spotlight: finalSpotlight,
+
         categoryId: finalCategoryId,
         subCategoryId: finalSubCategoryId,
       },
     });
 
     res.json(updated);
-
   } catch (error) {
     console.error("Error updating test:", error);
     res.status(500).json({ error: "Failed to update test" });
@@ -453,8 +561,7 @@ export const deleteTest = async (req, res) => {
       where: { id: Number(id) },
     });
 
-    if (!existing)
-      return res.status(404).json({ error: "Test not found" });
+    if (!existing) return res.status(404).json({ error: "Test not found" });
 
     if (existing.imgUrl) {
       await deleteFromS3(existing.imgUrl);
@@ -471,7 +578,6 @@ export const deleteTest = async (req, res) => {
   }
 };
 
-
 export const getTestsByCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
@@ -481,18 +587,18 @@ export const getTestsByCategory = async (req, res) => {
 
       include: {
         category: {
-          select:{
-            id:true,
-            name:true,
-            type:true
-          }
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
         },
         subCategory: true,
 
         // ⭐ RETURN NUMBER OF PARAMETERS
         _count: {
           select: {
-            parameters: true,   // returns how many parameters the test has
+            parameters: true, // returns how many parameters the test has
           },
         },
       },
@@ -504,8 +610,6 @@ export const getTestsByCategory = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch tests by category" });
   }
 };
-
-
 
 export const getTestsBySubCategory = async (req, res) => {
   try {
@@ -523,8 +627,6 @@ export const getTestsBySubCategory = async (req, res) => {
   }
 };
 
-
-
 export const getTestsByTestType = async (req, res) => {
   try {
     const { testType } = req.params;
@@ -541,9 +643,8 @@ export const getTestsByTestType = async (req, res) => {
   }
 };
 
-
 // Download template
- export const downloadTemplate = async (req, res) => {
+export const downloadTemplate = async (req, res) => {
   try {
     // Create CSV template content
     const templateData = `name,description,actualPrice,offerPrice,discount,reportWithin,reportUnit,testType,categoryId,subCategoryId,gender,sampleRequired,preparations,contains,title,subtitle,status,imgUrl
@@ -552,26 +653,29 @@ Complete Blood Count,Complete blood count test,800,600,25,6,hours,Pathology,15,,
 Liver Function Test,Liver function test panel,1500,1200,20,24,hours,Pathology,17,,both,Blood sample,Fasting required,10 parameters,Liver Profile,Liver health check,active,
 Kidney Function Test,Kidney function tests,1000,800,20,24,hours,Pathology,18,,both,Blood sample,Fasting required,8 parameters,Kidney Profile,Kidney health check,active,`;
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=test_bulk_upload_template.csv');
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=test_bulk_upload_template.csv"
+    );
     res.send(templateData);
   } catch (error) {
-    console.error('Error generating template:', error);
-    res.status(500).json({ 
+    console.error("Error generating template:", error);
+    res.status(500).json({
       success: false,
-      error: 'Failed to generate template',
-      message: error.message 
+      error: "Failed to generate template",
+      message: error.message,
     });
   }
 };
 
 // Bulk upload tests
- export const bulkUpload = async (req, res) => {
+export const bulkUpload = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        error: 'No file uploaded' 
+        error: "No file uploaded",
       });
     }
 
@@ -586,13 +690,19 @@ Kidney Function Test,Kidney function tests,1000,800,20,24,hours,Pathology,18,,bo
     await new Promise((resolve, reject) => {
       stream
         .pipe(csv())
-        .on('data', async (row) => {
+        .on("data", async (row) => {
           try {
             // Validate required fields
-            if (!row.name || !row.actualPrice || !row.testType || !row.categoryId) {
+            if (
+              !row.name ||
+              !row.actualPrice ||
+              !row.testType ||
+              !row.categoryId
+            ) {
               errors.push({
                 row,
-                error: 'Missing required fields: name, actualPrice, testType, or categoryId'
+                error:
+                  "Missing required fields: name, actualPrice, testType, or categoryId",
               });
               failedCount++;
               return;
@@ -603,7 +713,7 @@ Kidney Function Test,Kidney function tests,1000,800,20,24,hours,Pathology,18,,bo
             if (isNaN(actualPrice) || actualPrice <= 0) {
               errors.push({
                 row,
-                error: 'Invalid actualPrice'
+                error: "Invalid actualPrice",
               });
               failedCount++;
               return;
@@ -613,7 +723,7 @@ Kidney Function Test,Kidney function tests,1000,800,20,24,hours,Pathology,18,,bo
             if (isNaN(categoryId) || categoryId <= 0) {
               errors.push({
                 row,
-                error: 'Invalid categoryId'
+                error: "Invalid categoryId",
               });
               failedCount++;
               return;
@@ -621,13 +731,13 @@ Kidney Function Test,Kidney function tests,1000,800,20,24,hours,Pathology,18,,bo
 
             // Check if category exists
             const categoryExists = await prisma.category.findUnique({
-              where: { id: categoryId }
+              where: { id: categoryId },
             });
 
             if (!categoryExists) {
               errors.push({
                 row,
-                error: `Category with ID ${categoryId} does not exist`
+                error: `Category with ID ${categoryId} does not exist`,
               });
               failedCount++;
               return;
@@ -641,26 +751,28 @@ Kidney Function Test,Kidney function tests,1000,800,20,24,hours,Pathology,18,,bo
               offerPrice: row.offerPrice ? parseFloat(row.offerPrice) : null,
               discount: row.discount ? parseFloat(row.discount) : null,
               reportWithin: parseInt(row.reportWithin) || 24,
-              reportUnit: row.reportUnit || 'hours',
+              reportUnit: row.reportUnit || "hours",
               testType: row.testType,
               categoryId: categoryId,
-              subCategoryId: row.subCategoryId ? parseInt(row.subCategoryId) : null,
-              gender: row.gender || 'both',
+              subCategoryId: row.subCategoryId
+                ? parseInt(row.subCategoryId)
+                : null,
+              gender: row.gender || "both",
               sampleRequired: row.sampleRequired || null,
               preparations: row.preparations || null,
               contains: row.contains || null,
               title: row.title || null,
               subtitle: row.subtitle || null,
-              status: row.status || 'active',
-              imgUrl: row.imgUrl || null
+              status: row.status || "active",
+              imgUrl: row.imgUrl || null,
             };
 
             // Check if test already exists by name and category
             const existingTest = await prisma.test.findFirst({
               where: {
                 name: testData.name,
-                categoryId: testData.categoryId
-              }
+                categoryId: testData.categoryId,
+              },
             });
 
             let savedTest;
@@ -668,41 +780,40 @@ Kidney Function Test,Kidney function tests,1000,800,20,24,hours,Pathology,18,,bo
               // Update existing test
               savedTest = await prisma.test.update({
                 where: { id: existingTest.id },
-                data: testData
+                data: testData,
               });
               results.push({
                 id: savedTest.id,
                 name: savedTest.name,
-                action: 'updated',
-                status: 'success'
+                action: "updated",
+                status: "success",
               });
             } else {
               // Create new test
               savedTest = await prisma.test.create({
-                data: testData
+                data: testData,
               });
               results.push({
                 id: savedTest.id,
                 name: savedTest.name,
-                action: 'created',
-                status: 'success'
+                action: "created",
+                status: "success",
               });
             }
             successCount++;
-
           } catch (error) {
-            console.error('Error processing row:', error);
+            console.error("Error processing row:", error);
             errors.push({
               row,
-              error: error.message
+              error: error.message,
             });
             failedCount++;
           }
         })
-        .on('end', () => {
+        .on("end", () => {
           resolve();
         })
-        .on('error', (error) => {
+        .on("error", (error) => {
           reject(error);
         });
     });
@@ -714,15 +825,14 @@ Kidney Function Test,Kidney function tests,1000,800,20,24,hours,Pathology,18,,bo
       failedCount,
       total: successCount + failedCount,
       results: results.slice(0, 50), // Limit results to 50
-      errors: errors.slice(0, 50) // Limit errors to 50
+      errors: errors.slice(0, 50), // Limit errors to 50
     });
-
   } catch (error) {
-    console.error('Bulk upload error:', error);
-    res.status(500).json({ 
+    console.error("Bulk upload error:", error);
+    res.status(500).json({
       success: false,
-      error: 'Failed to process bulk upload',
-      message: error.message 
+      error: "Failed to process bulk upload",
+      message: error.message,
     });
   }
 };
@@ -733,16 +843,16 @@ export const simpleBulkUpload = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        error: 'No file uploaded'
+        error: "No file uploaded",
       });
     }
 
     const fileContent = req.file.buffer.toString();
-    const lines = fileContent.split('\n').filter(line => line.trim() !== '');
-    
+    const lines = fileContent.split("\n").filter((line) => line.trim() !== "");
+
     // Skip header row
     const dataRows = lines.slice(1);
-    
+
     const results = [];
     const errors = [];
     let successCount = 0;
@@ -751,39 +861,44 @@ export const simpleBulkUpload = async (req, res) => {
     for (let i = 0; i < dataRows.length; i++) {
       try {
         const row = dataRows[i];
-        const columns = row.split(',').map(col => col.trim());
-        
+        const columns = row.split(",").map((col) => col.trim());
+
         // Skip empty rows
         if (columns.length < 3 || !columns[0]) continue;
 
         // Extract data (adjust indices based on your CSV format)
         const testData = {
-          name: columns[0] || 'Unnamed Test',
+          name: columns[0] || "Unnamed Test",
           description: columns[1] || null,
           actualPrice: parseFloat(columns[2]) || 0,
           offerPrice: columns[3] ? parseFloat(columns[3]) : null,
           discount: columns[4] ? parseFloat(columns[4]) : null,
           reportWithin: parseInt(columns[5]) || 24,
-          reportUnit: columns[6] || 'hours',
-          testType: columns[7] || 'Pathology',
+          reportUnit: columns[6] || "hours",
+          testType: columns[7] || "Pathology",
           categoryId: columns[8] ? parseInt(columns[8]) : null,
           subCategoryId: columns[9] ? parseInt(columns[9]) : null,
-          gender: columns[10] || 'both',
+          gender: columns[10] || "both",
           sampleRequired: columns[11] || null,
           preparations: columns[12] || null,
           contains: columns[13] || null,
           title: columns[14] || null,
           subtitle: columns[15] || null,
-          status: columns[16] || 'active',
-          imgUrl: columns[17] || null
+          status: columns[16] || "active",
+          imgUrl: columns[17] || null,
         };
 
         // Validate required fields
-        if (!testData.name || !testData.actualPrice || !testData.testType || !testData.categoryId) {
+        if (
+          !testData.name ||
+          !testData.actualPrice ||
+          !testData.testType ||
+          !testData.categoryId
+        ) {
           errors.push({
             row: i + 2,
-            error: 'Missing required fields',
-            data: testData
+            error: "Missing required fields",
+            data: testData,
           });
           failedCount++;
           continue;
@@ -792,14 +907,14 @@ export const simpleBulkUpload = async (req, res) => {
         // Check if category exists
         if (testData.categoryId) {
           const categoryExists = await prisma.category.findUnique({
-            where: { id: testData.categoryId }
+            where: { id: testData.categoryId },
           });
-          
+
           if (!categoryExists) {
             errors.push({
               row: i + 2,
               error: `Category ID ${testData.categoryId} not found`,
-              data: testData
+              data: testData,
             });
             failedCount++;
             continue;
@@ -810,8 +925,8 @@ export const simpleBulkUpload = async (req, res) => {
         const existingTest = await prisma.test.findFirst({
           where: {
             name: testData.name,
-            categoryId: testData.categoryId
-          }
+            categoryId: testData.categoryId,
+          },
         });
 
         let savedTest;
@@ -819,27 +934,26 @@ export const simpleBulkUpload = async (req, res) => {
           // Update existing
           savedTest = await prisma.test.update({
             where: { id: existingTest.id },
-            data: testData
+            data: testData,
           });
         } else {
           // Create new
           savedTest = await prisma.test.create({
-            data: testData
+            data: testData,
           });
         }
 
         results.push({
           id: savedTest.id,
           name: savedTest.name,
-          status: 'success'
+          status: "success",
         });
         successCount++;
-
       } catch (error) {
         errors.push({
           row: i + 2,
           error: error.message,
-          rawData: dataRows[i]
+          rawData: dataRows[i],
         });
         failedCount++;
       }
@@ -852,42 +966,41 @@ export const simpleBulkUpload = async (req, res) => {
       failedCount,
       total: dataRows.length,
       results: results.slice(0, 20),
-      errors: errors.slice(0, 20)
+      errors: errors.slice(0, 20),
     });
-
   } catch (error) {
-    console.error('Simple bulk upload error:', error);
+    console.error("Simple bulk upload error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to process file',
-      message: error.message
+      error: "Failed to process file",
+      message: error.message,
     });
   }
 };
 
 // Get categories for template
- export const getCategoriesForTemplate = async (req, res) => {
+export const getCategoriesForTemplate = async (req, res) => {
   try {
     const categories = await prisma.category.findMany({
       select: {
         id: true,
         name: true,
-        type: true
+        type: true,
       },
       orderBy: {
-        name: 'asc'
-      }
+        name: "asc",
+      },
     });
 
     res.json({
       success: true,
-      data: categories
+      data: categories,
     });
   } catch (error) {
-    console.error('Error fetching categories:', error);
+    console.error("Error fetching categories:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch categories'
+      error: "Failed to fetch categories",
     });
   }
 };
@@ -898,55 +1011,54 @@ export const validateBulkUpload = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        error: 'No file uploaded'
+        error: "No file uploaded",
       });
     }
 
     const fileContent = req.file.buffer.toString();
-    const lines = fileContent.split('\n');
-    
+    const lines = fileContent.split("\n");
+
     const validationResults = {
       totalRows: lines.length - 1, // Exclude header
       validRows: 0,
       invalidRows: 0,
       errors: [],
-      sampleData: []
+      sampleData: [],
     };
 
     // Validate header
-    const header = lines[0]?.split(',') || [];
-    const requiredHeaders = ['name', 'actualPrice', 'testType', 'categoryId'];
-    const missingHeaders = requiredHeaders.filter(h => !header.includes(h));
-    
+    const header = lines[0]?.split(",") || [];
+    const requiredHeaders = ["name", "actualPrice", "testType", "categoryId"];
+    const missingHeaders = requiredHeaders.filter((h) => !header.includes(h));
+
     if (missingHeaders.length > 0) {
       validationResults.errors.push({
-        type: 'header',
-        message: `Missing required headers: ${missingHeaders.join(', ')}`
+        type: "header",
+        message: `Missing required headers: ${missingHeaders.join(", ")}`,
       });
     }
 
     // Check first few rows for sample data
     for (let i = 1; i < Math.min(5, lines.length); i++) {
       if (lines[i].trim()) {
-        const columns = lines[i].split(',').map(col => col.trim());
+        const columns = lines[i].split(",").map((col) => col.trim());
         validationResults.sampleData.push({
           row: i + 1,
-          data: columns
+          data: columns,
         });
       }
     }
 
     res.json({
       success: true,
-      data: validationResults
+      data: validationResults,
     });
-
   } catch (error) {
-    console.error('Validation error:', error);
+    console.error("Validation error:", error);
     res.status(500).json({
       success: false,
-      error: 'Validation failed',
-      message: error.message
+      error: "Validation failed",
+      message: error.message,
     });
   }
 };
@@ -959,25 +1071,23 @@ export const getHomeMostBooked = async (req, res) => {
         _count: {
           select: {
             orderMemberPackages: true,
-            parameters: true
-          }
-        }
+            parameters: true,
+          },
+        },
       },
 
       orderBy: {
         orderMemberPackages: {
-          _count: "desc"
-        }
+          _count: "desc",
+        },
       },
 
-      take: 10
+      take: 10,
     });
 
     res.json({ success: true, data: tests });
-
   } catch (err) {
     console.error("Error fetching most booked tests:", err);
     res.status(500).json({ error: "Failed to load most booked tests" });
   }
 };
-
