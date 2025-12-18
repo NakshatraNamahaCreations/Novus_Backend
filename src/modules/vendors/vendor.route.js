@@ -16,11 +16,12 @@ import {
   verifyOtp,
   addVendorEarning,
 } from "./vendor.controller.js";
+import { authenticateUser } from "../../middlewares/auth.js";
 
 const router = express.Router();
 
 // AUTH
-router.post("/register", registerVendor);
+router.post("/register",authenticateUser, registerVendor);
 
 router.post("/login", loginVendor);
 router.post("/logout", logoutVendor);

@@ -1,8 +1,8 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import crypto from 'crypto';
-import nodemailer from 'nodemailer'
+import crypto from "crypto";
+import nodemailer from "nodemailer";
 const JWT_SECRET = process.env.JWT_SECRET || "supersecret";
 const prisma = new PrismaClient();
 
@@ -11,10 +11,10 @@ export const createUser = async (req, res) => {
   try {
     const { name, email, phone, city, password, role, rights } = req.body;
 
-    console.log("rights",rights)
     // Check for existing user
     const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) return res.status(400).json({ error: "Email already exists" });
+    if (existing)
+      return res.status(400).json({ error: "Email already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -26,8 +26,7 @@ export const createUser = async (req, res) => {
         city,
         password: hashedPassword,
         role,
-  rights: typeof rights === "string" ? JSON.parse(rights) : rights || {},
-
+        rights: typeof rights === "string" ? JSON.parse(rights) : rights || {},
       },
     });
 
@@ -118,9 +117,21 @@ export const getUserById = async (req, res) => {
 export const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, phone, city, password, status, isActive, role, rights } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      city,
+      password,
+      status,
+      isActive,
+      role,
+      rights,
+    } = req.body;
 
-    const existing = await prisma.user.findUnique({ where: { id: Number(id) } });
+    const existing = await prisma.user.findUnique({
+      where: { id: Number(id) },
+    });
     if (!existing) return res.status(404).json({ error: "User not found" });
 
     let updatedPassword = existing.password;
@@ -137,7 +148,8 @@ export const updateUser = async (req, res) => {
         city,
         password: updatedPassword,
         status,
-        isActive: isActive !== undefined ? Boolean(isActive) : existing.isActive,
+        isActive:
+          isActive !== undefined ? Boolean(isActive) : existing.isActive,
         role,
         rights:
           typeof rights === "string"
@@ -158,7 +170,9 @@ export const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const existing = await prisma.user.findUnique({ where: { id: Number(id) } });
+    const existing = await prisma.user.findUnique({
+      where: { id: Number(id) },
+    });
     if (!existing) return res.status(404).json({ error: "User not found" });
 
     await prisma.user.delete({ where: { id: Number(id) } });
@@ -169,8 +183,6 @@ export const deleteUser = async (req, res) => {
     res.status(500).json({ error: "Failed to delete user" });
   }
 };
-
-
 
 export const loginUser = async (req, res) => {
   try {
@@ -230,7 +242,7 @@ export const logoutUser = async (req, res) => {
     if (req.user?.id) {
       await prisma.user.update({
         where: { id: req.user.id },
-        data: { isActive: false,status:"inactive" },
+        data: { isActive: false, status: "inactive" },
       });
     }
 
@@ -248,22 +260,21 @@ export const logoutUser = async (req, res) => {
   }
 };
 
-
-
 export const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
-    if (!email)
-      return res.status(400).json({ error: "Email is required" });
+    if (!email) return res.status(400).json({ error: "Email is required" });
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user)
-      return res.status(404).json({ error: "User not found" });
+    if (!user) return res.status(404).json({ error: "User not found" });
 
     // Generate secure random token
     const resetToken = crypto.randomBytes(32).toString("hex");
-    const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
     const tokenExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
     // Save token in DB
@@ -276,7 +287,9 @@ export const forgotPassword = async (req, res) => {
     });
 
     // Reset URL
-    const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password?token=${resetToken}`;
+    const resetUrl = `${
+      process.env.FRONTEND_URL || "http://localhost:5173"
+    }/reset-password?token=${resetToken}`;
 
     // ✉️ Configure Nodemailer transporter
     const transporter = nodemailer.createTransport({
@@ -321,7 +334,7 @@ export const forgotPassword = async (req, res) => {
     console.error("Error in forgotPassword:", error);
     res.status(500).json({ error: "Failed to send reset email" });
   }
-}
+};
 
 export const resetPassword = async (req, res) => {
   try {
@@ -360,12 +373,13 @@ export const resetPassword = async (req, res) => {
   }
 };
 
-
 export const changePassword = async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "Unauthorized. No token provided." });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized. No token provided." });
     }
 
     const token = authHeader.split(" ")[1];
@@ -416,15 +430,112 @@ export const changePassword = async (req, res) => {
   }
 };
 
+
+export const changePassword1 = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    console.log("userId",userId)
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        message: "All password fields are required",
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        message: "New password and confirm password do not match",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters long",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    const isMatch = await bcrypt.compare(
+      currentPassword,
+      user.password
+    );
+
+    if (!isMatch) {
+      return res.status(401).json({
+        message: "Current password is incorrect",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    res.json({ message: "Password changed successfully" });
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({ message: "Failed to change password" });
+  }
+};
+
+
 export const getCurrentUser = async (req, res) => {
   try {
     // assuming you use JWT or session middleware that attaches req.user
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { id: true, name: true, email: true,phone:true, role: true,rights:true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        rights: true,
+      },
     });
     res.json({ user });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch user info' });
+    res.status(500).json({ error: "Failed to fetch user info" });
+  }
+};
+
+export const updateCurrentUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name, phone } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Name is required" });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        name: name.trim(),
+        phone,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        rights: true,
+      },
+    });
+
+    res.json({
+      message: "Profile updated successfully",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    res.status(500).json({ message: "Failed to update profile" });
   }
 };

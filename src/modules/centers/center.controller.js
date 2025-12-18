@@ -65,6 +65,7 @@ export const createCenter = async (req, res) => {
     const center = await prisma.center.create({
       data: {
         name,
+        createdById:req.user.id,
         contactName,
         venue,
         address,

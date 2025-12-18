@@ -21,6 +21,7 @@ import {
   getOrdersExpiringSoon
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
+import { authenticateUser } from "../../middlewares/auth.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -35,7 +36,7 @@ router.post(
   createOrder
 );
 router.get("/", getAllOrders);
-router.post("/create-admin", createAdminOrder);
+router.post("/create-admin",authenticateUser, createAdminOrder);
 router.get("/order-reports", getOrderReports);
 router.get("/expiring", getOrdersExpiringSoon);
 

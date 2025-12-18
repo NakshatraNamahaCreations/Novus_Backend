@@ -62,6 +62,8 @@ export const bookSlot = async (slotId, orderDate) => {
   return { success: true };
 };
 
+
+
 export const createOrder = async (req, res) => {
   try {
     const {
@@ -345,6 +347,7 @@ export const createAdminOrder = async (req, res) => {
     // Only include relation connect blocks when values are present
     const dataToCreate = {
       orderNumber,
+      createdById:req.user.id,
       patient: { connect: { id: Number(patientId) } },
       orderType: registrationType ?? undefined,
       totalAmount: Number(total),

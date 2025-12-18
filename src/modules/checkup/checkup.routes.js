@@ -9,11 +9,12 @@ import {
   getHealthPackagesByCategory,
   getSpotlightHealthPackages
 } from "./checkup.controller.js";
+import { authenticateUser } from "../../middlewares/auth.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-router.post("/", upload.single("image"), addHealthPackage);
+router.post("/", upload.single("image"),authenticateUser, addHealthPackage);
 router.get("/", getAllHealthPackages);
 router.get("/spotlight", getSpotlightHealthPackages);
 

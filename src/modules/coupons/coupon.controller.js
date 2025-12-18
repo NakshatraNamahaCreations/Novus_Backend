@@ -59,6 +59,7 @@ export const createCoupon = async (req, res) => {
       data: {
         code: code.toUpperCase(),
         description,
+        createdById:req.user.id,
         discountType,
         discountValue: Number(discountValue),
         minOrderAmount: minOrderAmount ? Number(minOrderAmount) : null,

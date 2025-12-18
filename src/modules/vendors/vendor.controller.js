@@ -38,6 +38,7 @@ export const registerVendor = async (req, res) => {
     const vendor = await prisma.vendor.create({
       data: {
         name,
+         createdById: req.user.id,
         number,
         city,
         category,

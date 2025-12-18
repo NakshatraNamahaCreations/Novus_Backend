@@ -67,14 +67,21 @@ const app = express();
 app.use(cookieParser());
 app.use(express.json());
 app.use(helmet());
+
 app.use(
   cors({
-    origin: "http://localhost:4028",
+    origin: [
+      "http://localhost:4028",
+      "https://novushealth.in",
+      "https://api.novushealth.in",
+      "https://admin.novushealth.in",
+    ],
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
+     methods: ["GET", "POST", "PUT", "DELETE","PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
 
 app.use(express.urlencoded({ extended: true }));
 

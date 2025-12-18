@@ -106,10 +106,12 @@ if (spotlight !== undefined) {
 }
 
 
+
     // Create Test
     const test = await prisma.test.create({
       data: {
         name,
+       createdById: req.user.id,
         actualPrice: actual,
         offerPrice: finalOfferPrice, // 👈 FINAL PRICE AFTER ROUNDING
         discount: finalDiscount,

@@ -13,6 +13,7 @@ getCenterSlots,
 updateCenterSlot,
 deleteCenterSlot
 } from "./center.controller.js";
+import { authenticateUser } from "../../middlewares/auth.js";
 
 const router = express.Router();
 
@@ -20,7 +21,7 @@ const router = express.Router();
 router.get("/nearby", getNearbyCenters);
 
 // CREATE
-router.post("/", createCenter);
+router.post("/",authenticateUser, createCenter);
 router.post("/:id/categories", assignCategoriesToCenter);
 router.post("/:id/slots", createCenterSlot);
 router.get("/:id/slots", getCenterSlots);

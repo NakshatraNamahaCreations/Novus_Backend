@@ -94,6 +94,7 @@ export const addHealthPackage = async (req, res) => {
     const healthPackage = await prisma.healthPackage.create({
       data: {
         name,
+            createdById: req.user.id,
         description,
         imgUrl,
         actualPrice: actual,

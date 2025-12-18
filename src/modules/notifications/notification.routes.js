@@ -11,6 +11,7 @@ import {
   getNotificationStats,
   resendNotification
 } from './notification.controller.js';
+import { authenticateUser } from '../../middlewares/auth.js';
 
 const router = express.Router();
 
@@ -24,7 +25,7 @@ router.get('/stats', getNotificationStats);
 router.get('/:id', getNotificationById);
 
 // POST /api/notifications - Create new notification
-router.post('/', createNotification);
+router.post('/',authenticateUser, createNotification);
 
 // PUT /api/notifications/:id - Update notification
 router.put('/:id', updateNotification);

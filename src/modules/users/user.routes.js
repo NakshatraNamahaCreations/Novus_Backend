@@ -10,7 +10,9 @@ import {
   forgotPassword,
   resetPassword,
   changePassword,
-  getCurrentUser
+  changePassword1,
+  getCurrentUser,
+  updateCurrentUser
 } from "./user.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -27,7 +29,10 @@ router.post("/create", createUser);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.post("/change-password", changePassword); 
+router.post("/change-password1",authenticateUser, changePassword1); 
+
 router.get("/me", authenticateUser, getCurrentUser);
+router.put("/me", authenticateUser, updateCurrentUser);
 
 
 

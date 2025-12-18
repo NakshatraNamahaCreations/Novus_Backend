@@ -18,12 +18,13 @@ import {
   getHomeMostBooked,
   getSpotlightTests
 } from "./package.controller.js";
+import { authenticateUser } from "../../middlewares/auth.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 // CRUD
-router.post("/", upload.single("image"), addTest);
+router.post("/", upload.single("image"),authenticateUser, addTest);
 router.get("/search", searchTestsGrouped);
 router.get("/most-booked-tests", getHomeMostBooked);
 

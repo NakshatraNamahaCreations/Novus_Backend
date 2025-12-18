@@ -10,11 +10,12 @@ import {
   applyCoupon,
   toggleCouponStatus,
 } from './coupon.controller.js';
+import { authenticateUser } from '../../middlewares/auth.js';
 
 const router = express.Router();
 
 // Coupon management routes
-router.post('/', createCoupon);
+router.post('/',authenticateUser, createCoupon);
 router.get('/', getAllCoupons);
 router.get('/active', getActiveCouponsForPatient);
 router.get('/:id', getCouponById);
