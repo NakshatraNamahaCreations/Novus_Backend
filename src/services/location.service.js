@@ -1,11 +1,11 @@
 import redis from "../config/redis.js";
 
-
 /**
  * Broadcast new order to nearby vendors.
  */
 export async function broadcastNewOrder(io, order) {
   try {
+  
     const { address } = order;
     if (!address) return;
 
@@ -23,7 +23,10 @@ export async function broadcastNewOrder(io, order) {
           const vendorId = await redis.get(`socketVendor:${socketId}`);
 
           // skip rejected vendors
-          const rejected = await redis.sIsMember(`rejected:${orderId}`, vendorId);
+          const rejected = await redis.sIsMember(
+            `rejected:${orderId}`,
+            vendorId
+          );
           if (rejected) continue;
 
           io.to(socketId).emit("orderForPincode", order);
@@ -39,6 +42,8 @@ export async function broadcastNewOrder(io, order) {
       typeof address.longitude === "number"
     ) {
       const RADIUS_KM = order.radiusKm || 5;
+console.log(" slot: order.slot,",  order.slot,)
+
 
       const res = await redis.sendCommand([
         "GEORADIUS",
@@ -56,20 +61,22 @@ export async function broadcastNewOrder(io, order) {
           const distanceKm = parseFloat(item[1]);
 
           // ❌ skip rejected vendors
-          const rejected = await redis.sIsMember(`rejected:${orderId}`, vendorId);
+          const rejected = await redis.sIsMember(
+            `rejected:${orderId}`,
+            vendorId
+          );
           if (rejected) continue;
-
-   io.to(`vendor_${vendorId}`).emit("orderNearby", { 
-  orderId: order.id,
-  pincode: order.address.pincode,
-  latitude: order.address.latitude,
-  longitude: order.address.longitude,
-  slot: order.slot,
-  date: order.date,
-  testType: order.testType,
-  distanceKm
-});
-
+          io.to(`vendor_${vendorId}`).emit("orderNearby", {
+            
+            orderId: order.id,
+            pincode: order.address.pincode,
+            latitude: order.address.latitude,
+            longitude: order.address.longitude,
+            slot: order.slot || "9:00 pM",
+            date: order.date,
+            testType: order.testType,
+            distanceKm,
+          });
         }
       }
     }

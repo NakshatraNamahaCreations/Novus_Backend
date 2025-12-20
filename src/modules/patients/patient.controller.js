@@ -409,21 +409,29 @@ export const deleteFamilyMember = async (req, res) => {
 // LOGOUT (just placeholder, no session handling yet)
 export const logout = async (req, res) => {
   try {
-    const { fcmToken } = req.body;
+    const { id } = req.params;
 
-    if (!fcmToken) {
-      return res.status(400).json({ error: "FCM token required" });
+    if (!id) {
+      return res.status(400).json({ error: "patientId is required" });
     }
 
-    await prisma.patientDevice.delete({
-      where: { fcmToken },
+    const deleted = await prisma.patientDevice.deleteMany({
+      where: {
+        patientId: Number(id),
+      },
     });
 
-    return res.json({ message: "Logged out successfully" });
+    return res.json({
+      success: true,
+      message: "Logged out successfully from all devices",
+      devicesRemoved: deleted.count,
+    });
   } catch (err) {
+    console.error("Logout error:", err);
     return res.status(500).json({ error: "Logout failed" });
   }
 };
+
 
 // UPDATE STATUS
 export const updateStatus = async (req, res) => {

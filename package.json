@@ -4,7 +4,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon src/server.js"
+    "start": "nodemon src/server.js",
+    "worker:whatsapp": "nodemon src/queues/whatsapp.worker.js"
   },
   "author": "yogesh",
   "license": "ISC",
@@ -15,6 +16,7 @@
     "@socket.io/redis-adapter": "^8.3.0",
     "axios": "^1.13.2",
     "bcryptjs": "^3.0.2",
+    "bullmq": "^5.66.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
@@ -26,6 +28,7 @@
     "geolib": "^3.3.4",
     "google-auth-library": "^10.5.0",
     "helmet": "^8.1.0",
+    "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.2",
     "multer": "^2.0.2",
@@ -37,6 +40,7 @@
     "puppeteer": "^24.33.0",
     "rate-limiter-flexible": "^8.2.1",
     "redis": "^5.10.0",
+    "redlock": "^5.0.0-beta.2",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "stream": "^0.0.3",

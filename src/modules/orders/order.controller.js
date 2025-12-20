@@ -4,67 +4,20 @@ import locationService from "../location/location.service.js";
 import { broadcastNewOrder } from "../../services/location.service.js";
 import redis from "../../config/redis.js";
 import dayjs from "dayjs";
+import { bookSlotTx } from "../../utils/bookSlotTx.js";
+import { whatsappQueue } from "../../queues/whatsapp.queue.js";
+import { acquireLock } from "../../utils/redisLock.js";
 
 const prisma = new PrismaClient();
 
-export const bookSlot = async (slotId, orderDate) => {
-  // Ensure orderDate is a Date object
-  const dateObj = new Date(orderDate);
 
-  if (isNaN(dateObj)) {
-    throw new Error("Invalid orderDate format");
-  }
-
-  // Normalize date to remove time
-  const dateOnly = new Date(dateObj);
-  dateOnly.setHours(0, 0, 0, 0);
-
-  // 1. Fetch slot
-  const slot = await prisma.slot.findUnique({
-    where: { id: slotId },
-  });
-
-  if (!slot) throw new Error("Slot not found");
-
-  // 2. Find existing OrderSlot
-  let record = await prisma.orderSlot.findFirst({
-    where: {
-      slotId,
-      date: dateOnly,
-    },
-  });
-
-  // 3. Create new record if none exists
-  if (!record) {
-    await prisma.orderSlot.create({
-      data: {
-        slotId,
-        date: dateOnly,
-        count: 1,
-      },
-    });
-    return { success: true };
-  }
-
-  // 4. If full → error
-  if (record.count >= slot.capacity) {
-    throw new Error("Slot is already full");
-  }
-
-  // 5. Increment count
-  await prisma.orderSlot.update({
-    where: { id: record.id },
-    data: {
-      count: { increment: 1 },
-    },
-  });
-
-  return { success: true };
-};
-
+const formatTime = (date) =>
+  dayjs(date).format("hh:mm A");
 
 
 export const createOrder = async (req, res) => {
+  let lock;
+
   try {
     const {
       source,
@@ -74,7 +27,6 @@ export const createOrder = async (req, res) => {
       discount,
       finalAmount,
       testType,
-      slot,
       date,
       doctorId,
       isSelf,
@@ -86,67 +38,65 @@ export const createOrder = async (req, res) => {
       centerId,
     } = req.body;
 
-    if (!members || members.length === 0) {
-      return res.status(400).json({ error: "Members list is required" });
+    if (!members?.length) {
+      return res.status(400).json({ error: "Members required" });
     }
 
-    /* ---------------------------------------------
-       1️⃣ CHECK SLOT BEFORE ORDER CREATION
-    --------------------------------------------- */
-    try {
-      await bookSlot(slotId, date);
-    } catch (err) {
-      return res.status(400).json({
-        success: false,
-        message: err.message || "Slot full or invalid",
+    const orderDate = new Date(date);
+    if (isNaN(orderDate)) {
+      return res.status(400).json({ error: "Invalid date" });
+    }
+
+    /* 🔐 REDIS LOCK (slot + date) */
+    const lockKey = `lock:slot:${slotId}:${dayjs(orderDate).format(
+      "YYYY-MM-DD"
+    )}`;
+    lock = await acquireLock(lockKey);
+
+    /* 🧠 DB TRANSACTION */
+    const order = await prisma.$transaction(async (tx) => {
+      await bookSlotTx(tx, slotId, orderDate);
+
+      const createdOrder = await tx.order.create({
+        data: {
+          orderNumber: `ORD-${Date.now()}`,
+          source,
+          addressId,
+          patientId,
+          totalAmount,
+          discount,
+          finalAmount,
+          doctorId,
+          isSelf,
+          testType,
+          date: orderDate,
+          status: "pending",
+          paymentStatus: paymentStatus || "pending",
+          merchantOrderId,
+          isHomeSample,
+          centerId,
+          slotId,
+        },
       });
-    }
 
-    /* ---------------------------------------------
-       2️⃣ CREATE ORDER
-    --------------------------------------------- */
-    const order = await prisma.order.create({
-      data: {
-        orderNumber: "ORD-" + Date.now(),
-        source,
-        addressId,
-        patientId,
-        totalAmount,
-        discount,
-        finalAmount,
-        doctorId,
-        isSelf,
-        testType,
-        slot,
-        date: new Date(date),
-        status: "pending",
-        paymentStatus: paymentStatus || "pending",
-        merchantOrderId,
-        isHomeSample,
-        centerId,
-      },
+      await tx.payment.create({
+        data: {
+          orderId: createdOrder.id,
+          patientId,
+          paymentId: `PAY-${Date.now()}`,
+          paymentMethod: "UPI",
+          paymentMode: "ONLINE",
+          paymentStatus: "COMPLETED",
+          amount: finalAmount,
+          currency: "INR",
+          paymentDate: new Date(),
+        },
+      });
+
+      return createdOrder;
     });
 
-    const paymentId = `PAY-${Date.now()}-${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
-    await prisma.payment.create({
-      data: {
-        orderId: order.id,
-        patientId: patientId,
-        paymentId,
-
-        paymentMethod: "UPI",
-        paymentMode: "ONLINE",
-        paymentStatus: "COMPLETED",
-        amount: finalAmount,
-        currency: "INR",
-        paymentDate: new Date(),
-      },
-    });
-    /* ---------------------------------------------
-       3️⃣ ADD MEMBERS (packages + tests)
-    --------------------------------------------- */
+    /* 👥 MEMBERS (FAST BULK INSERT) */
     for (const m of members) {
       const orderMember = await prisma.orderMember.create({
         data: {
@@ -178,12 +128,16 @@ export const createOrder = async (req, res) => {
       }
     }
 
-    /* ---------------------------------------------
-       4️⃣ ADDRESS
-    --------------------------------------------- */
+     /*  SOCKET */
     const address = await prisma.address.findUnique({
       where: { id: addressId },
     });
+
+
+       const slotData = await prisma.slot.findUnique({
+      where: { id: slotId },
+    });
+
 
     if (!address) return res.status(400).json({ error: "Address not found" });
 
@@ -195,7 +149,7 @@ export const createOrder = async (req, res) => {
       pincode: address.pincode?.toString(),
       latitude: lat,
       longitude: lng,
-      slot,
+      slot: `${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`,
       date,
       testType,
       radiusKm: 5,
@@ -207,7 +161,7 @@ export const createOrder = async (req, res) => {
        ✔ Today’s Order Only
        ✔ testType MUST BE "Pathology"
     --------------------------------------------- */
-    const orderDate = new Date(date);
+  
     const today = new Date();
 
     const isToday =
@@ -219,10 +173,10 @@ export const createOrder = async (req, res) => {
 
     if (io && isToday && testType === "PATHOLOGY") {
 
-      console.log("today")
+     
       await broadcastNewOrder(io, {
         id: order.id,
-        slot,
+        slot:`${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`,
         date: orderDate,
         testType,
         address: {
@@ -236,29 +190,42 @@ export const createOrder = async (req, res) => {
       io.emit("orderCreatedServer", { orderId: order.id });
     }
 
-    /* ---------------------------------------------
-       6️⃣ SAVE IN REDIS
-    --------------------------------------------- */
+
+
+
+    /* 🟢 REDIS CACHE */
     await redis.hSet(`order:${order.id}`, {
       orderId: order.id.toString(),
-      pincode: orderForBroadcast.pincode || "",
-      latitude: lat.toString(),
-      longitude: lng.toString(),
-      slot: slot || "",
+      slotId: slotId.toString(),
       date: orderDate.toISOString(),
-      testType,
       status: "pending",
     });
 
-    return res.json({
+    /* 🚀 RESPOND IMMEDIATELY */
+    res.json({
       success: true,
-      message: "Order created successfully",
       orderId: order.id,
       orderNumber: order.orderNumber,
     });
+
+    /* 🟢 BACKGROUND: WhatsApp (enqueue minimal data only) */
+    await whatsappQueue.add(
+      "ORDER_CONFIRMED",
+      {
+        orderId: order.id,
+      },
+      {
+        jobId: `wa-order-${order.id}`,
+        removeOnComplete: true,
+      }
+    );
+
+   
   } catch (err) {
-    console.error("Order creation error:", err);
-    return res.status(500).json({ error: "Something went wrong" });
+    console.error("Create order error:", err);
+    res.status(500).json({ error: err.message || "Something went wrong" });
+  } finally {
+    if (lock?.release) await lock.release();
   }
 };
 
@@ -347,7 +314,7 @@ export const createAdminOrder = async (req, res) => {
     // Only include relation connect blocks when values are present
     const dataToCreate = {
       orderNumber,
-      createdById:req.user.id,
+      createdById: req.user.id,
       patient: { connect: { id: Number(patientId) } },
       orderType: registrationType ?? undefined,
       totalAmount: Number(total),
@@ -440,7 +407,6 @@ export const createAdminOrder = async (req, res) => {
   }
 };
 
-
 export const acceptOrderByVendor = async (req, res) => {
   try {
     const { orderId, vendorId } = req.body;
@@ -468,7 +434,9 @@ export const acceptOrderByVendor = async (req, res) => {
     });
 
     if (!orderDetails)
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
 
     if (orderDetails.vendorId)
       return res
@@ -588,8 +556,6 @@ export const acceptOrderByVendor = async (req, res) => {
   }
 };
 
-
-/* ------------------------- VENDOR ACCEPTS AND STARTS JOB ------------------------- */
 export const vendorStartJob = async (req, res) => {
   // NOTE: vendorId is pulled from the request body for this example
   try {
@@ -610,7 +576,7 @@ export const vendorStartJob = async (req, res) => {
       where: { id: orderIdNumber },
       data: {
         vendorId: vendorIdNumber,
-        status: "ASSIGNED", // Set initial assignment status
+        status: "on_the_way", // Set initial assignment status
       },
       select: { id: true, vendorId: true },
     });
@@ -898,7 +864,7 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
                     actualPrice: true,
                     offerPrice: true,
                     imgUrl: true,
-                    testType:true
+                    testType: true,
                   },
                 },
               },
@@ -933,6 +899,8 @@ export const getAllOrders = async (req, res) => {
       where.OR = [
         { orderNumber: { contains: search, mode: "insensitive" } },
         { trackingId: { contains: search, mode: "insensitive" } },
+        { source: { contains: search, mode: "insensitive" } },
+
         { patient: { fullName: { contains: search, mode: "insensitive" } } },
         { patient: { contactNo: { contains: search, mode: "insensitive" } } },
       ];
@@ -946,7 +914,26 @@ export const getAllOrders = async (req, res) => {
       where,
       skip,
       take: limit,
-      include: {
+
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        paymentStatus: true,
+        totalAmount: true,
+        finalAmount: true,
+        discount: true,
+        paymentMode: true,
+        date: true,
+        reportReady: true,
+        sampleCollected: true,
+        createdAt: true,
+        isSelf: true,
+        trackingId: true,
+        isHomeSample: true,
+        source: true,
+        isHomeSample: true,
+        // ✅ RELATIONS
         patient: {
           select: {
             id: true,
@@ -955,15 +942,33 @@ export const getAllOrders = async (req, res) => {
             contactNo: true,
           },
         },
+
         vendor: {
           select: {
             id: true,
             name: true,
             email: true,
-            // Remove contactNo since it doesn't exist in your model
+          },
+        },
+
+        slot: {
+          select: {
+            id: true,
+            name: true,
+            startTime: true,
+            endTime: true,
+          },
+        },
+        address: {
+          select: {
+            id: true,
+            address: true,
+            pincode: true,
+            city: true,
           },
         },
       },
+
       orderBy: { createdAt: "desc" },
     });
 
@@ -1055,66 +1060,65 @@ export const getOrderById = async (req, res) => {
         /* --------------------------------------------------------------
            🔥 Members + their tests + their packages
         -------------------------------------------------------------- */
-      orderMembers: {
-  include: {
-    patient: {
-      select: {
-        id: true,
-        fullName: true,
-        contactNo: true,
-        gender:true
-      },
-    },
-    orderMemberPackages: {
-      include: {
-        // Standalone test booking
-        test: {
-          select: {
-            id: true,
-            name: true,
-            actualPrice: true,
-            offerPrice: true,
-            discount: true,
-            testType: true,
-            sampleRequired: true,
-            preparations: true,
-          },
-        },
-
-        // Health checkup package booking
-        package: {
-          select: {
-            id: true,
-            name: true,
-            actualPrice: true,
-            offerPrice: true,
-            description: true,
-            imgUrl: true,
-            testType: true,
-            noOfParameter: true,
-
-            // ✅ THIS IS THE IMPORTANT PART
-            checkupPackages: {
+        orderMembers: {
+          include: {
+            patient: {
+              select: {
+                id: true,
+                fullName: true,
+                contactNo: true,
+                gender: true,
+              },
+            },
+            orderMemberPackages: {
               include: {
+                // Standalone test booking
                 test: {
                   select: {
                     id: true,
                     name: true,
-                    testType: true,
                     actualPrice: true,
                     offerPrice: true,
+                    discount: true,
+                    testType: true,
                     sampleRequired: true,
+                    preparations: true,
+                  },
+                },
+
+                // Health checkup package booking
+                package: {
+                  select: {
+                    id: true,
+                    name: true,
+                    actualPrice: true,
+                    offerPrice: true,
+                    description: true,
+                    imgUrl: true,
+                    testType: true,
+                    noOfParameter: true,
+
+                    // ✅ THIS IS THE IMPORTANT PART
+                    checkupPackages: {
+                      include: {
+                        test: {
+                          select: {
+                            id: true,
+                            name: true,
+                            testType: true,
+                            actualPrice: true,
+                            offerPrice: true,
+                            sampleRequired: true,
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
             },
           },
         },
-      },
-    },
-  },
-},
-
       },
     });
 
@@ -1142,13 +1146,8 @@ export const getOrderById = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      status,
-      paymentStatus,
-      sampleCollected,
-      reportReady,
-      reportUrl,
-    } = req.body;
+    const { status, paymentStatus, sampleCollected, reportReady, reportUrl } =
+      req.body;
 
     const order = await prisma.order.update({
       where: { id: Number(id) },
@@ -1156,7 +1155,8 @@ export const updateOrderStatus = async (req, res) => {
         ...(status && { status }),
         ...(paymentStatus && { paymentStatus }),
         ...(sampleCollected !== undefined && {
-          sampleCollected: sampleCollected === "true" || sampleCollected === true,
+          sampleCollected:
+            sampleCollected === "true" || sampleCollected === true,
         }),
         ...(reportReady !== undefined && {
           reportReady: reportReady === "true" || reportReady === true,
@@ -1170,7 +1170,6 @@ export const updateOrderStatus = async (req, res) => {
     res.status(500).json({ error: "Failed to update order" });
   }
 };
-
 
 export const updateAssignvendor = async (req, res) => {
   try {
@@ -1745,6 +1744,7 @@ export const addOrderPayment = async (req, res) => {
  * @route   GET /api/orders/:orderId/payments/summary
  * @access  Private (Admin/Patient/Vendor)
  */
+
 export const getOrderPaymentSummary = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -2020,23 +2020,23 @@ export const getOrdersExpiringSoon = async (req, res) => {
         address: true,
       },
       orderBy: {
-        date: 'asc', // Sort by date ascending
+        date: "asc", // Sort by date ascending
       },
       skip,
       take: limitNum,
     });
 
     // 3️⃣ Calculate time left for each order
-    const ordersWithTimeLeft = orders.map(order => {
+    const ordersWithTimeLeft = orders.map((order) => {
       const slotDateTime = dayjs(
         `${dayjs(order.date).format("YYYY-MM-DD")} ${order.slot}`,
         "YYYY-MM-DD hh:mm A"
       );
       const minsLeft = slotDateTime.diff(now, "minute");
-      
+
       return {
         ...order,
-        minsLeft
+        minsLeft,
       };
     });
 
@@ -2048,7 +2048,6 @@ export const getOrdersExpiringSoon = async (req, res) => {
       limit: limitNum,
       totalPages: Math.ceil(totalOrders / limitNum),
     });
-
   } catch (error) {
     console.error("Expiring orders error:", error);
     res.status(500).json({

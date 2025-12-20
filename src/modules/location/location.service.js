@@ -1,36 +1,33 @@
-const { PrismaClient } = require('@prisma/client');
-const geolib = require('geolib');
-const axios = require('axios');
+const { PrismaClient } = require("@prisma/client");
+const axios = require("axios");
 
 const prisma = new PrismaClient();
 
 class LocationService {
-  constructor() {
-    this.activeConnections = new Map();
-  }
+  // -----------------------------
+  // GOOGLE MAPS DISTANCE + ETA
+  // -----------------------------
+  async getRoadMetrics(from, to) {
+    const key = process.env.GOOGLE_MAPS_API_KEY;
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${from.latitude},${from.longitude}&destination=${to.latitude},${to.longitude}&key=${key}`;
 
-  // Helper: Get road distance and ETA using Google Maps Directions API
-  async getRoadMetrics(vendorLocation, userLocation) {
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY; // store securely
-    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${vendorLocation.latitude},${vendorLocation.longitude}&destination=${userLocation.latitude},${userLocation.longitude}&key=${apiKey}`;
-
-    const response = await axios.get(url);
-    const route = response.data.routes[0];
+    const res = await axios.get(url);
+    const route = res.data.routes?.[0];
     if (!route) return null;
 
-    const distance = route.legs[0].distance.value; // meters
-    const duration = route.legs[0].duration.value; // seconds
-
-    return { distance, duration };
+    return {
+      distance: route.legs[0].distance.value, // meters
+      duration: route.legs[0].duration.value, // seconds
+    };
   }
 
-  // Start tracking for an order
+  // -----------------------------
+  // START ORDER TRACKING
+  // -----------------------------
   async startOrderTracking(orderId, vendorId, userLatitude, userLongitude) {
     try {
-      const orderIdNumber = Number(orderId);
-
       const tracking = await prisma.orderTracking.upsert({
-        where: { orderId: orderIdNumber },
+        where: { orderId },
         update: {
           vendorId,
           userLatitude,
@@ -43,155 +40,132 @@ class LocationService {
           vendorPath: [],
         },
         create: {
-          orderId: orderIdNumber,
+          orderId,
           vendorId,
           userLatitude,
           userLongitude,
           isActive: true,
-        }
+          startTime: new Date(),
+          vendorPath: [],
+        },
       });
 
       await prisma.order.update({
-        where: { id: orderIdNumber },
-        data: { status: 'ON_THE_WAY' }
-      });
-
-      await prisma.vendor.update({
-        where: { id: vendorId },
-        data: { isOnline: true }
+        where: { id: orderId },
+        data: { status: "ON_THE_WAY" },
       });
 
       return tracking;
-    } catch (error) {
-      throw new Error(`Failed to start order tracking: ${error.message}`);
+    } catch (err) {
+      throw new Error("Failed to start tracking: " + err.message);
     }
   }
 
-  // Update vendor location
-  async updateVendorLocation(vendorId, latitude, longitude, orderId = null) {
-    try {
-      // Store vendor location history
-      await prisma.vendorLocation.create({
-        data: { vendorId, latitude, longitude }
-      });
-
-      // Update order tracking if applicable
-      if (orderId) {
-        const tracking = await prisma.orderTracking.findUnique({ where: { orderId } });
-
-        if (tracking && tracking.isActive) {
-          const vendorPath = tracking.vendorPath || [];
-          vendorPath.push({ latitude, longitude, timestamp: new Date() });
-
-          await prisma.orderTracking.update({
-            where: { orderId },
-            data: {
-              vendorLatitude: latitude,
-              vendorLongitude: longitude,
-              vendorPath
-            }
-          });
-
-          // Calculate and return progress metrics
-          return await this.calculateProgressMetrics(orderId);
-        }
-      }
-
-      return null;
-    } catch (error) {
-      throw new Error(`Failed to update vendor location: ${error.message}`);
-    }
-  }
-
-  // Calculate progress metrics
-  async calculateProgressMetrics(orderId) {
-    const tracking = await prisma.orderTracking.findUnique({
-      where: { orderId },
-      include: { order: true }
-    });
-
-    if (!tracking || !tracking.vendorLatitude) return null;
-
-    const vendorLocation = { latitude: tracking.vendorLatitude, longitude: tracking.vendorLongitude };
-    const userLocation = { latitude: tracking.userLatitude, longitude: tracking.userLongitude };
-
-    const roadMetrics = await this.getRoadMetrics(vendorLocation, userLocation);
-    if (!roadMetrics) return null;
-
-    let { distance, duration } = roadMetrics;
-
-    let initialDistance = distance;
-    if (tracking.vendorPath && tracking.vendorPath.length > 0) {
-      const firstLocation = tracking.vendorPath[0];
-      const initialRoute = await this.getRoadMetrics(firstLocation, userLocation);
-      if (initialRoute) initialDistance = initialRoute.distance;
-    }
-
-    const progress = Math.max(0, ((initialDistance - distance) / initialDistance) * 100);
-
-    return {
-      distanceRemaining: distance,
-      progress: Math.min(100, progress),
-      eta: Math.ceil(duration / 60), // minutes
-      vendorLocation,
-      userLocation
-    };
-  }
-
-  // Complete order tracking and remove data
-  async completeOrderTracking(orderId) {
-    try {
-      const tracking = await prisma.orderTracking.findUnique({ where: { orderId } });
-      if (!tracking) throw new Error("Order tracking not found");
-
-      const vendorId = tracking.vendorId;
-
-      await prisma.orderTracking.delete({ where: { orderId } });
-      await prisma.vendorLocation.deleteMany({ where: { vendorId } });
-
-      await prisma.order.update({ where: { id: orderId }, data: { status: "DELIVERED" } });
-
-      return true;
-    } catch (error) {
-      throw new Error(`Failed to complete order tracking: ${error.message}`);
-    }
-  }
-
-  async getOrderTracking(orderId) {
+  // -----------------------------
+  // UPDATE VENDOR LOCATION
+  // -----------------------------
+  async updateVendorLocation(vendorId, latitude, longitude, orderId, io) {
     try {
       const tracking = await prisma.orderTracking.findUnique({
         where: { orderId },
-        include: {
-          order: {
-            include: {
-              vendor: { include: { vendorProfile: true } },
-              address: true,
-              user: true
-            }
-          }
-        }
       });
 
-      if (!tracking) return null;
+      if (!tracking || !tracking.isActive) return null;
 
-      const metrics = await this.calculateProgressMetrics(orderId);
-      return { ...tracking, metrics };
-    } catch (error) {
-      throw new Error(`Failed to get order tracking: ${error.message}`);
+      // ✅ 1. Save history (append-only)
+      await prisma.vendorLocation.create({
+        data: {
+          vendorId,
+          orderId,
+          latitude,
+          longitude,
+        },
+      });
+
+      // ✅ 2. Update ONLY latest location
+      await prisma.orderTracking.update({
+        where: { orderId },
+        data: {
+          vendorLatitude: latitude,
+          vendorLongitude: longitude,
+        },
+      });
+
+      // ⏱ Throttle ETA (30 sec)
+      let metrics = null;
+      const now = Date.now();
+
+      if (now - new Date(tracking.lastEtaUpdate).getTime() > 30000) {
+        metrics = await this.calculateMetrics(orderId);
+        await prisma.orderTracking.update({
+          where: { orderId },
+          data: { lastEtaUpdate: new Date() },
+        });
+      }
+
+      // 📡 Socket update to customer
+      io?.to(`order_${orderId}`).emit("vendorLocationUpdate", {
+        orderId,
+        vendorLocation: { latitude, longitude },
+        metrics,
+      });
+
+      return metrics;
+    } catch (err) {
+      throw new Error("Location update failed: " + err.message);
     }
   }
 
-  async getVendorActiveDeliveries(vendorId) {
-    try {
-      const activeOrders = await prisma.order.findMany({
-        where: { vendorId, status: 'ON_THE_WAY' },
-        include: { orderTracking: true, address: true, user: true }
-      });
+  // -----------------------------
+  // CALCULATE PROGRESS + ETA
+  // -----------------------------
+  async calculateMetrics(orderId) {
+    const tracking = await prisma.orderTracking.findUnique({
+      where: { orderId },
+    });
 
-      return activeOrders;
-    } catch (error) {
-      throw new Error(`Failed to get active deliveries: ${error.message}`);
-    }
+    if (!tracking?.vendorLatitude) return null;
+
+    const from = {
+      latitude: tracking.vendorLatitude,
+      longitude: tracking.vendorLongitude,
+    };
+
+    const to = {
+      latitude: tracking.userLatitude,
+      longitude: tracking.userLongitude,
+    };
+
+    const metrics = await this.getRoadMetrics(from, to);
+    if (!metrics) return null;
+
+    return {
+      distanceRemaining: metrics.distance,
+      eta: Math.ceil(metrics.duration / 60),
+    };
+  }
+
+  // -----------------------------
+  // COMPLETE JOB
+  // -----------------------------
+  async completeOrderTracking(orderId, io) {
+    await prisma.orderTracking.update({
+      where: { orderId },
+      data: {
+        isActive: false,
+        endTime: new Date(),
+      },
+    });
+    await prisma.vendorLocation.deleteMany({
+      where: { orderId },
+    });
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { status: "completed" },
+    });
+
+    io?.to(`order_${orderId}`).emit("trackingCompleted", { orderId });
   }
 }
 

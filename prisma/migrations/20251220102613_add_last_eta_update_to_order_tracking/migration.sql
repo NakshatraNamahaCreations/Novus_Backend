@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "order_tracking" ADD COLUMN     "lastEtaUpdate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

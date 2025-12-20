@@ -631,7 +631,7 @@ model Order {
   paymentMode     String?
   status          String    @default("pending")
   testType        String?
-  slot            String?
+  // slot            String?
   date            DateTime
   documentImage   String?
   orderType       String?
@@ -647,6 +647,8 @@ model Order {
   couponId        Int?
   couponCode      String?
   discountAmount  Float?
+  slotId Int?
+  slot   Slot? @relation(fields: [slotId], references: [id])
 
   createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
@@ -1024,7 +1026,7 @@ model OrderTracking {
   isActive        Boolean   @default(true)
   startTime       DateTime  @default(now())
   endTime         DateTime?
-
+  lastEtaUpdate   DateTime @default(now()) 
   createdById Int? // ⭐ ADDED: Track who created the tracking
   createdBy   User? @relation(fields: [createdById], references: [id])
 
@@ -1036,31 +1038,38 @@ model OrderTracking {
 model VendorLocation {
   id        Int      @id @default(autoincrement())
   vendorId  Int
+  orderId   Int?
   latitude  Float
   longitude Float
   createdAt DateTime @default(now())
 
   vendor Vendor @relation(fields: [vendorId], references: [id])
 
+  @@index([vendorId])
+  @@index([orderId])
+  @@index([createdAt])
   @@map("vendor_location")
 }
 
 model Slot {
-  id        Int     @id @default(autoincrement())
-  name      String? // optional: Morning / Afternoon / Evening
-  startTime String // example: "09:00 AM"
-  endTime   String?
-  capacity  Int // how many orders per day
+  id        Int      @id @default(autoincrement())
+  name      String?
+
+  startTime DateTime?  
+  endTime   DateTime?  
+
+  capacity  Int
   isActive  Boolean @default(true)
 
-  createdById Int? // ⭐ ADDED: Track who created the slot
+  createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
+ orders     Order[]
   orderSlots OrderSlot[]
 }
+
 
 model OrderSlot {
   id     Int      @id @default(autoincrement())

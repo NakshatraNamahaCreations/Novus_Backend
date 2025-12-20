@@ -3,12 +3,13 @@ import axios from "axios";
 const SMS_CONFIG = {
   apiId: process.env.BULK_SMS_API_ID,
   apiPassword: process.env.BULK_SMS_API_PASSWORD,
-  sender: "HDTSMS",
+  sender: "NOVLAB",
 };
 
 export const sendOtpSms = async (mobile, otp) => {
   try {
-    const message = `THIS IS TEST MESSAGE TO START BULK SMS SERVICE WITH {#var#} HENCE DIGITAL`;
+    const message = `Your OTP to access your Novus Health Labs account is ${otp}. Please do not share this OTP with anyone. This OTP is valid for 10 minutes.-NOVLAB`;
+    
 
     const url = "https://bulksmsplans.com/api/verify";
 
@@ -21,7 +22,8 @@ export const sendOtpSms = async (mobile, otp) => {
         sender: SMS_CONFIG.sender,
         number: mobile,
         message,
-        var1: otp, // 👈 template variable
+        var1: otp ||'1245', 
+       
       },
       timeout: 10000,
     });

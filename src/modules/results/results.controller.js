@@ -93,8 +93,8 @@ download: async (req, res) => {
       : null;
 
       const defaultSignature = await prisma.eSignature.findFirst({
-  where: { isDefault: true },
-});
+     where: { isDefault: true },
+     });
 
       // Generate the HTML using your existing service
       const html = ResultService.generatePrintableHtml(result, layout, defaultSignature);

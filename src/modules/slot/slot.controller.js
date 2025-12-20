@@ -1,17 +1,45 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
-// Create Slot
+import dayjs from "dayjs";
+
+const formatTime = (date) =>
+  dayjs(date).format("hh:mm A");
+
+/* ----------------------------------------
+   CREATE SLOT
+---------------------------------------- */
 export const createSlot = async (req, res) => {
   try {
-    const { name, startTime,endTime, capacity } = req.body;
+    const { name, startTime, endTime, capacity, isActive = true } = req.body;
 
-    if (!startTime || !capacity) {
-      return res.status(400).json({ message: "startTime and capacity are required" });
+    if (!startTime || !endTime || !capacity) {
+      return res.status(400).json({
+        message: "startTime, endTime and capacity are required",
+      });
+    }
+
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+
+    if (isNaN(start) || isNaN(end)) {
+      return res.status(400).json({ message: "Invalid time format" });
+    }
+
+    if (start >= end) {
+      return res.status(400).json({
+        message: "startTime must be before endTime",
+      });
     }
 
     const slot = await prisma.slot.create({
-      data: { name, startTime, capacity ,endTime},
+      data: {
+        name,
+        startTime: start,
+        endTime: end,
+        capacity: Number(capacity),
+        isActive,
+      },
     });
 
     res.status(201).json({ message: "Slot created", slot });
@@ -20,19 +48,39 @@ export const createSlot = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+/* ----------------------------------------
+   GET ALL ACTIVE SLOTS
+---------------------------------------- */
 export const getSlots = async (req, res) => {
   try {
     const slots = await prisma.slot.findMany({
       where: { isActive: true },
-      orderBy: { startTime: "asc" }
+      orderBy: { startTime: "asc" },
     });
 
-    res.status(200).json({ slots });
+    const formatted = slots.map((slot) => ({
+      id: slot.id,
+      name: slot.name,
+      startTime: formatTime(slot.startTime),
+      endTime: formatTime(slot.endTime),
+      capacity: slot.capacity,
+      isActive: slot.isActive,
+      createdAt: slot.createdAt,
+      updatedAt: slot.updatedAt,
+    }));
+
+    res.status(200).json({ slots: formatted });
   } catch (err) {
     console.error("Get Slots Error:", err);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+
+/* ----------------------------------------
+   GET SLOTS BY DATE (CAPACITY AWARE)
+---------------------------------------- */
 export const getSlotsByDate = async (req, res) => {
   try {
     const { date } = req.query;
@@ -42,13 +90,15 @@ export const getSlotsByDate = async (req, res) => {
     }
 
     const reqDate = new Date(date);
-    if (isNaN(reqDate.getTime())) {
+    if (isNaN(reqDate)) {
       return res.status(400).json({ message: "Invalid date format" });
     }
 
-    const start = new Date(reqDate.setHours(0, 0, 0, 0));
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
+    const startOfDay = new Date(reqDate);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(startOfDay);
+    endOfDay.setDate(endOfDay.getDate() + 1);
 
     const slots = await prisma.slot.findMany({
       where: { isActive: true },
@@ -57,8 +107,8 @@ export const getSlotsByDate = async (req, res) => {
         orderSlots: {
           where: {
             date: {
-              gte: start,
-              lt: end,
+              gte: startOfDay,
+              lt: endOfDay,
             },
           },
         },
@@ -66,13 +116,16 @@ export const getSlotsByDate = async (req, res) => {
     });
 
     const formatted = slots.map((slot) => {
-      const booked = slot.orderSlots.reduce((sum, os) => sum + os.count, 0);
+      const booked = slot.orderSlots.reduce(
+        (sum, os) => sum + os.count,
+        0
+      );
 
       return {
         id: slot.id,
-        name:slot.name,
-        startTime: slot.startTime,  
-        endTime:slot.endTime,  // For user app display
+        name: slot.name,
+        startTime: formatTime(slot.startTime),
+        endTime: formatTime(slot.endTime),
         capacity: slot.capacity,
         booked,
         remaining: Math.max(0, slot.capacity - booked),
@@ -86,58 +139,67 @@ export const getSlotsByDate = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+/* ----------------------------------------
+   BOOK SLOT (CAPACITY SAFE)
+---------------------------------------- */
 export const bookSlot = async (slotId, orderDate) => {
-  const dateOnly = new Date(orderDate.setHours(0,0,0,0));
+  try {
+    const dateObj = new Date(orderDate);
+    if (isNaN(dateObj)) throw new Error("Invalid order date");
 
-  // 1. Fetch slot
-  const slot = await prisma.slot.findUnique({
-    where: { id: slotId },
-  });
+    const dateOnly = new Date(dateObj);
+    dateOnly.setHours(0, 0, 0, 0);
 
-  if (!slot) throw new Error("Slot not found");
+    const slot = await prisma.slot.findUnique({
+      where: { id: slotId },
+    });
 
-  // 2. Find existing OrderSlot
-  let record = await prisma.orderSlot.findFirst({
-    where: {
-      slotId,
-      date: dateOnly,
-    },
-  });
+    if (!slot) throw new Error("Slot not found");
 
-  // 3. If not found → create new record
-  if (!record) {
-    record = await prisma.orderSlot.create({
-      data: {
+    let record = await prisma.orderSlot.findFirst({
+      where: {
         slotId,
         date: dateOnly,
-        count: 1,
       },
     });
+
+    if (!record) {
+      await prisma.orderSlot.create({
+        data: {
+          slotId,
+          date: dateOnly,
+          count: 1,
+        },
+      });
+      return { success: true };
+    }
+
+    if (record.count >= slot.capacity) {
+      throw new Error("Slot is already full");
+    }
+
+    await prisma.orderSlot.update({
+      where: { id: record.id },
+      data: {
+        count: { increment: 1 },
+      },
+    });
+
     return { success: true };
+  } catch (err) {
+    console.error("Book Slot Error:", err);
+    throw err;
   }
-
-  // 4. If full → throw
-  if (record.count >= slot.capacity) {
-    throw new Error("Slot is already full");
-  }
-
-  // 5. Increment count
-  await prisma.orderSlot.update({
-    where: { id: record.id },
-    data: {
-      count: { increment: 1 },
-    },
-  });
-
-  return { success: true };
 };
 
-
-// UPDATE SLOT
+/* ----------------------------------------
+   UPDATE SLOT
+---------------------------------------- */
 export const updateSlot = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, startTime, capacity, isActive } = req.body;
+    const { name, startTime, endTime, capacity, isActive } = req.body;
 
     const slot = await prisma.slot.findUnique({
       where: { id: Number(id) },
@@ -151,9 +213,8 @@ export const updateSlot = async (req, res) => {
       where: { id: Number(id) },
       data: {
         name: name ?? slot.name,
-        startTime: startTime ?? slot.startTime,
-        endTime: endTime ?? slot.endTime,
-
+        startTime: startTime ? new Date(startTime) : slot.startTime,
+        endTime: endTime ? new Date(endTime) : slot.endTime,
         capacity: capacity ?? slot.capacity,
         isActive: isActive ?? slot.isActive,
       },
@@ -169,7 +230,9 @@ export const updateSlot = async (req, res) => {
   }
 };
 
-// DELETE SLOT
+/* ----------------------------------------
+   DELETE SLOT
+---------------------------------------- */
 export const deleteSlot = async (req, res) => {
   try {
     const { id } = req.params;
@@ -190,10 +253,9 @@ export const deleteSlot = async (req, res) => {
   } catch (err) {
     console.error("Delete Slot Error:", err);
 
-    // Handle foreign key constraints (OrderSlot table)
     if (err.code === "P2003") {
       return res.status(400).json({
-        message: "Cannot delete slot because it has bookings (OrderSlot records).",
+        message: "Cannot delete slot because it has bookings",
       });
     }
 

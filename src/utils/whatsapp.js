@@ -14,7 +14,7 @@ export const WhatsAppMessage = async ({
     const payload = {
       "app-key": process.env.WABRIDGE_APP_KEY,
       "auth-key": process.env.WABRIDGE_AUTH_KEY,
-      destination_number: phone,
+      destination_number: '91'+phone,
       message,
       template_id: templateId,
       device_id: process.env.WABRIDGE_DEVICE_ID,
@@ -28,6 +28,7 @@ export const WhatsAppMessage = async ({
       headers: { "Content-Type": "application/json" },
     });
 
+   
     return response.data;
   } catch (error) {
     console.error(

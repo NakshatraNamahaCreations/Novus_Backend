@@ -30,8 +30,11 @@ export default function locationSocket(io, socket) {
   });
 
   socket.on("vendorLocationUpdate", async (data) => {
+    
+    
     const { vendorId, latitude, longitude, orderId } = data;
 
+ 
     try {
       const metrics = await locationService.updateVendorLocation(
         vendorId,
