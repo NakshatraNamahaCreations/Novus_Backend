@@ -244,8 +244,7 @@ export const createAdminOrder = async (req, res) => {
       refCenterId,
       doctorId,
       source,
-      centerId,
-      collectionCenterId,
+    
       totalAmount: bodyTotalAmount,
       discount,
       discountAmount,
@@ -314,7 +313,9 @@ export const createAdminOrder = async (req, res) => {
     // Only include relation connect blocks when values are present
     const dataToCreate = {
       orderNumber,
-      createdById: req.user.id,
+      createdBy: {
+   connect: { id: req.user.id },
+ },
       patient: { connect: { id: Number(patientId) } },
       orderType: registrationType ?? undefined,
       totalAmount: Number(total),
@@ -325,7 +326,9 @@ export const createAdminOrder = async (req, res) => {
       discountAmount:
         discountAmt !== undefined ? Number(discountAmt) : undefined,
       finalAmount: Number(finalAmt),
-      diagnosticCenterId: castInt(diagnosticCenterId),
+    diagnosticCenter: {
+    connect: { id: Number(diagnosticCenterId) }, // ✅ CORRECT
+  },
 
       source: source ?? undefined,
       date: new Date(),
@@ -887,7 +890,14 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
 /* ------------------------- GET ALL ORDERS ------------------------- */
 export const getAllOrders = async (req, res) => {
   try {
-    let { page = 1, limit = 10, search = "", status = "" } = req.query;
+    let {
+      page = 1,
+      limit = 10,
+      search = "",
+      status = "",
+      paymentStatus = "",
+      date = "all",
+    } = req.query;
 
     page = Number(page);
     limit = Number(limit);
@@ -895,25 +905,98 @@ export const getAllOrders = async (req, res) => {
 
     let where = {};
 
+    /* ----------------------------------
+       SEARCH FILTER
+    ---------------------------------- */
     if (search) {
       where.OR = [
         { orderNumber: { contains: search, mode: "insensitive" } },
         { trackingId: { contains: search, mode: "insensitive" } },
         { source: { contains: search, mode: "insensitive" } },
-
-        { patient: { fullName: { contains: search, mode: "insensitive" } } },
-        { patient: { contactNo: { contains: search, mode: "insensitive" } } },
+        {
+          patient: {
+            fullName: { contains: search, mode: "insensitive" },
+          },
+        },
+        {
+          patient: {
+            contactNo: { contains: search, mode: "insensitive" },
+          },
+        },
       ];
     }
 
+    /* ----------------------------------
+       ORDER STATUS FILTER
+    ---------------------------------- */
     if (status && status !== "all") {
       where.status = status;
     }
 
+    /* ----------------------------------
+       PAYMENT STATUS FILTER (FIXED)
+    ---------------------------------- */
+    if (paymentStatus === "pending") {
+      // ✅ DUE PAYMENTS
+      where.paymentStatus = {
+        in: ["pending", "AUTHORIZED", "FAILED"],
+      };
+    }
+
+    if (paymentStatus === "paid") {
+      // ✅ COMPLETED PAYMENTS
+      where.paymentStatus = {
+        in: ["CAPTURED", "COMPLETED", "paid"],
+      };
+    }
+
+    /* ----------------------------------
+       DATE FILTER
+    ---------------------------------- */
+    if (date && date !== "all") {
+      const now = new Date();
+      let startDate;
+      let endDate = new Date();
+
+      if (date === "today") {
+        startDate = new Date();
+        startDate.setHours(0, 0, 0, 0);
+      }
+
+      if (date === "yesterday") {
+        startDate = new Date();
+        startDate.setDate(startDate.getDate() - 1);
+        startDate.setHours(0, 0, 0, 0);
+
+        endDate = new Date();
+        endDate.setDate(endDate.getDate() - 1);
+        endDate.setHours(23, 59, 59, 999);
+      }
+
+      if (date === "this_week") {
+        startDate = new Date();
+        startDate.setDate(startDate.getDate() - startDate.getDay());
+        startDate.setHours(0, 0, 0, 0);
+      }
+
+      if (date === "this_month") {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+
+      where.createdAt = {
+        gte: startDate,
+        lte: endDate,
+      };
+    }
+
+    /* ----------------------------------
+       FETCH ORDERS
+    ---------------------------------- */
     const orders = await prisma.order.findMany({
       where,
       skip,
       take: limit,
+      orderBy: { createdAt: "desc" },
 
       select: {
         id: true,
@@ -932,8 +1015,7 @@ export const getAllOrders = async (req, res) => {
         trackingId: true,
         isHomeSample: true,
         source: true,
-        isHomeSample: true,
-        // ✅ RELATIONS
+
         patient: {
           select: {
             id: true,
@@ -959,6 +1041,7 @@ export const getAllOrders = async (req, res) => {
             endTime: true,
           },
         },
+
         address: {
           select: {
             id: true,
@@ -968,14 +1051,15 @@ export const getAllOrders = async (req, res) => {
           },
         },
       },
-
-      orderBy: { createdAt: "desc" },
     });
 
+    /* ----------------------------------
+       META
+    ---------------------------------- */
     const total = await prisma.order.count({ where });
     const totalPages = Math.ceil(total / limit);
 
-    res.json({
+    return res.json({
       success: true,
       orders,
       meta: {
@@ -987,12 +1071,13 @@ export const getAllOrders = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching orders:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: "Failed to fetch orders",
+      message: "Failed to fetch orders",
     });
   }
 };
+
 
 export const getOrderById = async (req, res) => {
   try {
@@ -1141,6 +1226,257 @@ export const getOrderById = async (req, res) => {
     });
   }
 };
+export const getOrderResultsById = async (req, res) => {
+  try {
+    const orderId = Number(req.params.id);
+    if (isNaN(orderId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID",
+      });
+    }
+
+    /* --------------------------------------------------
+       1️⃣ Fetch order + members + tests/packages
+    -------------------------------------------------- */
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderMembers: {
+          select: {
+            id: true,
+            orderId: true,
+            patientId: true,
+            patient: {
+              select: {
+                id: true,
+                fullName: true,
+                contactNo: true,
+                gender: true,
+              },
+            },
+            orderMemberPackages: {
+              select: {
+                id: true,
+                orderMemberId: true,
+                packageId: true,
+                testId: true,
+
+                test: {
+                  select: {
+                    id: true,
+                    name: true,
+                    actualPrice: true,
+                    offerPrice: true,
+                    discount: true,
+                    testType: true,
+                    sampleRequired: true,
+                    preparations: true,
+                  },
+                },
+
+                package: {
+                  select: {
+                    id: true,
+                    name: true,
+                    actualPrice: true,
+                    offerPrice: true,
+                    description: true,
+                    testType: true,
+                    checkupPackages: {
+                      include: {
+                        test: {
+                          select: {
+                            id: true,
+                            name: true,
+                            testType: true,
+                            actualPrice: true,
+                            offerPrice: true,
+                            sampleRequired: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    /* --------------------------------------------------
+       2️⃣ Fetch ALL results for this order
+       (order by latest first)
+    -------------------------------------------------- */
+    const results = await prisma.patientTestResult.findMany({
+      where: { orderId },
+      orderBy: [
+        { reportedAt: "desc" },
+        { updatedAt: "desc" },
+      ],
+      select: {
+        id: true,
+        patientId: true,
+        testId: true,
+        status: true,
+        reportedAt: true,
+        reportHtml: true,
+        updatedAt: true,
+      },
+    });
+
+    /* --------------------------------------------------
+       3️⃣ Build STRONG result map
+       Priority: APPROVED > latest
+       key = orderId_patientId_testId
+    -------------------------------------------------- */
+    const resultMap = new Map();
+
+    for (const r of results) {
+      const key = `${orderId}_${r.patientId}_${r.testId}`;
+      const existing = resultMap.get(key);
+
+      if (!existing) {
+        resultMap.set(key, r);
+        continue;
+      }
+
+      // APPROVED always wins
+      if (existing.status !== "APPROVED" && r.status === "APPROVED") {
+        resultMap.set(key, r);
+        continue;
+      }
+
+      // Otherwise keep latest
+      if (
+        new Date(r.updatedAt) > new Date(existing.updatedAt)
+      ) {
+        resultMap.set(key, r);
+      }
+    }
+
+    /* --------------------------------------------------
+       4️⃣ Build FINAL RESPONSE (patient-safe)
+    -------------------------------------------------- */
+    const orderMembers = order.orderMembers.map((member) => ({
+      id: member.id,
+      orderId: member.orderId,
+      patientId: member.patientId,
+      patient: member.patient,
+
+      orderMemberPackages: member.orderMemberPackages.map((omp) => {
+        /* -------- INDIVIDUAL TEST -------- */
+        if (omp.testId && omp.test) {
+          const result = resultMap.get(
+            `${orderId}_${member.patientId}_${omp.testId}`
+          );
+
+          return {
+            id: omp.id,
+            orderMemberId: omp.orderMemberId,
+            packageId: null,
+            testId: omp.testId,
+            resultAdded: !!result,
+            test: {
+              ...omp.test,
+              result: result
+                ? {
+                    status: result.status,
+                    reportedAt: result.reportedAt,
+                    reportHtml: result.reportHtml,
+                  }
+                : null,
+            },
+            package: null,
+          };
+        }
+
+        /* -------- PACKAGE -------- */
+        if (omp.packageId && omp.package) {
+          let completed = 0;
+          let approvedCount = 0;
+
+          const packageTests = omp.package.checkupPackages.map((cp) => {
+            const result = resultMap.get(
+              `${orderId}_${member.patientId}_${cp.test.id}`
+            );
+
+            if (result) completed++;
+            if (result?.status === "APPROVED") approvedCount++;
+
+            return {
+              ...cp,
+              test: {
+                ...cp.test,
+                result: result
+                  ? {
+                      status: result.status,
+                      reportedAt: result.reportedAt,
+                      reportHtml: result.reportHtml,
+                    }
+                  : null,
+              },
+            };
+          });
+
+          let resultStatus = "PENDING";
+          if (completed === packageTests.length && packageTests.length > 0) {
+            resultStatus =
+              approvedCount === packageTests.length
+                ? "APPROVED"
+                : "COMPLETED";
+          } else if (completed > 0) {
+            resultStatus = "PARTIAL";
+          }
+
+          return {
+            id: omp.id,
+            orderMemberId: omp.orderMemberId,
+            packageId: omp.packageId,
+            testId: null,
+            resultAdded: completed === packageTests.length,
+            test: null,
+            package: {
+              ...omp.package,
+              checkupPackages: packageTests,
+              completedTests: completed,
+              totalTests: packageTests.length,
+              resultStatus,
+            },
+          };
+        }
+
+        return null;
+      }),
+    }));
+
+    /* --------------------------------------------------
+       5️⃣ Send response
+    -------------------------------------------------- */
+    return res.json({
+      success: true,
+      orderMembers,
+    });
+  } catch (error) {
+    console.error("Error fetching order results:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch order results",
+    });
+  }
+};
+
+
 
 /* ------------------------- UPDATE ORDER STATUS ------------------------- */
 export const updateOrderStatus = async (req, res) => {

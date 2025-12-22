@@ -18,7 +18,8 @@ import {
   getVendorOrdersBasic,
   updateAssignvendor,
   getOrderReports,
-  getOrdersExpiringSoon
+  getOrdersExpiringSoon,
+  getOrderResultsById
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
 import { authenticateUser } from "../../middlewares/auth.js";
@@ -43,6 +44,8 @@ router.get("/expiring", getOrdersExpiringSoon);
 
 
 router.get("/:id", getOrderById);
+router.get("/:id/tests",   getOrderResultsById);
+
 router.put("/:id/vendor-status", updateOrderStatus);
 router.put("/:id/assign-vendor", updateAssignvendor);
 

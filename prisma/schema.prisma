@@ -17,6 +17,13 @@ enum Alignment {
   RIGHT
 }
 
+enum TestResultStatus {
+  DRAFT
+  REPORTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
 enum PrescriptionStatus {
   PENDING_REVIEW
   APPROVED
@@ -735,7 +742,7 @@ model OrderMemberPackage {
   orderMemberId Int
   packageId     Int?
   testId        Int?
-  resultAdded   Boolean     @default(false)
+ 
   orderMember   OrderMember @relation(fields: [orderMemberId], references: [id], onDelete: Cascade)
 
   package HealthPackage? @relation(fields: [packageId], references: [id])
@@ -1175,7 +1182,7 @@ model PatientTestResult {
   collectedAt  DateTime?
   reportedAt   DateTime?
   reportedById Int?
-  status       String    @default("draft")
+   status    TestResultStatus @default(DRAFT)
   notes        String?
   rawJson      Json?
 

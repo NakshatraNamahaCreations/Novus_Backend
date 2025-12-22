@@ -23,21 +23,33 @@ export const ResultController = {
     }
   },
 
-  find: async (req, res) => {
+find: async (req, res) => {
   try {
-    const { orderId, testId } = req.query;
+    const { orderId, testId, patientId } = req.query;
 
-    const result = await ResultService.findByOrderAndTest(
+    if (!orderId || !testId || !patientId) {
+      return res.status(400).json({
+        success: false,
+        message: "orderId, testId and patientId are required",
+      });
+    }
+
+    const result = await ResultService.findByOrderTestAndPatient(
       Number(orderId),
-      Number(testId)
+      Number(testId),
+      Number(patientId)
     );
 
     res.json({ success: true, data: result });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch result" });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch result",
+    });
   }
 },
+
  // UPDATE RESULT
   update: async (req, res) => {
     try {
@@ -48,6 +60,7 @@ export const ResultController = {
       return res.status(500).json({ success: false, message: err.message });
     }
   },
+
 print: async (req, res) => {
   try {
     const report = await ResultService.fetchById(req.params.id);

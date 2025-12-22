@@ -167,6 +167,22 @@ class LocationService {
 
     io?.to(`order_${orderId}`).emit("trackingCompleted", { orderId });
   }
+  async emitOrderStatus(io, orderId) {
+    if (!io || !orderId) return;
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { status: true },
+    });
+
+    if (!order) return;
+
+    io.to(`order_${orderId}`).emit("orderStatusUpdate", {
+      orderId,
+      status: order.status,
+      timestamp: new Date(),
+    });
+  }
 }
 
 module.exports = new LocationService();

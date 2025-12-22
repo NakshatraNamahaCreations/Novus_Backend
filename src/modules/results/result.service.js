@@ -29,75 +29,68 @@ export const ResultService = {
 
     if (!existing) throw new Error("Result not found");
 
-    const isRadiology = payload.testType === "RADIOLOGY";
-
-    // UPDATE MAIN RESULT
-    const updated = await prisma.patientTestResult.update({
+    // update main test result
+    await prisma.patientTestResult.update({
       where: { id },
       data: {
-        reportHtml: payload.reportHtml ?? existing.reportHtml,
+        status: payload.approve ? "APPROVED" : "REPORTED",
         reportedById: payload.reportedById,
+        createdById:payload.createdById,
         reportedAt: new Date(),
-        status: "reported",
-       
       },
     });
 
-    // RADIOLOGY DONE
-    if (isRadiology) return ResultService.fetchById(id);
-
-    // PATHOLOGY → Update parameters
+    // replace parameters
     if (payload.parameters?.length) {
       await prisma.parameterResult.deleteMany({
         where: { patientTestResultId: id },
       });
 
-      const patient = await prisma.patient.findUnique({
-        where: { id: existing.patientId },
-      });
-
-      const rows = [];
-
-      for (const p of payload.parameters) {
-        const range = await ResultService.findRange(p.parameterId, patient);
-        const flag = ResultService.evaluateFlag(p.valueNumber, range);
-
-        rows.push({
-          patientTestResultId: id,
-          parameterId: p.parameterId,
-          valueNumber: p.valueNumber ?? null,
-          valueText: p.valueText ?? null,
-          unit: p.unit ?? null,
-          flag,
-          normalRangeText:
-            range?.referenceRange ||
-            `${range?.lowerLimit ?? "-"} - ${range?.upperLimit ?? "-"}`,
-        });
-      }
+      const rows = payload.parameters.map((p) => ({
+        patientTestResultId: id,
+        parameterId: p.parameterId,
+        valueNumber: p.valueNumber,
+        valueText: p.valueText,
+        unit: p.unit,
+      }));
 
       await prisma.parameterResult.createMany({ data: rows });
     }
 
-    return ResultService.fetchById(id);
+    return prisma.patientTestResult.findUnique({
+      where: { id },
+      include: { parameterResults: true },
+    });
   },
-  findByOrderAndTest: (orderId, testId) =>
+
+  findByOrderTestAndPatient: (orderId, testId, patientId) =>
     prisma.patientTestResult.findFirst({
-      where: { orderId, testId },
+      where: {
+        orderId,
+        testId,
+        patientId,
+      },
       include: {
         patient: {
-          select: { id: true, fullName: true },
+          select: {
+            id: true,
+            fullName: true,
+          },
         },
-        test: true,
-
-        // ⭐ INCLUDE PARAMETER WITH NAME
+        test: {
+          select: {
+            id: true,
+            name: true,
+            testType: true,
+          },
+        },
         parameterResults: {
           include: {
             parameter: {
               select: {
                 id: true,
-                name: true, // 👈 GET PARAMETER NAME
-
-                type: true, // optional
+                name: true,
+                type: true,
               },
             },
           },
@@ -146,7 +139,7 @@ export const ResultService = {
         reportedAt: new Date(),
         reportedById: payload.reportedById,
         status: "reported",
-       
+
         reportHtml: payload.reportHtml || null,
       },
     });
@@ -230,73 +223,79 @@ export const ResultService = {
       where: { isDefault: true },
     }),
 
- generatePrintableHtml: (report, layout = null, signature = null) => {
-  const withLetterhead = !!layout;
+  generatePrintableHtml: (report, layout = null, signature = null) => {
+    const withLetterhead = !!layout;
 
-  const isRadiology = !!report.reportHtml && report.reportHtml !== "";
-  const isPathology = report.parameterResults?.length > 0;
+    const isRadiology = !!report.reportHtml && report.reportHtml !== "";
+    const isPathology = report.parameterResults?.length > 0;
 
-  const today = new Date(report.reportedAt).toLocaleString();
+    const today = new Date(report.reportedAt).toLocaleString();
 
-  // Pathology rows
-  const parameterRows = isPathology
-    ? report.parameterResults
-        .map(
-          (p) => `
+    // Pathology rows
+    const parameterRows = isPathology
+      ? report.parameterResults
+          .map(
+            (p) => `
         <tr>
           <td>${p.parameter?.name || "–"}</td>
           <td>${p.valueNumber ?? p.valueText ?? "–"}</td>
           <td>${p.unit ?? ""}</td>
           <td>${p.normalRangeText ?? "–"}</td>
-          <td><span class="flag ${p.flag?.toLowerCase()}">${p.flag || ""}</span></td>
+          <td><span class="flag ${p.flag?.toLowerCase()}">${
+              p.flag || ""
+            }</span></td>
         </tr>
       `
-        )
-        .join("")
-    : "";
+          )
+          .join("")
+      : "";
 
-  // Header
-  const headerHtml = withLetterhead
-    ? `
+    // Header
+    const headerHtml = withLetterhead
+      ? `
       <div class="header-img-box">
         <img src="${layout.headerImg}" class="header-img" />
       </div>
     `
-    : `
+      : `
       <div class="header"></div>
     `;
 
-  // Footer
-  const footerHtml = withLetterhead
-    ? `
+    // Footer
+    const footerHtml = withLetterhead
+      ? `
       <div class="footer-img-box">
         <img src="${layout.footerImg}" class="footer-img" />
       </div>
     `
-    : `
+      : `
       <div class="footer">
         This is a computer-generated report. No signature is required.
       </div>
     `;
 
-  // ⭐ SIGNATURE BLOCK
-  const signatureHtml = signature
-    ? `
+    // ⭐ SIGNATURE BLOCK
+    const signatureHtml = signature
+      ? `
       <div class="signature-area" style="text-align: right; margin-top: 50px;">
-        <img src="${signature.signatureImg}" style="height: 80px; object-fit: contain;" />
+        <img src="${
+          signature.signatureImg
+        }" style="height: 80px; object-fit: contain;" />
         <p style="font-weight: bold; margin: 4px 0;">${signature.name}</p>
         <p style="margin: 2px 0;">${signature.qualification || ""}</p>
         <p style="margin: 2px 0;">${signature.designation || ""}</p>
       </div>
     `
-    : `
+      : `
       <div class="signature-area" style="text-align: right; margin-top: 50px;">
-        <p><b>Reported By:</b> ${report.reportedById ? "Authorised Personnel" : "System"}</p>
+        <p><b>Reported By:</b> ${
+          report.reportedById ? "Authorised Personnel" : "System"
+        }</p>
         <p>__________________________</p>
       </div>
     `;
 
-  return `
+    return `
   <html>
   <head>
     <meta charset="UTF-8">
@@ -485,6 +484,5 @@ export const ResultService = {
   </body>
   </html>
   `;
-},
-
+  },
 };

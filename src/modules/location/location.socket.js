@@ -4,7 +4,7 @@ export default function locationSocket(io, socket) {
   console.log("Location socket active for:", socket.id);
 
   socket.on("joinOrderRoom", (orderId) => {
-    console.log("joinOrderRoom",orderId)
+    console.log("joinOrderRoom", orderId);
     socket.join(`order_${orderId}`);
   });
 
@@ -30,11 +30,8 @@ export default function locationSocket(io, socket) {
   });
 
   socket.on("vendorLocationUpdate", async (data) => {
-    
-    
     const { vendorId, latitude, longitude, orderId } = data;
 
- 
     try {
       const metrics = await locationService.updateVendorLocation(
         vendorId,
