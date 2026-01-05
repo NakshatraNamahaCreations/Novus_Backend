@@ -28,7 +28,7 @@ export const sendOtpSms = async (mobile, otp) => {
       timeout: 10000,
     });
 
-    console.log("response.data",response.data)
+   
     return response.data;
   } catch (error) {
     console.error("SMS sending failed:", error?.response?.data || error.message);

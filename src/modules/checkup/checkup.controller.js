@@ -291,15 +291,23 @@ export const getAllHealthPackages = async (req, res) => {
     const currentPage = Number(page) || 1;
     const pageSize = Number(limit) || 10;
 
-    const whereCondition = search
-      ? {
-          OR: [
-            { name: { contains: search, mode: "insensitive" } },
-            { category: { name: { contains: search, mode: "insensitive" } } }
-          ]
-        }
-      : {};
+   const searchText = String(search || "").trim();
 
+const whereCondition = searchText
+  ? {
+      OR: [
+        { name: { contains: searchText, mode: "insensitive" } },
+        { alsoKnowAs: { contains: searchText, mode: "insensitive" } },
+        {
+          category: {
+            is: {
+              name: { contains: searchText, mode: "insensitive" },
+            },
+          },
+        },
+      ],
+    }
+  : {};
     /* -------------------------------------------
        1️⃣ COUNT TOTAL RESULTS
     -------------------------------------------- */

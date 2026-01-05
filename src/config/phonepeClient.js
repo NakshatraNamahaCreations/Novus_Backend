@@ -1,10 +1,30 @@
-import { StandardCheckoutClient, Env } from 'pg-sdk-node';
+const { StandardCheckoutClient, Env } = require("pg-sdk-node");
 
-const phonepeClient = StandardCheckoutClient.getInstance(
-  process.env.PHONEPE_CLIENT_ID,
-  process.env.PHONEPE_CLIENT_SECRET,
-  Number(process.env.PHONEPE_CLIENT_VERSION),
-  Env.SANDBOX
-);
 
-export default phonepeClient;
+const {
+  PHONEPE_CLIENT_ID,
+  PHONEPE_CLIENT_SECRET,
+  PHONEPE_CLIENT_VERSION,
+  PHONEPE_ENV,
+} = process.env;
+
+class PhonePeClient {
+  constructor() {
+    if (!PhonePeClient.instance) {
+      this.client = StandardCheckoutClient.getInstance(
+        PHONEPE_CLIENT_ID,
+        PHONEPE_CLIENT_SECRET,
+        parseInt(PHONEPE_CLIENT_VERSION),
+        PHONEPE_ENV === "PRODUCTION" ? Env.PRODUCTION : Env.SANDBOX
+      );
+      PhonePeClient.instance = this;
+    }
+    return PhonePeClient.instance;
+  }
+
+  getClient() {
+    return this.client;
+  }
+}
+
+module.exports = new PhonePeClient();

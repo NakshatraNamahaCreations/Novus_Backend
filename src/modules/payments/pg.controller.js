@@ -1,112 +1,125 @@
 import { PrismaClient } from "@prisma/client";
 import phonepeClient from "../../config/phonepeClient.js";
+import { StandardCheckoutPayRequest } from "pg-sdk-node";
 import { v4 as uuidv4 } from "uuid";
+import { WHATSAPP_TEMPLATES } from "../../templates/whatsapp.templates.js";
+import { WhatsAppMessage } from "../../utils/whatsapp.js";
 
 const prisma = new PrismaClient();
 
 export const createPaymentLink = async (req, res) => {
   try {
-    const orderId = Number(req.params.orderId);
+    const { orderId, patientId } = req.query;
+
+    if (!orderId || !patientId) {
+      return res.status(400).json({ message: "orderId and patientId required" });
+    }
 
     const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: { patient: true }
+      where: { id: Number(orderId) },
+      include: { patient: true },
     });
 
-    if (!order) return res.status(404).json({ message: "Order not found" });
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
 
-    const balance = 100;
+    const amountInPaise = 100 * 100;
+    const amountInRupees = amountInPaise / 100;
 
-    const transactionId = `ORD-${orderId}-${uuidv4().split("-")[0]}`;
+    const merchantOrderId = `ORD-${orderId}-${uuidv4().slice(0, 8)}`;
 
-    const payload = {
-      merchantId: process.env.PHONEPE_MERCHANT_ID,
-      merchantTransactionId: transactionId,
-      merchantUserId: `USER-${order.patient.id}`,
-      amount: balance * 100,
-      redirectUrl: `${process.env.FRONTEND_URL}/payment/status?txnId=${transactionId}`,
-      redirectMode: "POST",
-      callbackUrl: `${process.env.BASE_URL}/api/payments/pg/callback`,
-      mobileNumber: order.patient.phone,
-      paymentInstrument: { type: "PAY_PAGE" }
-    };
+    const redirectUrl = `${process.env.BACKEND_URL}/api/pg/callback?orderId=${merchantOrderId}&patientId=${patientId}&refOrderId=${orderId}`;
 
-    const response = await phonepeClient.createPayment(payload);
+    const request = StandardCheckoutPayRequest.builder()
+      .merchantOrderId(merchantOrderId)
+      .amount(amountInPaise)
+      .redirectUrl(redirectUrl)
+      .build();
+
+    const response = await phonepeClient.getClient().pay(request);
+
+    // ✅ WhatsApp template + variables
+    const tpl = WHATSAPP_TEMPLATES.payment_link;
+
+    const variables = tpl.mapVariables({
+      customerName: order.patient?.fullName || "Customer",
+      amount: amountInRupees,
+      bookingId: orderId,
+      paymentLink: response.redirectUrl,
+      supportContact: process.env.SUPPORT_PHONE || "1800-000-000",
+    });
+
+    await WhatsAppMessage({
+      phone: `${order.patient?.contactNo}`,
+      templateId: tpl.templateId,
+      message: tpl.message,
+      variables,
+    });
 
     return res.json({
       success: true,
-      paymentLink: response.data.instrumentResponse.redirectInfo.url,
-      transactionId
+      paymentLink: response.redirectUrl,
+      transactionId: merchantOrderId,
     });
-
   } catch (err) {
+    console.error("Create Payment Error:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+
   
 
 // 🚀 Webhook callback from PhonePe
 export const phonePeCallback = async (req, res) => {
   try {
-    const xVerify = req.headers["x-verify"];
-    const responseBody = req.body;
+    const { orderId, patientId, refOrderId } = req.query;
 
-    console.log("PhonePe CALLBACK:", responseBody);
+    console.log(req.query)
 
-    // Verify callback authenticity
-    if (!phonepeClient.verifyCallback(xVerify, responseBody)) {
-      console.error("Invalid callback checksum");
-      return res.status(400).json({ message: "Invalid checksum" });
+    if (!orderId || !patientId) {
+      return res.status(400).send("Invalid callback params");
     }
 
-    // Decode the base64 response
-    const decodedResponse = JSON.parse(
-      Buffer.from(responseBody.response, "base64").toString("utf-8")
-    );
+    // ✅ VERIFY USING SDK
+    const statusResp = await phonepeClient
+      .getClient()
+      .getOrderStatus(orderId);
 
-    const { merchantTransactionId, transactionId, amount, state } = decodedResponse;
-
-    const link = await prisma.paymentLink.findUnique({
-      where: { transactionId: merchantTransactionId }
-    });
-
-    if (!link) {
-      return res.status(404).json({ message: "Transaction not found" });
+      console.log("statusResp",statusResp)
+    if (statusResp.state !== "COMPLETED") {
+     
+      return res.redirect(`${process.env.FRONTEND_URL}/payment-failed`);
     }
+const phonePeMethod = statusResp.paymentDetails?.[0]?.paymentMode;
 
-    // Update link status
-    await prisma.paymentLink.update({
-      where: { transactionId: merchantTransactionId },
-      data: { 
-        status: state,
-        gatewayTransactionId: transactionId
-      }
-    });
 
-    if (state === "COMPLETED") {
-      // Check if payment already recorded
-      const existingPayment = await prisma.payment.findFirst({
-        where: { transactionId }
-      });
 
-      if (!existingPayment) {
-        // Insert final payment record
-        await prisma.payment.create({
-          data: {
-            orderId: link.orderId,
-            amount: link.amount,
-            paymentMode: "ONLINE",
-            transactionId,
-            collectedBy: "PhonePe Gateway"
-          }
-        });
-      }
+await prisma.payment.create({
+  data: {
+    amount: statusResp.amount / 100,
+    paymentMode:"ONLINE",
+    paymentId: refOrderId,
+  
+    paymentMethod: "NETBANKING",
+ 
+    paymentStatus: statusResp.state,
+
+    order: {
+      connect: { id: Number(refOrderId) }
+    },
+    patient: {
+      connect: { id: Number(patientId) }
     }
+  }
+});
 
-    return res.json({ success: true });
+   
+
+    return res.redirect(`${process.env.FRONTEND_URL}/payment-success`);
   } catch (err) {
-    console.error("PhonePe Webhook Error:", err);
-    return res.status(500).json({ message: "Callback failed" });
+    console.error("Callback Error:", err);
+    return res.status(500).send("Payment verification failed");
   }
 };
 

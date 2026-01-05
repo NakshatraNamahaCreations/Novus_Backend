@@ -1,51 +1,61 @@
-
-import cron from 'node-cron';
+import cron from "node-cron";
 import { PrismaClient } from "@prisma/client";
+import { notificationQueue } from "../../queues/notification.queue.js";
 
 const prisma = new PrismaClient();
-import { sendNotificationImmediately } from './notification.controller.js';
 
 // Run every minute to check for scheduled notifications
-cron.schedule('* * * * *', async () => {
+cron.schedule("* * * * *", async () => {
   try {
     const now = new Date();
-    
+
     const scheduledNotifications = await prisma.notification.findMany({
       where: {
-        status: 'scheduled',
+        status: "scheduled",
         scheduledAt: {
-          lte: now
-        }
-      }
+          lte: now,
+        },
+      },
     });
 
     for (const notification of scheduledNotifications) {
       try {
-        await sendNotificationImmediately(notification);
-        
+        await notificationQueue.add(
+          "send-notification",
+          {
+            notificationId: notification.id,
+          },
+          {
+            jobId: `notification-${notification.id}`,
+          }
+        );
+
         // Update status to sent
         await prisma.notification.update({
           where: { id: notification.id },
           data: {
-            status: 'sent',
-            sentAt: now
-          }
+            status: "sent",
+            sentAt: now,
+          },
         });
-        
+
         console.log(`Sent scheduled notification: ${notification.title}`);
       } catch (error) {
-        console.error(`Failed to send scheduled notification ${notification.id}:`, error);
-        
+        console.error(
+          `Failed to send scheduled notification ${notification.id}:`,
+          error
+        );
+
         // Update status to failed
         await prisma.notification.update({
           where: { id: notification.id },
           data: {
-            status: 'failed'
-          }
+            status: "failed",
+          },
         });
       }
     }
   } catch (error) {
-    console.error('Error in notification scheduler:', error);
+    console.error("Error in notification scheduler:", error);
   }
 });

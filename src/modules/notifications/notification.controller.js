@@ -2,7 +2,7 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-import { sendPushNotification, sendWhatsAppMessage } from './notification.service.js';
+import { notificationQueue } from "../../queues/notification.queue.js";
 
 export const getAllNotifications = async (req, res) => {
   try {
@@ -195,7 +195,16 @@ export const createNotification = async (req, res) => {
     
     // If not scheduled, send immediately
     if (!scheduledAt) {
-      await sendNotificationImmediately(notification);
+await notificationQueue.add(
+  "send-notification",
+  {
+    notificationId: notification.id
+  },
+  {
+    jobId: `notification-${notification.id}`
+  }
+);
+
     }
 
     res.status(201).json({
@@ -312,8 +321,16 @@ export const sendNotificationNow = async (req, res) => {
 
   
 
-    // Send notification immediately
-    await sendNotificationImmediately(notification);
+  await notificationQueue.add(
+  "send-notification",
+  {
+    notificationId: notification.id
+  },
+  {
+    jobId: `notification-${notification.id}`
+  }
+);
+
 
     // Update notification status
     const updatedNotification = await prisma.notification.update({
@@ -392,7 +409,16 @@ export const resendNotification = async (req, res) => {
     });
 
     // Send the notification
-    await sendNotificationImmediately(resendNotification);
+await notificationQueue.add(
+  "send-notification",
+  {
+    notificationId: notification.id
+  },
+  {
+    jobId: `notification-${notification.id}`
+  }
+);
+
 
     res.json({
       success: true,
@@ -529,160 +555,3 @@ export const getNotificationStats = async (req, res) => {
   }
 };
 
-export const sendNotificationImmediately = async (notification) => {
-  let patients = [];
-  let patientIds = [];
-
-  if (notification.audience === "all") {
-    patients = await prisma.patient.findMany({
-      where: { status: "active" },
-      select: {
-        id: true,
-        contactNo: true,
-        patientDevices: { select: { fcmToken: true } }
-      }
-    });
-    patientIds = patients.map(p => p.id);
-  }
-
-  if (notification.audience === "selected_patients" && notification.selectedPatients) {
-    patients = await prisma.patient.findMany({
-      where: {
-        id: { in: notification.selectedPatients },
-        status: "active"
-      },
-      select: {
-        id: true,
-        contactNo: true,
-        patientDevices: { select: { fcmToken: true } }
-      }
-    });
-    patientIds = patients.map(p => p.id);
-  }
-
-  let success = 0;
-  let failed = 0;
-  
-
-  for (const patient of patients) {
-    try {
-      /* ================= PUSH ================= */
-      if (
-        (notification.type === "push" || notification.type === "both") &&
-        patient.patientDevices?.length
-      ) {
-        for (const device of patient.patientDevices) {
-          console.log("device.fcmToken",device.fcmToken)
-          try {
-            const result = await sendPushNotification({
-              token: device.fcmToken,
-              title: notification.title,
-              body: notification.message,
-              image: notification.imageUrl,
-              data: { deepLink: notification.deepLink }
-            });
-
-            await prisma.notificationLog.create({
-              data: {
-                notificationId: notification.id,
-                patientId: patient.id,
-                type: "push",
-                status: result.success ? "sent" : "failed",
-                deviceToken: device.fcmToken,
-                errorMessage: result.errorMessage,
-                isResend: notification.isResend || false
-              }
-            });
-
-            if (result.success) {
-              success++;
-            } else {
-              failed++;
-            }
-          } catch (err) {
-            await prisma.notificationLog.create({
-              data: {
-                notificationId: notification.id,
-                patientId: patient.id,
-                type: "push",
-                status: "failed",
-                deviceToken: device.fcmToken,
-                errorMessage: err.message,
-                isResend: notification.isResend || false
-              }
-            });
-            failed++;
-          }
-        }
-      }
-
-      /* ================= WHATSAPP ================= */
-      if (
-        (notification.type === "whatsapp" || notification.type === "both") &&
-        patient.contactNo
-      ) {
-        try {
-          const result = await sendWhatsAppMessage({
-            to: patient.contactNo,
-            message: notification.message
-          });
-
-          await prisma.notificationLog.create({
-            data: {
-              notificationId: notification.id,
-              patientId: patient.id,
-              type: "whatsapp",
-              status: result.success ? "sent" : "failed",
-              phoneNumber: patient.contactNo,
-              errorMessage: result.errorMessage,
-              isResend: notification.isResend || false
-            }
-          });
-
-          if (result.success) {
-            success++;
-          } else {
-            failed++;
-          }
-        } catch (err) {
-          await prisma.notificationLog.create({
-            data: {
-              notificationId: notification.id,
-              patientId: patient.id,
-              type: "whatsapp",
-              status: "failed",
-              phoneNumber: patient.contactNo,
-              errorMessage: err.message,
-              isResend: notification.isResend || false
-            }
-          });
-          failed++;
-        }
-      }
-
-    } catch (err) {
-      failed++;
-      console.error("Notification failed:", err.message);
-    }
-  }
-
-  // Determine final status
-  let finalStatus = 'sent';
-  if (failed > 0 && success > 0) {
-    finalStatus = 'partial';
-  } else if (failed > 0 && success === 0) {
-    finalStatus = 'failed';
-  }
-
-  await prisma.notification.update({
-    where: { id: notification.id },
-    data: {
-      recipients: success,
-      failureCount: failed,
-      status: finalStatus,
-      sentAt: new Date()
-    }
-  });
-
-  return { success, failed, patientIds };
-};

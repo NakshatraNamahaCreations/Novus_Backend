@@ -23,45 +23,98 @@ export const ResultService = {
     );
   },
   update: async (id, payload) => {
-    const existing = await prisma.patientTestResult.findUnique({
-      where: { id },
-    });
-
-    if (!existing) throw new Error("Result not found");
-
-    // update main test result
-    await prisma.patientTestResult.update({
-      where: { id },
-      data: {
-        status: payload.approve ? "APPROVED" : "REPORTED",
-        reportedById: payload.reportedById,
-        createdById:payload.createdById,
-        reportedAt: new Date(),
-      },
-    });
-
-    // replace parameters
-    if (payload.parameters?.length) {
-      await prisma.parameterResult.deleteMany({
-        where: { patientTestResultId: id },
+    try {
+      const existing = await prisma.patientTestResult.findUnique({
+        where: { id },
       });
 
-      const rows = payload.parameters.map((p) => ({
-        patientTestResultId: id,
-        parameterId: p.parameterId,
-        valueNumber: p.valueNumber,
-        valueText: p.valueText,
-        unit: p.unit,
-      }));
+      if (!existing) throw new Error("Result not found");
 
-      await prisma.parameterResult.createMany({ data: rows });
+      await prisma.patientTestResult.update({
+        where: { id },
+        data: {
+          status: payload.approve ? "APPROVED" : "REPORTED",
+          reportedById: payload.reportedById,
+          createdById: payload.createdById,
+          reportedAt: new Date(),
+
+          // ⭐ RADIOLOGY REPORT
+          ...(payload.testType === "RADIOLOGY" && {
+            reportHtml: payload.reportHtml,
+            rawJson: payload.rawJson || null,
+          }),
+        },
+      });
+
+      // ⭐ PATHOLOGY PARAMETERS
+      if (payload.testType === "PATHOLOGY" && payload.parameters?.length) {
+        await prisma.parameterResult.deleteMany({
+          where: { patientTestResultId: id },
+        });
+
+        const rows = payload.parameters.map((p) => ({
+          patientTestResultId: id,
+          parameterId: p.parameterId,
+          valueNumber: p.valueNumber,
+          valueText: p.valueText,
+          unit: p.unit,
+        }));
+
+        await prisma.parameterResult.createMany({ data: rows });
+      }
+
+      return prisma.patientTestResult.findUnique({
+        where: { id },
+        include: { parameterResults: true },
+      });
+    } catch (err) {
+      console.error("Update error:", err);
+      throw err;
     }
-
-    return prisma.patientTestResult.findUnique({
-      where: { id },
-      include: { parameterResults: true },
-    });
   },
+
+  // update: async (id, payload) => {
+
+  //   console.log("payload",payload)
+  //   const existing = await prisma.patientTestResult.findUnique({
+  //     where: { id },
+  //   });
+
+  //   if (!existing) throw new Error("Result not found");
+
+  //   // update main test result
+  //   await prisma.patientTestResult.update({
+  //     where: { id },
+  //     data: {
+  //       status: payload.approve ? "APPROVED" : "REPORTED",
+  //       reportedById: payload.reportedById,
+  //       createdById:payload.createdById,
+  //       reportedAt: new Date(),
+  //     },
+  //   });
+
+  //   // replace parameters
+  //   if (payload.parameters?.length) {
+  //     await prisma.parameterResult.deleteMany({
+  //       where: { patientTestResultId: id },
+  //     });
+
+  //     const rows = payload.parameters.map((p) => ({
+  //       patientTestResultId: id,
+  //       parameterId: p.parameterId,
+  //       valueNumber: p.valueNumber,
+  //       valueText: p.valueText,
+  //       unit: p.unit,
+  //     }));
+
+  //     await prisma.parameterResult.createMany({ data: rows });
+  //   }
+
+  //   return prisma.patientTestResult.findUnique({
+  //     where: { id },
+  //     include: { parameterResults: true },
+  //   });
+  // },
 
   findByOrderTestAndPatient: (orderId, testId, patientId) =>
     prisma.patientTestResult.findFirst({
@@ -138,15 +191,14 @@ export const ResultService = {
         collectedAt: payload.collectedAt,
         reportedAt: new Date(),
         reportedById: payload.reportedById,
-        status: "reported",
 
         reportHtml: payload.reportHtml || null,
       },
     });
 
+   
     // 2️⃣ If radiology, no parameters needed
     if (isRadiology) {
-      await ResultService.markResultAdded(payload.orderId, payload.testId);
       return ResultService.fetchById(created.id);
     }
 
@@ -178,25 +230,9 @@ export const ResultService = {
       await prisma.parameterResult.createMany({ data: paramInsert });
     }
 
-    // 4️⃣ MARK ORDER MEMBER PACKAGE AS RESULT ADDED
-    await ResultService.markResultAdded(payload.orderId, payload.testId);
-
     return ResultService.fetchById(created.id);
   },
 
-  markResultAdded: async (orderId, testId) => {
-    return prisma.orderMemberPackage.updateMany({
-      where: {
-        testId: testId,
-        orderMember: {
-          orderId: orderId,
-        },
-      },
-      data: {
-        resultAdded: true,
-      },
-    });
-  },
   // -------------------------------------------
   // FETCH WITH children
   // -------------------------------------------

@@ -156,52 +156,34 @@ export const getAllTests = async (req, res) => {
     page = Number(page);
     limit = Number(limit);
 
-    // BUILD FILTER
-    const filter = {};
+    const where = {};
 
+    // Search should be OR
     if (search.trim() !== "") {
-      filter.name = {
-        contains: search,
-        mode: "insensitive",
-      };
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { alsoKnowAs: { contains: search, mode: "insensitive" } },
+      ];
     }
 
-    if (categoryId) filter.categoryId = Number(categoryId);
-    if (subCategoryId) filter.subCategoryId = Number(subCategoryId);
-    if (testType) filter.testType = testType;
+    if (categoryId) where.categoryId = Number(categoryId);
+    if (subCategoryId) where.subCategoryId = Number(subCategoryId);
+    if (testType) where.testType = testType;
 
-    console.log("filter", filter);
-    // TOTAL COUNT
-    const total = await prisma.test.count({
-      where: filter,
-    });
+    const total = await prisma.test.count({ where });
 
-    // FETCH PAGINATED RESULTS
     const tests = await prisma.test.findMany({
-      where: filter,
+      where,
       include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
+        category: { select: { id: true, name: true, type: true } },
         subCategory: true,
-        _count: {
-          select: {
-            parameters: true, // returns how many parameters the test has
-          },
-        },
+        _count: { select: { parameters: true } },
       },
       skip: (page - 1) * limit,
       take: limit,
-      orderBy: {
-        createdAt: "desc",
-      },
+      orderBy: { createdAt: "desc" },
     });
 
-    // RESPONSE FORMAT
     res.json({
       success: true,
       page,
@@ -215,6 +197,7 @@ export const getAllTests = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch tests" });
   }
 };
+
 
 export const getSpotlightTests = async (req, res) => {
   try {

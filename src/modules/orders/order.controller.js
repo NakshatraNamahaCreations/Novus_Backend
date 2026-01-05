@@ -7,13 +7,12 @@ import dayjs from "dayjs";
 import { bookSlotTx } from "../../utils/bookSlotTx.js";
 import { whatsappQueue } from "../../queues/whatsapp.queue.js";
 import { acquireLock } from "../../utils/redisLock.js";
+import { markOrderReportReady } from "./order.service.js";
+import { vendorNotificationQueue } from "../../queues/vendorNotification.queue.js";
 
 const prisma = new PrismaClient();
 
-
-const formatTime = (date) =>
-  dayjs(date).format("hh:mm A");
-
+const formatTime = (date) => dayjs(date).format("hh:mm A");
 
 export const createOrder = async (req, res) => {
   let lock;
@@ -128,28 +127,43 @@ export const createOrder = async (req, res) => {
       }
     }
 
-     /*  SOCKET */
+    /*  SOCKET */
     const address = await prisma.address.findUnique({
       where: { id: addressId },
     });
 
-
-       const slotData = await prisma.slot.findUnique({
+    const slotData = await prisma.slot.findUnique({
       where: { id: slotId },
     });
-
 
     if (!address) return res.status(400).json({ error: "Address not found" });
 
     const lat = Number(address.latitude);
     const lng = Number(address.longitude);
 
+    await vendorNotificationQueue.add(
+      "notify-new-order",
+      {
+        orderId: order.id,
+        pincode: address.pincode,
+        latitude: lat,
+        longitude: lng,
+        testType,
+        radiusKm: 5,
+      },
+      {
+        jobId: `vendor-new-order-${order.id}`,
+      }
+    );
+
     const orderForBroadcast = {
       orderId: order.id,
       pincode: address.pincode?.toString(),
       latitude: lat,
       longitude: lng,
-      slot: `${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`,
+      slot: `${formatTime(slotData.startTime)} - ${formatTime(
+        slotData.endTime
+      )}`,
       date,
       testType,
       radiusKm: 5,
@@ -161,7 +175,7 @@ export const createOrder = async (req, res) => {
        ✔ Today’s Order Only
        ✔ testType MUST BE "Pathology"
     --------------------------------------------- */
-  
+
     const today = new Date();
 
     const isToday =
@@ -172,11 +186,11 @@ export const createOrder = async (req, res) => {
     const io = req.app.get("io");
 
     if (io && isToday && testType === "PATHOLOGY") {
-
-     
       await broadcastNewOrder(io, {
         id: order.id,
-        slot:`${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`,
+        slot: `${formatTime(slotData.startTime)} - ${formatTime(
+          slotData.endTime
+        )}`,
         date: orderDate,
         testType,
         address: {
@@ -186,20 +200,32 @@ export const createOrder = async (req, res) => {
         },
         radiusKm: 5,
       });
-
-      io.emit("orderCreatedServer", { orderId: order.id });
     }
 
-
-
-
-    /* 🟢 REDIS CACHE */
+    /* ---------------- REDIS CACHE (PENDING ORDERS) ---------------- */
     await redis.hSet(`order:${order.id}`, {
-      orderId: order.id.toString(),
-      slotId: slotId.toString(),
+      orderId: String(order.id),
+      slotId: String(slotId),
       date: orderDate.toISOString(),
       status: "pending",
+      pincode: String(address.pincode),
+      latitude: String(lat),
+      longitude: String(lng),
+      testType: String(testType),
     });
+
+    console.log(`orders:pending:pincode:${String(address.pincode)}`);
+    await redis.sAdd("orders:pending", String(order.id));
+    await redis.sAdd(
+      `orders:pending:pincode:${String(address.pincode)}`,
+      String(order.id)
+    );
+
+    await redis.expire(`order:${order.id}`, 600);
+    await redis.expire(
+      `orders:pending:pincode:${String(address.pincode)}`,
+      600
+    );
 
     /* 🚀 RESPOND IMMEDIATELY */
     res.json({
@@ -209,18 +235,12 @@ export const createOrder = async (req, res) => {
     });
 
     /* 🟢 BACKGROUND: WhatsApp (enqueue minimal data only) */
-    await whatsappQueue.add(
-      "ORDER_CONFIRMED",
-      {
-        orderId: order.id,
-      },
-      {
-        jobId: `wa-order-${order.id}`,
-        removeOnComplete: true,
-      }
-    );
 
-   
+    await whatsappQueue.add(
+      "whatsapp.sendOrderAndPayment",
+      { orderId: order.id },
+      { jobId: `whatsapp-orderpay-${order.id}`, removeOnComplete: true }
+    );
   } catch (err) {
     console.error("Create order error:", err);
     res.status(500).json({ error: err.message || "Something went wrong" });
@@ -244,7 +264,7 @@ export const createAdminOrder = async (req, res) => {
       refCenterId,
       doctorId,
       source,
-    
+
       totalAmount: bodyTotalAmount,
       discount,
       discountAmount,
@@ -314,8 +334,8 @@ export const createAdminOrder = async (req, res) => {
     const dataToCreate = {
       orderNumber,
       createdBy: {
-   connect: { id: req.user.id },
- },
+        connect: { id: req.user.id },
+      },
       patient: { connect: { id: Number(patientId) } },
       orderType: registrationType ?? undefined,
       totalAmount: Number(total),
@@ -326,9 +346,9 @@ export const createAdminOrder = async (req, res) => {
       discountAmount:
         discountAmt !== undefined ? Number(discountAmt) : undefined,
       finalAmount: Number(finalAmt),
-    diagnosticCenter: {
-    connect: { id: Number(diagnosticCenterId) }, // ✅ CORRECT
-  },
+      diagnosticCenter: {
+        connect: { id: Number(diagnosticCenterId) }, // ✅ CORRECT
+      },
 
       source: source ?? undefined,
       date: new Date(),
@@ -581,15 +601,15 @@ export const vendorStartJob = async (req, res) => {
         vendorId: vendorIdNumber,
         status: "on_the_way", // Set initial assignment status
       },
-      select: { id: true, vendorId: true },
+      select: { id: true, vendorId: true ,address:true},
     });
 
     // 2. Start location tracking (This handles the ON_THE_WAY status update and upsert)
     const tracking = await locationService.startOrderTracking(
       order.id,
       order.vendorId,
-      parseFloat(userLatitude),
-      parseFloat(userLongitude)
+      parseFloat(order?.address?.latitude),
+      parseFloat(order?.address?.longitude)
     );
 
     // 3. Emit socket event
@@ -796,6 +816,65 @@ export const getOrdersByPatientId = async (req, res) => {
   }
 };
 
+export const getOrdersByPatientIdTrack = async (req, res) => {
+  try {
+    const patientId = Number(req.params.patientId);
+    if (!Number.isFinite(patientId)) {
+      return res.status(400).json({ success: false, error: "Invalid patientId" });
+    }
+
+    const orders = await prisma.order.findMany({
+      where: {
+        AND: [
+          {
+            OR: [{ patientId }, { orderMembers: { some: { patientId } } }],
+          },
+          {
+            status: { not: "completed" }, // ✅ except completed
+          },
+        ],
+      },
+      include: {
+        patient: {
+          select: { id: true, fullName: true, email: true, contactNo: true },
+        },
+        address: true,
+        vendor: true,
+        orderMembers: {
+          where: { patientId },
+          include: {
+            patient: {
+              select: { id: true, fullName: true, email: true, contactNo: true },
+            },
+            orderMemberPackages: {
+              include: {
+                package: {
+                  select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    actualPrice: true,
+                    offerPrice: true,
+                    imgUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.json({ success: true, orders });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: "Failed to fetch orders" });
+  }
+};
+
+
+
 export const getOrdersByPrimaryPatientId = async (req, res) => {
   try {
     const patientId = Number(req.params.patientId);
@@ -817,6 +896,7 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
         reportReady: true,
         isHomeSample: true,
         sampleCollected: true,
+        reportUrl: true,
         patient: {
           select: {
             id: true,
@@ -1078,7 +1158,6 @@ export const getAllOrders = async (req, res) => {
   }
 };
 
-
 export const getOrderById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1320,10 +1399,7 @@ export const getOrderResultsById = async (req, res) => {
     -------------------------------------------------- */
     const results = await prisma.patientTestResult.findMany({
       where: { orderId },
-      orderBy: [
-        { reportedAt: "desc" },
-        { updatedAt: "desc" },
-      ],
+      orderBy: [{ reportedAt: "desc" }, { updatedAt: "desc" }],
       select: {
         id: true,
         patientId: true,
@@ -1358,9 +1434,7 @@ export const getOrderResultsById = async (req, res) => {
       }
 
       // Otherwise keep latest
-      if (
-        new Date(r.updatedAt) > new Date(existing.updatedAt)
-      ) {
+      if (new Date(r.updatedAt) > new Date(existing.updatedAt)) {
         resultMap.set(key, r);
       }
     }
@@ -1432,9 +1506,7 @@ export const getOrderResultsById = async (req, res) => {
           let resultStatus = "PENDING";
           if (completed === packageTests.length && packageTests.length > 0) {
             resultStatus =
-              approvedCount === packageTests.length
-                ? "APPROVED"
-                : "COMPLETED";
+              approvedCount === packageTests.length ? "APPROVED" : "COMPLETED";
           } else if (completed > 0) {
             resultStatus = "PARTIAL";
           }
@@ -1476,8 +1548,6 @@ export const getOrderResultsById = async (req, res) => {
   }
 };
 
-
-
 /* ------------------------- UPDATE ORDER STATUS ------------------------- */
 export const updateOrderStatus = async (req, res) => {
   try {
@@ -1500,6 +1570,11 @@ export const updateOrderStatus = async (req, res) => {
         ...(reportUrl && { reportUrl }),
       },
     });
+
+    if (reportReady === "true" || reportReady === true) {
+      console.log("report ready---");
+      await markOrderReportReady(order);
+    }
 
     res.json({ message: "Order updated successfully", order });
   } catch (error) {

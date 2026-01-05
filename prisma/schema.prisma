@@ -46,7 +46,8 @@ enum PaymentMethod {
   CASH
   CARD
   UPI
-  NETBANKING
+   NETBANKING   // 👈 add back temporarily
+  NET_BANKING // 👈 new value
   WALLET
   CHEQUE
   BANK_TRANSFER

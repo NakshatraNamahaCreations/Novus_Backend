@@ -102,7 +102,7 @@ export const loginVendor = async (req, res) => {
     return res.json({
       message: "Login successful",
       token,
-      vendor: cleanVendor,
+      vendor: vendor,
     });
   } catch (error) {
     console.error("Error logging in:", error);

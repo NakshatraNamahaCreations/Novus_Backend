@@ -13,6 +13,8 @@ class LocationService {
 
     const res = await axios.get(url);
     const route = res.data.routes?.[0];
+
+
     if (!route) return null;
 
     return {
@@ -97,6 +99,7 @@ class LocationService {
 
       if (now - new Date(tracking.lastEtaUpdate).getTime() > 30000) {
         metrics = await this.calculateMetrics(orderId);
+       
         await prisma.orderTracking.update({
           where: { orderId },
           data: { lastEtaUpdate: new Date() },
@@ -135,6 +138,9 @@ class LocationService {
       latitude: tracking.userLatitude,
       longitude: tracking.userLongitude,
     };
+
+
+
 
     const metrics = await this.getRoadMetrics(from, to);
     if (!metrics) return null;

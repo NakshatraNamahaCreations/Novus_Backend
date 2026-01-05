@@ -11,6 +11,7 @@ export const WhatsAppMessage = async ({
   media = null,
 }) => {
   try {
+
     const payload = {
       "app-key": process.env.WABRIDGE_APP_KEY,
       "auth-key": process.env.WABRIDGE_AUTH_KEY,
@@ -20,6 +21,7 @@ export const WhatsAppMessage = async ({
       device_id: process.env.WABRIDGE_DEVICE_ID,
     };
 
+ 
     if (variables.length) payload.variables = variables;
     if (buttonVariables.length) payload.button_variable = buttonVariables;
     if (media) payload.media = media;

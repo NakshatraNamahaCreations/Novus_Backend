@@ -49,6 +49,8 @@ import esignatureRoutes from "./modules/esignature/esignature.route.js";
 import reportlayoutsRoutes from "./modules/reportLayout/reportLayout.routes.js"
 import pgRoutes from "./modules/payments/pg.routes.js"
 import pincodeRoutes from "./modules/pincode/pincode.routes.js";
+import locationRoutes from "./modules/location/location.route.js";
+
 import "./modules/notifications/notification.scheduler.js";
 
 import redis from './config/redis.js';
@@ -119,7 +121,7 @@ app.use("/api/esignatures", esignatureRoutes);
 app.use("/api/report-layouts", reportlayoutsRoutes);
 app.use("/api/pg", pgRoutes);
 app.use("/api/pincodes", pincodeRoutes);
-
+app.use("/api/location",locationRoutes)
 
 
 

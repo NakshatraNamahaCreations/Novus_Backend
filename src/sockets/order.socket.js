@@ -1,56 +1,54 @@
 import redis from "../config/redis.js";
 
-
 export default function orderSocket(io, socket) {
 
-  // debug ping
   socket.on("ping", (msg) => socket.emit("pong", msg));
 
-  // new order event
-  socket.on("newOrderCreated", async (order) => {
-   
+  socket.on("vendorOnline", async ({ vendorId, pincode }) => {
     try {
-      if (!order || !order.address) return;
+      if (!vendorId || !pincode) return;
 
-      const { latitude, longitude, pincode } = order.address;
+      const vendorIdStr = String(vendorId);
+      const pincodeStr = String(pincode).trim();
 
-      // 1) Send to pincode room
-      if (pincode) {
-        io.to(`pin_${pincode}`).emit("orderForPincode", order);
-      }
+      console.log("✔ VENDOR JOINED:", vendorIdStr, pincodeStr);
 
-      // 2) Redis GEO search
-      if (typeof latitude === "number" && typeof longitude === "number") {
+      socket.join(`vendor_${vendorIdStr}`);
+      socket.join(`pin_${pincodeStr}`);
 
-        const RADIUS_KM = order.radiusKm || 5;
+      const pendingOrderIds = await redis.sMembers(
+        `orders:pending:pincode:${pincodeStr}`
+      );
 
-        const res = await redis.sendCommand([
-          "GEORADIUS",
-          "vendors:geo",
-          String(longitude),
-          String(latitude),
-          String(RADIUS_KM),
-          "km",
-          "WITHDIST",
-          "WITHCOORD"
-        ]);
+      console.log(pendingOrderIds, "pendingOrderIds");
 
-      
-        if (Array.isArray(res) && res.length) {
-          for (const item of res) {
-            const vendorId = item[0];
-            const distanceKm = parseFloat(item[1]);
+      for (const orderId of pendingOrderIds) {
 
-            io.to(`vendor_${vendorId}`).emit("orderNearby", {
-              order,
-              distanceKm
-            });
-          }
-        }
+        const rejected = await redis.sIsMember(
+          `rejected:${orderId}`,
+          vendorIdStr
+        );
+        if (rejected) continue;
+
+        const orderData = await redis.hGetAll(`order:${orderId}`);
+        console.log("orderData",orderData)
+        if (!Object.keys(orderData).length) continue;
+
+        socket.emit("orderForPincode", {
+          orderId: Number(orderData.orderId),
+          slotId: orderData.slotId,
+          date: orderData.date,
+          status: orderData.status,
+          testType: orderData.testType,
+          pincode: orderData.pincode,
+          latitude: Number(orderData.latitude),
+          longitude: Number(orderData.longitude),
+          isReplay: true
+        });
       }
 
     } catch (err) {
-      console.error("newOrderCreated handler error", err);
+      console.error("vendorOnline error", err);
     }
   });
 }

@@ -17,24 +17,17 @@ export const WHATSAPP_TEMPLATES = {
       address,
       supportNumber,
     }) => [
-      customerName,     // {{1}}
-      bookingId,        // {{2}}
-      tests,            // {{3}}
-      collectionDate,   // {{4}}
-      timeSlot,         // {{5}}
-      address,          // {{6}}
-      supportNumber,    // {{7}}
+      customerName,
+      bookingId,
+      tests,
+      collectionDate,
+      timeSlot,
+      address,
+      supportNumber,
     ],
   },
 
-  TEST_REPORT_READY: {
-    templateId: process.env.WABRIDGE_REPORT_TEMPLATE_ID,
-    message: "Hello {{1}}, your test report is ready. Reference ID: {{2}}.",
-    mapVariables: ({ patientName, reportId }) => [
-      patientName, // {{1}}
-      reportId,    // {{2}}
-    ],
-  },
+
 
   PAYMENT_CONFIRMED: {
     templateId: process.env.WABRIDGE_PAYMENT_TEMPLATE_ID,
@@ -51,20 +44,13 @@ We have received your payment successfully.
 Thank you for trusting *Novus Health Labs.*
 
 Wishing you good health.`,
-
     mapVariables: ({
       customerName,
       amount,
       paymentMode,
       transactionId,
       date,
-    }) => [
-      customerName,   // {{1}}
-      amount,         // {{2}}
-      paymentMode,    // {{3}}
-      transactionId,  // {{4}}
-      date,           // {{5}}
-    ],
+    }) => [customerName, amount, paymentMode, transactionId, date],
   },
 
   SAMPLE_COLLECTED: {
@@ -80,52 +66,19 @@ This is to inform you that your sample has been successfully collected by *Novus
 Your sample is now under processing. You will receive your report within the promised timeline.
 
 Thank you for choosing *Novus Health Labs.*`,
-
-    mapVariables: ({
+    mapVariables: ({ customerName, collectionDate, collectedBy }) => [
       customerName,
       collectionDate,
       collectedBy,
-    }) => [
-      customerName,     // {{1}}
-      collectionDate,   // {{2}}
-      collectedBy,      // {{3}}
     ],
   },
 
-  PAYMENT_LINK_GENERATED: {
-    templateId: process.env.WABRIDGE_PAYMENT_LINK_TEMPLATE_ID,
+
+
+  // ⭐ NEW — feedback_request_novus
+  FEEDBACK_REQUEST_NOVUS: {
+    templateId: process.env.WABRIDGE_FEEDBACK_REQUEST_TEMPLATE_ID,
     message: `Dear *{{1}},*
-
-Your payment link for *Novus Health Labs* has been generated.
-
-*Payment Details:*
-• Amount Payable: ₹*{{2}}*
-• Booking ID: *{{3}}*
-
-Please complete your payment using the link below:
-{{4}}
-
-For assistance, contact us at *{{5}}*.
-
-Thank you for choosing *Novus Health Labs.*`,
-
-    mapVariables: ({
-      customerName,
-      amount,
-      bookingId,
-      paymentLink,
-      supportNumber,
-    }) => [
-      customerName,   // {{1}}
-      amount,         // {{2}}
-      bookingId,      // {{3}}
-      paymentLink,    // {{4}}
-      supportNumber,  // {{5}}
-    ],
-  },
-  FEEDBACK_LINK: {
-  templateId: process.env.WABRIDGE_FEEDBACK_TEMPLATE_ID,
-  message: `Dear *{{1}},*
 
 We hope you had a smooth experience with *Novus Health Labs.*
 
@@ -137,14 +90,90 @@ Please take a moment to share your experience using the link below:
 Thank you for your valuable time.
 
 *Team Novus Health Labs*`,
+    mapVariables: ({ customerName, feedbackLink }) => [
+      customerName,
+      feedbackLink,
+    ],
+  },
 
+  // ⭐ NEW — thank_you_novus
+  THANK_YOU_NOVUS: {
+    templateId: process.env.WABRIDGE_THANK_YOU_TEMPLATE_ID,
+    message: `Dear *{{1}}*,
+
+Thank you for choosing *Novus Health Labs* for your diagnostic needs.
+
+We are committed to providing accurate reports, timely service, and reliable healthcare support.
+
+We wish you good health always.
+
+Warm regards,
+*Novus Health Labs*`,
+    mapVariables: ({ customerName }) => [customerName],
+  },
+
+  // ⭐ NEW — report_shared_novus
+  REPORT_SHARED_NOVUS: {
+    templateId: process.env.WABRIDGE_REPORT_SHARED_TEMPLATE_ID,
+    message: `Dear {{1}},
+
+Your medical test report for {{2}}, requested with Novus Health Labs, is now ready.
+
+Report Date: {{3}}
+
+You can view or download your report using the link below:
+{{4}}
+
+This message is sent as part of your recent test request.
+
+Regards,
+Novus Health Labs`,
+    mapVariables: ({ customerName, tests, reportDate, reportLink }) => [
+      customerName,
+      tests,
+      reportDate,
+      reportLink,
+    ],
+  },
+
+  // ⭐ NEW — new_patients_template
+  NEW_PATIENT_WELCOME: {
+    templateId: process.env.WABRIDGE_NEW_PATIENT_TEMPLATE_ID,
+    message: `Welcome to Novus 👋
+Your personal health companion for tests, reports, and care—simple, fast, and reliable.
+Let’s get started 💙`,
+    mapVariables: () => [],
+  },
+
+payment_link: {
+  templateId: process.env.WABRIDGE_PAYMENT_LINK,
+  message: `Dear {{1}},
+
+Your payment link for Novus Health Labs has been generated.
+
+Payment Details:
+• Amount Payable: ₹{{2}}
+• Booking ID: {{3}}
+
+Please complete your payment using the link below:
+{{4}}
+
+For assistance, contact us at {{5}}.
+
+Thank you for choosing Novus Health Labs.`,
   mapVariables: ({
     customerName,
-    feedbackLink,
+    amount,
+    bookingId,
+    paymentLink,
+    supportContact,
   }) => [
     customerName,   // {{1}}
-    feedbackLink,   // {{2}}
+    amount,         // {{2}}
+    bookingId,      // {{3}}
+    paymentLink,    // {{4}}
+    supportContact, // {{5}}
   ],
-},
+}
 
 };

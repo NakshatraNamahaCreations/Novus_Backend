@@ -3,20 +3,24 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon src/server.js",
-    "worker:whatsapp": "nodemon src/queues/whatsapp.worker.js"
+    "start:api": "nodemon src/server.js",
+    "start:report-worker": "nodemon src/workers/report.worker.js",
+    "start:whatsapp-worker": "nodemon src/workers/whatsapp.worker.js",
+    "start:notification-worker": "nodemon src/workers/notification.worker.js",
+    "start:vendor-notification-worker": "nodemon src/workers/vendorNotification.worker.js"
   },
   "author": "yogesh",
   "license": "ISC",
   "description": "",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.901.0",
+    "@aws-sdk/s3-request-presigner": "^3.958.0",
     "@prisma/client": "^6.19.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "axios": "^1.13.2",
     "bcryptjs": "^3.0.2",
-    "bullmq": "^5.66.1",
+    "bull": "^4.16.5",
+    "bullmq": "^5.66.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
@@ -34,6 +38,7 @@
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "nodemailer": "^7.0.9",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.16.3",
     "pg-sdk-node": "https://phonepe.mycloudrepo.io/public/repositories/phonepe-pg-sdk-node/releases/v2/phonepe-pg-sdk-node.tgz",
     "prisma": "^6.19.0",
@@ -47,6 +52,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "nodemon": "^3.1.11"
   }
 }

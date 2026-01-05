@@ -244,6 +244,7 @@ export const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
+    console.log("data",data)
 
     // calculate age if dob is provided
     if (data.dob) {
@@ -267,8 +268,8 @@ export const updateProfile = async (req, res) => {
 export const addFamilyMember = async (req, res) => {
   try {
     const { primaryId } = req.params;
-    const { fullName, dob, gender, email, bloodType, relationship } = req.body;
-
+    const { fullName, dob, gender, email, bloodType, relationship ,contactNo} = req.body;
+console.log("contactNo",contactNo)
     const data = {
       fullName,
       dob: dob ? new Date(dob) : null,
@@ -279,6 +280,7 @@ export const addFamilyMember = async (req, res) => {
       relationship,
       isPrimary: false,
       primaryId: Number(primaryId),
+      contactNo: contactNo
     };
 
     const member = await prisma.patient.create({ data });

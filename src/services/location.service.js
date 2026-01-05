@@ -42,7 +42,7 @@ export async function broadcastNewOrder(io, order) {
       typeof address.longitude === "number"
     ) {
       const RADIUS_KM = order.radiusKm || 5;
-console.log(" slot: order.slot,",  order.slot,)
+
 
 
       const res = await redis.sendCommand([
