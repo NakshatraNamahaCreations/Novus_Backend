@@ -99,7 +99,7 @@ update: async (parameterId, data) => {
     });
   },
 
-  listByTest: async (testId) => {
+  listByTest1: async (testId) => {
     return prisma.testParameter.findMany({
       where: { testId: Number(testId) },
       orderBy: { order: "asc" },
@@ -108,5 +108,34 @@ update: async (parameterId, data) => {
         resultOpts: true
       }
     });
-  }
+  },
+   listByTest: async (testId, gender = "Both") => {
+    try {
+      const tId = Number(testId);
+      const g = (gender || "Both").trim();
+
+      // If user passes Male/Female, also include "Both" rows.
+      const genderFilter = g === "Both" ? ["Both"] : [g, "Both"];
+
+      return await prisma.testParameter.findMany({
+        where: { testId: tId },
+        orderBy: { order: "asc" },
+        include: {
+          ranges: {
+            where: { gender: { in: genderFilter } },
+            orderBy: { id: "asc" }, // optional
+          },
+
+          // ✅ Only keep this if `resultOpts` table has a `gender` field
+          resultOpts: {
+            where: { gender: { in: genderFilter } },
+            orderBy: { id: "asc" }, // optional
+          },
+        },
+      });
+    } catch (err) {
+      console.error("ParameterService.listByTest error:", err);
+      throw err;
+    }
+  },
 };

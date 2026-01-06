@@ -46,12 +46,12 @@ enum PaymentMethod {
   CASH
   CARD
   UPI
-   NETBANKING   // 👈 add back temporarily
-  NET_BANKING // 👈 new value
+  NET_BANKING
   WALLET
   CHEQUE
   BANK_TRANSFER
 }
+
 
 enum PaymentMode {
   ONLINE
@@ -334,7 +334,7 @@ model HealthPackage {
   discount      Float   @default(0)
   showIn        ShowIn? @default(TEST)
   spotlight      Boolean   @default(false)
-
+  features       String? 
   createdById Int? // ⭐ ADDED: Track who created the package
   createdBy   User? @relation(fields: [createdById], references: [id])
 
@@ -364,6 +364,8 @@ model Test {
   alsoKnowAs     String?
   preparations   String?
   sampleRequired String?
+  features       String?
+
   testType       String
   categoryId     Int
   subCategoryId  Int?
@@ -1229,4 +1231,29 @@ model VendorEarningConfig {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model PatientReportPdf {
+  id               Int      @id @default(autoincrement())
+  orderId          Int
+  patientId        Int
+
+  plainPdfUrl      String?
+  letterheadPdfUrl String?
+  fullPdfUrl       String?
+
+  plainPdfKey      String?
+  letterheadPdfKey String?
+  fullPdfKey       String?
+
+  status           String   @default("NOT_GENERATED") // NOT_GENERATED|PENDING|READY|FAILED
+  generatedAt      DateTime?
+  version          Int      @default(1)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([orderId, patientId])
+  @@index([orderId])
+  @@index([patientId])
 }

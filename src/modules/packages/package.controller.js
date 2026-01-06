@@ -43,7 +43,8 @@ export const addTest = async (req, res) => {
       reportUnit,
       showIn,
       alsoKnowAs,
-      spotlight
+      spotlight,
+      features
     } = req.body;
 
 
@@ -130,7 +131,8 @@ if (spotlight !== undefined) {
         reportUnit,
         showIn,
         alsoKnowAs,
-      spotlight: finalSpotlight
+      spotlight: finalSpotlight,
+      features
 
       },
     });
@@ -158,7 +160,6 @@ export const getAllTests = async (req, res) => {
 
     const where = {};
 
-    // Search should be OR
     if (search.trim() !== "") {
       where.OR = [
         { name: { contains: search, mode: "insensitive" } },
@@ -177,6 +178,14 @@ export const getAllTests = async (req, res) => {
       include: {
         category: { select: { id: true, name: true, type: true } },
         subCategory: true,
+
+        // ✅ bring parameter names
+        parameters: {
+          select: { id: true, name: true },
+          // orderBy: { order: "asc" }, // enable only if you have `order` field
+        },
+
+        // ✅ count
         _count: { select: { parameters: true } },
       },
       skip: (page - 1) * limit,
@@ -184,19 +193,27 @@ export const getAllTests = async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    res.json({
+    // ✅ Optional: clean output (names + count at top level)
+    const data = tests.map((t) => ({
+      ...t,
+      parameterCount: t._count?.parameters ?? 0,
+      parameterNames: (t.parameters || []).map((p) => p.name),
+    }));
+
+    return res.json({
       success: true,
       page,
       limit,
       total,
       totalPages: Math.ceil(total / limit),
-      data: tests,
+      data,
     });
   } catch (error) {
     console.error("Error fetching tests:", error);
-    res.status(500).json({ error: "Failed to fetch tests" });
+    return res.status(500).json({ error: "Failed to fetch tests" });
   }
 };
+
 
 
 export const getSpotlightTests = async (req, res) => {
@@ -429,6 +446,7 @@ export const updateTest = async (req, res) => {
       subCategoryId,
       showIn,
       alsoKnowAs,
+      features
     } = req.body;
 
     console.log("spotlight",spotlight)
@@ -525,6 +543,7 @@ if (spotlight !== undefined) {
         showIn: showIn || existing.showIn,
         alsoKnowAs: alsoKnowAs || existing.alsoKnowAs,
      spotlight: finalSpotlight,
+     features:features,
 
         categoryId: finalCategoryId,
         subCategoryId: finalSubCategoryId,

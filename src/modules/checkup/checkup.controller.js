@@ -65,7 +65,8 @@ export const addHealthPackage = async (req, res) => {
       noOfParameter,
       categoryId,
       alsoKnowAs,
-      spotlight
+      spotlight,
+      features
     } = req.body;
 
     if (!name || !actualPrice) {
@@ -106,7 +107,8 @@ export const addHealthPackage = async (req, res) => {
         noOfParameter,
         categoryId: categoryId ? Number(categoryId) : null,
         alsoKnowAs,
-           spotlight: finalSpotlight
+           spotlight: finalSpotlight,
+           features
       }
     });
 
@@ -155,8 +157,11 @@ export const updateHealthPackage = async (req, res) => {
       reportUnit,
       spotlight,
       categoryId,
-      alsoKnowAs
+      alsoKnowAs,
+      features
     } = req.body;
+
+    console.log("features",features)
 
     // Fetch existing package
     const existing = await prisma.healthPackage.findUnique({
@@ -218,7 +223,8 @@ if (spotlight !== undefined) {
         
         categoryId: categoryId ? Number(categoryId) : existing.categoryId,
         alsoKnowAs:alsoKnowAs ?? existing.alsoKnowAs,
-        spotlight: finalSpotlight
+        spotlight: finalSpotlight,
+        features:features
 
       }
     });
@@ -374,6 +380,7 @@ const whereCondition = searchText
         tests,
         testCount: tests.length,
         parameterCount: totalParameters,
+        features:pkg.features
       };
     });
 

@@ -33,12 +33,39 @@ export const ParameterController = {
   },
 
   listByTest: async (req, res) => {
-    try {
-      const { testId } = req.params;
-      const list = await ParameterService.listByTest(testId);
-      res.json({ success: true, data: list });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch parameters" });
+   try {
+    const { testId } = req.params;
+    const gender = (req.query.gender || "Both").toString().trim();
+
+    // Optional validation (recommended)
+    const allowed = new Set(["Male", "Female", "Both"]);
+    if (!allowed.has(gender)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid gender. Use Male, Female, or Both.",
+      });
     }
+
+    const list = await ParameterService.listByTest(testId, gender);
+
+    return res.json({ success: true, data: list });
+  } catch (err) {
+    console.error("listByTest error:", err);
+    return res.status(500).json({ success: false, error: "Failed to fetch parameters" });
+  }
+  },
+
+   listByTest1: async (req, res) => {
+   try {
+    const { testId } = req.params;
+   
+
+    const list = await ParameterService.listByTest1(testId);
+
+    return res.json({ success: true, data: list });
+  } catch (err) {
+    console.error("listByTest error:", err);
+    return res.status(500).json({ success: false, error: "Failed to fetch parameters" });
+  }
   }
 };

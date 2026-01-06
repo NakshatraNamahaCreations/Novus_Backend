@@ -73,49 +73,6 @@ export const ResultService = {
     }
   },
 
-  // update: async (id, payload) => {
-
-  //   console.log("payload",payload)
-  //   const existing = await prisma.patientTestResult.findUnique({
-  //     where: { id },
-  //   });
-
-  //   if (!existing) throw new Error("Result not found");
-
-  //   // update main test result
-  //   await prisma.patientTestResult.update({
-  //     where: { id },
-  //     data: {
-  //       status: payload.approve ? "APPROVED" : "REPORTED",
-  //       reportedById: payload.reportedById,
-  //       createdById:payload.createdById,
-  //       reportedAt: new Date(),
-  //     },
-  //   });
-
-  //   // replace parameters
-  //   if (payload.parameters?.length) {
-  //     await prisma.parameterResult.deleteMany({
-  //       where: { patientTestResultId: id },
-  //     });
-
-  //     const rows = payload.parameters.map((p) => ({
-  //       patientTestResultId: id,
-  //       parameterId: p.parameterId,
-  //       valueNumber: p.valueNumber,
-  //       valueText: p.valueText,
-  //       unit: p.unit,
-  //     }));
-
-  //     await prisma.parameterResult.createMany({ data: rows });
-  //   }
-
-  //   return prisma.patientTestResult.findUnique({
-  //     where: { id },
-  //     include: { parameterResults: true },
-  //   });
-  // },
-
   findByOrderTestAndPatient: (orderId, testId, patientId) =>
     prisma.patientTestResult.findFirst({
       where: {
@@ -254,10 +211,11 @@ export const ResultService = {
         },
       },
     }),
-  getDefaultLayout: () =>
-    prisma.reportLayout.findFirst({
-      where: { isDefault: true },
-    }),
+getDefaultLayout: () =>
+  prisma.reportLayout.findFirst({
+    orderBy: { id: "desc" }, // or createdAt: "desc"
+  }),
+
 
   generatePrintableHtml: (report, layout = null, signature = null) => {
     const withLetterhead = !!layout;

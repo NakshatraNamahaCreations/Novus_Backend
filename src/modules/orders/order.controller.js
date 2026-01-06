@@ -1465,6 +1465,7 @@ export const getOrderResultsById = async (req, res) => {
               ...omp.test,
               result: result
                 ? {
+                    id:result.id,
                     status: result.status,
                     reportedAt: result.reportedAt,
                     reportHtml: result.reportHtml,
@@ -1494,6 +1495,7 @@ export const getOrderResultsById = async (req, res) => {
                 ...cp.test,
                 result: result
                   ? {
+                    id:result.id,
                       status: result.status,
                       reportedAt: result.reportedAt,
                       reportHtml: result.reportHtml,

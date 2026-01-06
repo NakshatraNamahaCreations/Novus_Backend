@@ -50,6 +50,67 @@ find: async (req, res) => {
   }
 },
 
+find1: async (req, res) => {
+  try {
+    const { orderId, patientId, type = "full" } = req.query;
+
+    if (!orderId || !patientId) {
+      return res.status(400).json({
+        success: false,
+        message: "orderId and patientId are required",
+      });
+    }
+
+    const row = await prisma.patientReportPdf.findUnique({
+      where: {
+        orderId_patientId: {
+          orderId: Number(orderId),
+          patientId: Number(patientId),
+        },
+      },
+    });
+  
+
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient PDF not found (not generated yet)",
+      });
+    }
+
+    const url =
+      type === "plain"
+        ? row.plainPdfUrl
+        : type === "letterhead"
+        ? row.letterheadPdfUrl
+        : row.fullPdfUrl;
+
+    if (!url) {
+      return res.status(404).json({
+        success: false,
+        message: `PDF url not available for type=${type}`,
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        orderId: row.orderId,
+        patientId: row.patientId,
+        type,
+        url,
+        status: row.status,
+      },
+    });
+  } catch (err) {
+    console.error("patientReportPdf.find error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch patient pdf url",
+    });
+  }
+},
+
  // UPDATE RESULT
   update: async (req, res) => {
     try {

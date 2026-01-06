@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
 import { sendOtpSms } from "../../utils/sendOtpSms.js";
+import { whatsappQueue } from "../../queues/whatsapp.queue.js";
 
 const prisma = new PrismaClient();
 
@@ -152,6 +153,7 @@ export const loginOrRegister = async (req, res) => {
 export const verifyOtp = async (req, res) => {
   try {
     const { contactNo, otp, fcmToken, platform } = req.body;
+    
 
     const patient = await prisma.patient.findFirst({
       where: { contactNo },
@@ -190,6 +192,23 @@ export const verifyOtp = async (req, res) => {
         },
       });
     }
+
+    // after patient create + sendOtpSms
+await whatsappQueue.add(
+  "whatsapp.welcomeNewPatient", // 👈 keep it consistent with worker routing
+  {
+    contactNo,
+    patientName: patient?.fullName || "Customer",
+  },
+  {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: true,
+    removeOnFail: false,
+  }
+);
+
+
 
     return res.json({
       message: "Login successful",

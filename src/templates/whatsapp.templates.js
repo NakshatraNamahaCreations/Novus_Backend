@@ -137,13 +137,20 @@ Novus Health Labs`,
   },
 
   // ⭐ NEW — new_patients_template
-  NEW_PATIENT_WELCOME: {
-    templateId: process.env.WABRIDGE_NEW_PATIENT_TEMPLATE_ID,
-    message: `Welcome to Novus 👋
-Your personal health companion for tests, reports, and care—simple, fast, and reliable.
-Let’s get started 💙`,
-    mapVariables: () => [],
-  },
+WELCOME_NEW_PATIENT: {
+  templateId: process.env.WABRIDGE_NEW_PATIENT_TEMPLATE_ID,
+  message: `Dear {{1}},
+
+Welcome to Novus.
+
+Novus helps you manage your health tests, reports, and related services in a simple and reliable way.
+
+You can use this platform to access your diagnostic information and stay updated on your healthcare services.
+
+Thank you for choosing Novus.`,
+  mapVariables: ({ customerName }) => [customerName],
+},
+
 
 payment_link: {
   templateId: process.env.WABRIDGE_PAYMENT_LINK,
