@@ -35,10 +35,12 @@ export const ParameterController = {
   listByTest: async (req, res) => {
    try {
     const { testId } = req.params;
+   
     const gender = (req.query.gender || "Both").toString().trim();
 
+  
     // Optional validation (recommended)
-    const allowed = new Set(["Male", "Female", "Both"]);
+    const allowed = new Set(["Male", "Female", "Both" ,"Kids"]);
     if (!allowed.has(gender)) {
       return res.status(400).json({
         success: false,
@@ -46,7 +48,7 @@ export const ParameterController = {
       });
     }
 
-    const list = await ParameterService.listByTest(testId, gender);
+    const list = await ParameterService.listByTest1(testId, gender);
 
     return res.json({ success: true, data: list });
   } catch (err) {

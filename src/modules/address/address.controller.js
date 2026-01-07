@@ -118,8 +118,8 @@ export const updateAddress = async (req, res) => {
         city,
         state,
         pincode,
-        latitude: latitude ? parseFloat(latitude) : null,
-        longitude: longitude ? parseFloat(longitude) : null,
+        latitude: latitude ? parseFloat(latitude) : existing?.latitude,
+        longitude: longitude ? parseFloat(longitude) : existing?.longitude,
       },
     });
 
