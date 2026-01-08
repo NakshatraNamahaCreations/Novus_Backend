@@ -101,7 +101,7 @@ await prisma.payment.create({
     paymentMode:"ONLINE",
     paymentId: refOrderId,
   
-    paymentMethod: "NETBANKING",
+    paymentMethod: "UPI",
  
     paymentStatus: statusResp.state,
 

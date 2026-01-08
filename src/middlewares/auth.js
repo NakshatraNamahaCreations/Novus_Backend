@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || "NOVUS!@2025";
 
 export const authenticateUser = (req, res, next) => {
   try {
