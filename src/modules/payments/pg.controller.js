@@ -24,8 +24,11 @@ export const createPaymentLink = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    const amountInPaise = 100 * 100;
+    const amountInPaise = order.finalAmount * 100;
+
     const amountInRupees = amountInPaise / 100;
+
+  
 
     const merchantOrderId = `ORD-${orderId}-${uuidv4().slice(0, 8)}`;
 

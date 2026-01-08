@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
+import { invoiceQueue } from "../../queues/invoice.queue.js";
 
 const prisma = new PrismaClient();
-
 
 /**
  * @desc    Create a new payment
@@ -10,8 +10,6 @@ const prisma = new PrismaClient();
  */
 export const createPayment = async (req, res) => {
   try {
-   
-
     const {
       orderId,
       patientId,
@@ -20,23 +18,23 @@ export const createPayment = async (req, res) => {
       paymentMethod,
       paymentMode,
       amount,
-      currency = 'INR',
+      currency = "INR",
       transactionNote,
       referenceId,
       gatewayResponse,
       capturedAmount,
-      ipAddress
+      ipAddress,
     } = req.body;
 
     // Check if order exists
     if (orderId) {
       const order = await prisma.order.findUnique({
         where: { id: orderId },
-        include: { payments: true }
+        include: { payments: true },
       });
 
       if (!order) {
-        return res.status(404).json({ message: 'Order not found' });
+        return res.status(404).json({ message: "Order not found" });
       }
 
       // Calculate total paid amount
@@ -47,13 +45,17 @@ export const createPayment = async (req, res) => {
       // Check if payment exceeds order amount
       if (existingPaymentsTotal + amount > order.finalAmount) {
         return res.status(400).json({
-          message: `Payment amount exceeds order balance. Maximum allowed: ${order.finalAmount - existingPaymentsTotal}`
+          message: `Payment amount exceeds order balance. Maximum allowed: ${
+            order.finalAmount - existingPaymentsTotal
+          }`,
         });
       }
     }
 
     // Generate unique payment ID
-    const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const paymentId = `PAY-${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
 
     // Create payment
     const payment = await prisma.payment.create({
@@ -66,7 +68,7 @@ export const createPayment = async (req, res) => {
         paymentId,
         paymentMethod,
         paymentMode,
-        paymentStatus: 'COMPLETED', // Default for manual payments
+        paymentStatus: "COMPLETED", // Default for manual payments
         amount,
         currency,
         paymentDate: new Date(),
@@ -76,7 +78,7 @@ export const createPayment = async (req, res) => {
         capturedAmount: capturedAmount || amount,
         ipAddress: ipAddress || req.ip,
         createdById: req.user?.id,
-        createdBy: req.user?.id ? { connect: { id: req.user.id } } : undefined
+        createdBy: req.user?.id ? { connect: { id: req.user.id } } : undefined,
       },
       include: {
         order: {
@@ -85,57 +87,62 @@ export const createPayment = async (req, res) => {
               select: {
                 id: true,
                 fullName: true,
-                contactNo: true
-              }
-            }
-          }
+                contactNo: true,
+              },
+            },
+          },
         },
         patient: {
           select: {
             id: true,
             fullName: true,
-            contactNo: true
-          }
+            contactNo: true,
+          },
         },
         vendor: {
           select: {
             id: true,
             name: true,
-            number: true
-          }
+            number: true,
+          },
         },
         center: {
           select: {
             id: true,
             name: true,
-            email: true
-          }
+            email: true,
+          },
         },
         createdBy: {
           select: {
             id: true,
             name: true,
-            email: true
-          }
-        }
-      }
+            email: true,
+          },
+        },
+      },
     });
 
     // Update order payment status if order exists
     if (orderId) {
       const order = await prisma.order.findUnique({
         where: { id: orderId },
-        include: { payments: true }
+        include: { payments: true },
       });
 
       if (order) {
-        const totalPaid = order.payments.reduce((total, p) => total + p.amount, 0) + amount;
-        const paymentStatus = totalPaid >= order.finalAmount ? 'paid' : 
-                             totalPaid > 0 ? 'partially_paid' : 'pending';
+        const totalPaid =
+          order.payments.reduce((total, p) => total + p.amount, 0) + amount;
+        const paymentStatus =
+          totalPaid >= order.finalAmount
+            ? "paid"
+            : totalPaid > 0
+            ? "partially_paid"
+            : "pending";
 
         await prisma.order.update({
           where: { id: orderId },
-          data: { paymentStatus }
+          data: { paymentStatus },
         });
       }
     }
@@ -145,38 +152,40 @@ export const createPayment = async (req, res) => {
       await prisma.vendor.update({
         where: { id: vendorId },
         data: {
-          earnings: { increment: amount }
-        }
+          earnings: { increment: amount },
+        },
       });
 
       // Create earnings history
       await prisma.earningsHistory.create({
         data: {
           vendorId,
-          title: 'Payment Received',
+          title: "Payment Received",
           desc: `Payment of ${amount} ${currency} received`,
           amount,
-          type: 'add',
-          balanceAfter: await prisma.vendor.findUnique({
-            where: { id: vendorId },
-            select: { earnings: true }
-          }).then(vendor => vendor.earnings),
-          createdById: req.user?.id
-        }
+          type: "add",
+          balanceAfter: await prisma.vendor
+            .findUnique({
+              where: { id: vendorId },
+              select: { earnings: true },
+            })
+            .then((vendor) => vendor.earnings),
+          createdById: req.user?.id,
+        },
       });
     }
-
+    await invoiceQueue.add("generate-invoice", { paymentId });
     res.status(201).json({
       success: true,
-      message: 'Payment created successfully',
-      payment
+      message: "Payment created successfully",
+      payment,
     });
   } catch (error) {
-    console.error('Create payment error:', error);
+    console.error("Create payment error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error creating payment',
-      error: error.message
+      message: "Error creating payment",
+      error: error.message,
     });
   }
 };
@@ -200,7 +209,7 @@ export const getAllPayments = async (req, res) => {
       paymentMode,
       startDate,
       endDate,
-      search
+      search,
     } = req.query;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -225,26 +234,26 @@ export const getAllPayments = async (req, res) => {
     // Search filter
     if (search) {
       where.OR = [
-        { paymentId: { contains: search, mode: 'insensitive' } },
-        { referenceId: { contains: search, mode: 'insensitive' } },
+        { paymentId: { contains: search, mode: "insensitive" } },
+        { referenceId: { contains: search, mode: "insensitive" } },
         {
           order: {
-            orderNumber: { contains: search, mode: 'insensitive' }
-          }
+            orderNumber: { contains: search, mode: "insensitive" },
+          },
         },
         {
           patient: {
             OR: [
-              { fullName: { contains: search, mode: 'insensitive' } },
-              { contactNo: { contains: search, mode: 'insensitive' } }
-            ]
-          }
+              { fullName: { contains: search, mode: "insensitive" } },
+              { contactNo: { contains: search, mode: "insensitive" } },
+            ],
+          },
         },
         {
           vendor: {
-            name: { contains: search, mode: 'insensitive' }
-          }
-        }
+            name: { contains: search, mode: "insensitive" },
+          },
+        },
       ];
     }
 
@@ -257,44 +266,44 @@ export const getAllPayments = async (req, res) => {
             select: {
               id: true,
               orderNumber: true,
-              finalAmount: true
-            }
+              finalAmount: true,
+            },
           },
           patient: {
             select: {
               id: true,
               fullName: true,
-              contactNo: true
-            }
+              contactNo: true,
+            },
           },
           vendor: {
             select: {
               id: true,
               name: true,
-              number: true
-            }
+              number: true,
+            },
           },
           center: {
             select: {
               id: true,
-              name: true
-            }
+              name: true,
+            },
           },
           createdBy: {
             select: {
               id: true,
               name: true,
-              email: true
-            }
-          }
+              email: true,
+            },
+          },
         },
         orderBy: {
-          createdAt: 'desc'
+          createdAt: "desc",
         },
         skip,
-        take: parseInt(limit)
+        take: parseInt(limit),
       }),
-      prisma.payment.count({ where })
+      prisma.payment.count({ where }),
     ]);
 
     // Calculate summary
@@ -302,9 +311,9 @@ export const getAllPayments = async (req, res) => {
       where,
       _sum: {
         amount: true,
-        refundAmount: true
+        refundAmount: true,
       },
-      _count: true
+      _count: true,
     });
 
     res.json({
@@ -314,21 +323,22 @@ export const getAllPayments = async (req, res) => {
         total,
         page: parseInt(page),
         limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit))
+        pages: Math.ceil(total / parseInt(limit)),
       },
       summary: {
         totalAmount: summary._sum.amount || 0,
         totalRefunds: summary._sum.refundAmount || 0,
-        netAmount: (summary._sum.amount || 0) - (summary._sum.refundAmount || 0),
-        totalPayments: summary._count
-      }
+        netAmount:
+          (summary._sum.amount || 0) - (summary._sum.refundAmount || 0),
+        totalPayments: summary._count,
+      },
     });
   } catch (error) {
-    console.error('Get all payments error:', error);
+    console.error("Get all payments error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching payments',
-      error: error.message
+      message: "Error fetching payments",
+      error: error.message,
     });
   }
 };
@@ -352,97 +362,97 @@ export const getPaymentById = async (req, res) => {
                 id: true,
                 fullName: true,
                 contactNo: true,
-                email: true
-              }
+                email: true,
+              },
             },
             vendor: {
               select: {
                 id: true,
                 name: true,
-                number: true
-              }
+                number: true,
+              },
             },
             center: {
               select: {
                 id: true,
-                name: true
-              }
-            }
-          }
+                name: true,
+              },
+            },
+          },
         },
         patient: {
           select: {
             id: true,
             fullName: true,
             contactNo: true,
-            email: true
-          }
+            email: true,
+          },
         },
         vendor: {
           select: {
             id: true,
             name: true,
             number: true,
-            email: true
-          }
+            email: true,
+          },
         },
         center: {
           select: {
             id: true,
             name: true,
-            email: true
-          }
+            email: true,
+          },
         },
         createdBy: {
           select: {
             id: true,
             name: true,
-            email: true
-          }
+            email: true,
+          },
         },
         updatedBy: {
           select: {
             id: true,
             name: true,
-            email: true
-          }
-        }
-      }
+            email: true,
+          },
+        },
+      },
     });
 
     if (!payment) {
       return res.status(404).json({
         success: false,
-        message: 'Payment not found'
+        message: "Payment not found",
       });
     }
 
     // Check authorization
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== "admin") {
       if (req.user.patientId && payment.patientId !== req.user.patientId) {
         return res.status(403).json({
           success: false,
-          message: 'Not authorized to access this payment'
+          message: "Not authorized to access this payment",
         });
       }
       if (req.user.vendorId && payment.vendorId !== req.user.vendorId) {
         return res.status(403).json({
           success: false,
-          message: 'Not authorized to access this payment'
+          message: "Not authorized to access this payment",
         });
       }
     }
 
     res.json({
       success: true,
-      payment
+      payment,
     });
   } catch (error) {
-    console.error('Get payment by ID error:', error);
+    console.error("Get payment by ID error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching payment',
-      error: error.message
+      message: "Error fetching payment",
+      error: error.message,
     });
   }
 };
@@ -458,29 +468,33 @@ export const getPaymentsByOrderId = async (req, res) => {
 
     const order = await prisma.order.findUnique({
       where: { id: parseInt(orderId) },
-      select: { patientId: true, vendorId: true }
+      select: { patientId: true, vendorId: true },
     });
 
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: 'Order not found'
+        message: "Order not found",
       });
     }
 
-    
-
     const payments = await prisma.payment.findMany({
       where: { orderId: parseInt(orderId) },
-    
+
       orderBy: {
-        createdAt: 'desc'
-      }
+        createdAt: "desc",
+      },
     });
 
     // Calculate totals
-    const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
-    const totalRefunded = payments.reduce((sum, payment) => sum + (payment.refundAmount || 0), 0);
+    const totalPaid = payments.reduce(
+      (sum, payment) => sum + payment.amount,
+      0
+    );
+    const totalRefunded = payments.reduce(
+      (sum, payment) => sum + (payment.refundAmount || 0),
+      0
+    );
 
     res.json({
       success: true,
@@ -489,15 +503,15 @@ export const getPaymentsByOrderId = async (req, res) => {
         totalPaid,
         totalRefunded,
         netAmount: totalPaid - totalRefunded,
-        count: payments.length
-      }
+        count: payments.length,
+      },
     });
   } catch (error) {
-    console.error('Get payments by order ID error:', error);
+    console.error("Get payments by order ID error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching order payments',
-      error: error.message
+      message: "Error fetching order payments",
+      error: error.message,
     });
   }
 };
@@ -512,10 +526,13 @@ export const getPaymentsByPatientId = async (req, res) => {
     const { patientId } = req.params;
 
     // Check authorization
-    if (req.user.role !== 'admin' && req.user.patientId !== parseInt(patientId)) {
+    if (
+      req.user.role !== "admin" &&
+      req.user.patientId !== parseInt(patientId)
+    ) {
       return res.status(403).json({
         success: false,
-        message: 'Not authorized to access patient payments'
+        message: "Not authorized to access patient payments",
       });
     }
 
@@ -531,25 +548,25 @@ export const getPaymentsByPatientId = async (req, res) => {
               id: true,
               orderNumber: true,
               finalAmount: true,
-              status: true
-            }
+              status: true,
+            },
           },
           createdBy: {
             select: {
               id: true,
-              name: true
-            }
-          }
+              name: true,
+            },
+          },
         },
         orderBy: {
-          createdAt: 'desc'
+          createdAt: "desc",
         },
         skip,
-        take: parseInt(limit)
+        take: parseInt(limit),
       }),
       prisma.payment.count({
-        where: { patientId: parseInt(patientId) }
-      })
+        where: { patientId: parseInt(patientId) },
+      }),
     ]);
 
     // Calculate summary
@@ -557,8 +574,8 @@ export const getPaymentsByPatientId = async (req, res) => {
       where: { patientId: parseInt(patientId) },
       _sum: {
         amount: true,
-        refundAmount: true
-      }
+        refundAmount: true,
+      },
     });
 
     res.json({
@@ -568,20 +585,21 @@ export const getPaymentsByPatientId = async (req, res) => {
         total,
         page: parseInt(page),
         limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit))
+        pages: Math.ceil(total / parseInt(limit)),
       },
       summary: {
         totalPaid: summary._sum.amount || 0,
         totalRefunded: summary._sum.refundAmount || 0,
-        netAmount: (summary._sum.amount || 0) - (summary._sum.refundAmount || 0)
-      }
+        netAmount:
+          (summary._sum.amount || 0) - (summary._sum.refundAmount || 0),
+      },
     });
   } catch (error) {
-    console.error('Get payments by patient ID error:', error);
+    console.error("Get payments by patient ID error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching patient payments',
-      error: error.message
+      message: "Error fetching patient payments",
+      error: error.message,
     });
   }
 };
@@ -596,24 +614,32 @@ export const updatePaymentStatus = async (req, res) => {
     const { id } = req.params;
     const { paymentStatus, notes } = req.body;
 
-    const validStatuses = ['PENDING', 'AUTHORIZED', 'CAPTURED', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED', 'CANCELLED'];
-    
+    const validStatuses = [
+      "PENDING",
+      "AUTHORIZED",
+      "CAPTURED",
+      "FAILED",
+      "REFUNDED",
+      "PARTIALLY_REFUNDED",
+      "CANCELLED",
+    ];
+
     if (!validStatuses.includes(paymentStatus)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid payment status'
+        message: "Invalid payment status",
       });
     }
 
     const payment = await prisma.payment.findUnique({
       where: { id: parseInt(id) },
-      include: { order: true }
+      include: { order: true },
     });
 
     if (!payment) {
       return res.status(404).json({
         success: false,
-        message: 'Payment not found'
+        message: "Payment not found",
       });
     }
 
@@ -622,62 +648,70 @@ export const updatePaymentStatus = async (req, res) => {
       where: { id: parseInt(id) },
       data: {
         paymentStatus,
-        transactionNote: notes ? `${payment.transactionNote || ''}\n${new Date().toISOString()}: ${notes}`.trim() : payment.transactionNote,
+        transactionNote: notes
+          ? `${
+              payment.transactionNote || ""
+            }\n${new Date().toISOString()}: ${notes}`.trim()
+          : payment.transactionNote,
         updatedById: req.user.id,
-        updatedBy: { connect: { id: req.user.id } }
+        updatedBy: { connect: { id: req.user.id } },
       },
       include: {
         order: {
           select: {
             id: true,
-            orderNumber: true
-          }
+            orderNumber: true,
+          },
         },
         updatedBy: {
           select: {
             id: true,
-            name: true
-          }
-        }
-      }
+            name: true,
+          },
+        },
+      },
     });
 
     // Update order payment status if payment is for an order
     if (payment.orderId) {
       const orderPayments = await prisma.payment.findMany({
-        where: { orderId: payment.orderId }
+        where: { orderId: payment.orderId },
       });
 
       const totalPaid = orderPayments
-        .filter(p => p.paymentStatus === 'CAPTURED')
+        .filter((p) => p.paymentStatus === "CAPTURED")
         .reduce((sum, p) => sum + p.amount, 0);
 
       const order = await prisma.order.findUnique({
-        where: { id: payment.orderId }
+        where: { id: payment.orderId },
       });
 
       if (order) {
-        const newPaymentStatus = totalPaid >= order.finalAmount ? 'paid' :
-                                totalPaid > 0 ? 'partially_paid' : 'pending';
+        const newPaymentStatus =
+          totalPaid >= order.finalAmount
+            ? "paid"
+            : totalPaid > 0
+            ? "partially_paid"
+            : "pending";
 
         await prisma.order.update({
           where: { id: payment.orderId },
-          data: { paymentStatus: newPaymentStatus }
+          data: { paymentStatus: newPaymentStatus },
         });
       }
     }
 
     res.json({
       success: true,
-      message: 'Payment status updated successfully',
-      payment: updatedPayment
+      message: "Payment status updated successfully",
+      payment: updatedPayment,
     });
   } catch (error) {
-    console.error('Update payment status error:', error);
+    console.error("Update payment status error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error updating payment status',
-      error: error.message
+      message: "Error updating payment status",
+      error: error.message,
     });
   }
 };
@@ -694,21 +728,21 @@ export const processRefund = async (req, res) => {
 
     const payment = await prisma.payment.findUnique({
       where: { id: parseInt(id) },
-      include: { order: true, vendor: true }
+      include: { order: true, vendor: true },
     });
 
     if (!payment) {
       return res.status(404).json({
         success: false,
-        message: 'Payment not found'
+        message: "Payment not found",
       });
     }
 
     // Check if payment is captured
-    if (payment.paymentStatus !== 'CAPTURED') {
+    if (payment.paymentStatus !== "CAPTURED") {
       return res.status(400).json({
         success: false,
-        message: 'Only captured payments can be refunded'
+        message: "Only captured payments can be refunded",
       });
     }
 
@@ -717,7 +751,7 @@ export const processRefund = async (req, res) => {
     if (refundAmount > maxRefundable) {
       return res.status(400).json({
         success: false,
-        message: `Refund amount exceeds maximum refundable amount of ${maxRefundable}`
+        message: `Refund amount exceeds maximum refundable amount of ${maxRefundable}`,
       });
     }
 
@@ -729,31 +763,32 @@ export const processRefund = async (req, res) => {
         refundDate: new Date(),
         refundReason,
         refundReference,
-        paymentStatus: refundAmount === payment.amount ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
+        paymentStatus:
+          refundAmount === payment.amount ? "REFUNDED" : "PARTIALLY_REFUNDED",
         updatedById: req.user.id,
-        updatedBy: { connect: { id: req.user.id } }
+        updatedBy: { connect: { id: req.user.id } },
       },
       include: {
         order: {
           select: {
             id: true,
-            orderNumber: true
-          }
+            orderNumber: true,
+          },
         },
         patient: {
           select: {
             id: true,
             fullName: true,
-            contactNo: true
-          }
+            contactNo: true,
+          },
         },
         updatedBy: {
           select: {
             id: true,
-            name: true
-          }
-        }
-      }
+            name: true,
+          },
+        },
+      },
     });
 
     // Update vendor earnings if vendor payment
@@ -761,38 +796,40 @@ export const processRefund = async (req, res) => {
       await prisma.vendor.update({
         where: { id: payment.vendorId },
         data: {
-          earnings: { decrement: refundAmount }
-        }
+          earnings: { decrement: refundAmount },
+        },
       });
 
       // Create earnings history for refund
       await prisma.earningsHistory.create({
         data: {
           vendorId: payment.vendorId,
-          title: 'Refund Processed',
+          title: "Refund Processed",
           desc: `Refund of ${refundAmount} processed for payment ${payment.paymentId}`,
           amount: refundAmount,
-          type: 'deduct',
-          balanceAfter: await prisma.vendor.findUnique({
-            where: { id: payment.vendorId },
-            select: { earnings: true }
-          }).then(vendor => vendor.earnings),
-          createdById: req.user.id
-        }
+          type: "deduct",
+          balanceAfter: await prisma.vendor
+            .findUnique({
+              where: { id: payment.vendorId },
+              select: { earnings: true },
+            })
+            .then((vendor) => vendor.earnings),
+          createdById: req.user.id,
+        },
       });
     }
 
     res.json({
       success: true,
-      message: 'Refund processed successfully',
-      payment: updatedPayment
+      message: "Refund processed successfully",
+      payment: updatedPayment,
     });
   } catch (error) {
-    console.error('Process refund error:', error);
+    console.error("Process refund error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error processing refund',
-      error: error.message
+      message: "Error processing refund",
+      error: error.message,
     });
   }
 };
@@ -821,39 +858,39 @@ export const getPaymentStatistics = async (req, res) => {
       totalRefunds,
       statusCounts,
       methodCounts,
-      dailyStats
+      dailyStats,
     ] = await Promise.all([
       // Total payments
       prisma.payment.count({ where }),
-      
+
       // Total amount
       prisma.payment.aggregate({
         where,
-        _sum: { amount: true }
+        _sum: { amount: true },
       }),
-      
+
       // Total refunds
       prisma.payment.aggregate({
         where: { ...where, refundAmount: { gt: 0 } },
-        _sum: { refundAmount: true }
+        _sum: { refundAmount: true },
       }),
-      
+
       // Status counts
       prisma.payment.groupBy({
-        by: ['paymentStatus'],
+        by: ["paymentStatus"],
         where,
         _count: true,
-        _sum: { amount: true }
+        _sum: { amount: true },
       }),
-      
+
       // Payment method counts
       prisma.payment.groupBy({
-        by: ['paymentMethod'],
+        by: ["paymentMethod"],
         where,
         _count: true,
-        _sum: { amount: true }
+        _sum: { amount: true },
       }),
-      
+
       // Daily statistics for last 30 days
       prisma.$queryRaw`
         SELECT 
@@ -863,20 +900,28 @@ export const getPaymentStatistics = async (req, res) => {
           SUM(COALESCE(refundAmount, 0)) as total_refunds
         FROM "Payment"
         WHERE "paymentDate" >= CURRENT_DATE - INTERVAL '30 days'
-          ${startDate ? prisma.sql`AND "paymentDate" >= ${new Date(startDate)}` : prisma.sql``}
-          ${endDate ? prisma.sql`AND "paymentDate" <= ${new Date(endDate)}` : prisma.sql``}
+          ${
+            startDate
+              ? prisma.sql`AND "paymentDate" >= ${new Date(startDate)}`
+              : prisma.sql``
+          }
+          ${
+            endDate
+              ? prisma.sql`AND "paymentDate" <= ${new Date(endDate)}`
+              : prisma.sql``
+          }
         GROUP BY DATE("paymentDate")
         ORDER BY date DESC
         LIMIT 30
-      `
+      `,
     ]);
 
     // Calculate vendor payments
     const vendorPayments = await prisma.payment.groupBy({
-      by: ['vendorId'],
+      by: ["vendorId"],
       where: { ...where, vendorId: { not: null } },
       _count: true,
-      _sum: { amount: true }
+      _sum: { amount: true },
     });
 
     // Get vendor details
@@ -884,13 +929,13 @@ export const getPaymentStatistics = async (req, res) => {
       vendorPayments.map(async (vp) => {
         const vendor = await prisma.vendor.findUnique({
           where: { id: vp.vendorId },
-          select: { name: true }
+          select: { name: true },
         });
         return {
           vendorId: vp.vendorId,
-          vendorName: vendor?.name || 'Unknown',
+          vendorName: vendor?.name || "Unknown",
           count: vp._count,
-          totalAmount: vp._sum.amount
+          totalAmount: vp._sum.amount,
         };
       })
     );
@@ -901,27 +946,29 @@ export const getPaymentStatistics = async (req, res) => {
         totalPayments,
         totalAmount: totalAmount._sum.amount || 0,
         totalRefunds: totalRefunds._sum.refundAmount || 0,
-        netAmount: (totalAmount._sum.amount || 0) - (totalRefunds._sum.refundAmount || 0),
-        byStatus: statusCounts.map(s => ({
+        netAmount:
+          (totalAmount._sum.amount || 0) -
+          (totalRefunds._sum.refundAmount || 0),
+        byStatus: statusCounts.map((s) => ({
           status: s.paymentStatus,
           count: s._count,
-          amount: s._sum.amount
+          amount: s._sum.amount,
         })),
-        byMethod: methodCounts.map(m => ({
+        byMethod: methodCounts.map((m) => ({
           method: m.paymentMethod,
           count: m._count,
-          amount: m._sum.amount
+          amount: m._sum.amount,
         })),
         byVendor: vendorDetails,
-        dailyStats
-      }
+        dailyStats,
+      },
     });
   } catch (error) {
-    console.error('Get payment statistics error:', error);
+    console.error("Get payment statistics error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching payment statistics',
-      error: error.message
+      message: "Error fetching payment statistics",
+      error: error.message,
     });
   }
 };
@@ -936,13 +983,13 @@ export const deletePayment = async (req, res) => {
     const { id } = req.params;
 
     const payment = await prisma.payment.findUnique({
-      where: { id: parseInt(id) }
+      where: { id: parseInt(id) },
     });
 
     if (!payment) {
       return res.status(404).json({
         success: false,
-        message: 'Payment not found'
+        message: "Payment not found",
       });
     }
 
@@ -950,7 +997,7 @@ export const deletePayment = async (req, res) => {
     if (payment.refundAmount && payment.refundAmount > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot delete payment with refunds'
+        message: "Cannot delete payment with refunds",
       });
     }
 
@@ -958,23 +1005,25 @@ export const deletePayment = async (req, res) => {
     await prisma.payment.update({
       where: { id: parseInt(id) },
       data: {
-        paymentStatus: 'CANCELLED',
-        transactionNote: `${payment.transactionNote || ''}\n${new Date().toISOString()}: Payment deleted by admin`.trim(),
+        paymentStatus: "CANCELLED",
+        transactionNote: `${
+          payment.transactionNote || ""
+        }\n${new Date().toISOString()}: Payment deleted by admin`.trim(),
         updatedById: req.user.id,
-        updatedBy: { connect: { id: req.user.id } }
-      }
+        updatedBy: { connect: { id: req.user.id } },
+      },
     });
 
     res.json({
       success: true,
-      message: 'Payment deleted successfully'
+      message: "Payment deleted successfully",
     });
   } catch (error) {
-    console.error('Delete payment error:', error);
+    console.error("Delete payment error:", error);
     res.status(500).json({
       success: false,
-      message: 'Error deleting payment',
-      error: error.message
+      message: "Error deleting payment",
+      error: error.message,
     });
   }
 };

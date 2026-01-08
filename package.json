@@ -7,7 +7,9 @@
     "start:report-worker": "nodemon src/workers/report.worker.js",
     "start:whatsapp-worker": "nodemon src/workers/whatsapp.worker.js",
     "start:notification-worker": "nodemon src/workers/notification.worker.js",
-    "start:vendor-notification-worker": "nodemon src/workers/vendorNotification.worker.js"
+    "start:vendor-notification-worker": "nodemon src/workers/vendorNotification.worker.js",
+    "start:invoice-worker": "nodemon src/workers/invoice.worker.js"
+
   },
   "author": "yogesh",
   "license": "ISC",

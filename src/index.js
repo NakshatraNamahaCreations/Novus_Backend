@@ -50,6 +50,8 @@ import reportlayoutsRoutes from "./modules/reportLayout/reportLayout.routes.js"
 import pgRoutes from "./modules/payments/pg.routes.js"
 import pincodeRoutes from "./modules/pincode/pincode.routes.js";
 import locationRoutes from "./modules/location/location.route.js";
+import sourcesRoutes from "./modules/sources/sources.routes.js";
+
 
 import "./modules/notifications/notification.scheduler.js";
 
@@ -122,6 +124,9 @@ app.use("/api/report-layouts", reportlayoutsRoutes);
 app.use("/api/pg", pgRoutes);
 app.use("/api/pincodes", pincodeRoutes);
 app.use("/api/location",locationRoutes)
+app.use("/api/source",sourcesRoutes)
+
+
 
 
 

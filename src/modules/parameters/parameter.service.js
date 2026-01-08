@@ -2,100 +2,134 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 export const ParameterService = {
- create: async (testId, data) => {
-  const { ranges, resultOpts, createdById, ...parameterData } = data;
+  create: async (testId, data) => {
+    const { ranges, resultOpts, createdById, ...parameterData } = data;
 
-  return prisma.testParameter.create({
-    data: {
-      ...parameterData,
-      testId: Number(testId),
-      createdById: createdById ?? null,
+    return prisma.testParameter.create({
+      data: {
+        ...parameterData,
+        testId: Number(testId),
+        createdById: createdById ?? null,
 
-      // ⭐ HERE ranges are added
-      ranges: ranges?.length
-        ? {
-            create: ranges.map(r => ({
-              ...r,
-              createdById: createdById ?? null
-            }))
-          }
-        : undefined,
+        ranges: ranges?.length
+          ? {
+              create: ranges.map((r) => ({
+                ...r,
+                createdById: createdById ?? null,
+              })),
+            }
+          : undefined,
 
-      // result options
-      resultOpts: resultOpts?.length
-        ? { create: resultOpts }
-        : undefined
-    },
-
-    include: {
-      ranges: true,
-      resultOpts: true
-    }
-  });
-}
-,
-
-// parameter.service.js - Updated update function
-update: async (parameterId, data) => {
-  const { ranges, resultOpts, createdById, ...parameterData } = data;
-
-  // Start a transaction to ensure data consistency
-  return await prisma.$transaction(async (tx) => {
-    // First update the parameter
-    const updatedParameter = await tx.testParameter.update({
-      where: { id: Number(parameterId) },
-      data: parameterData,
+        // ✅ store Positive/Negative/Nil in ResultOption table
+        resultOpts: resultOpts?.length
+          ? {
+              create: resultOpts
+                .filter((o) => (o?.label || o?.value)?.toString().trim())
+                .map((o) => ({
+                  label: (o.label || o.value).toString().trim(),
+                  value: (o.value || o.label).toString().trim(),
+                  createdById: createdById ?? null,
+                })),
+            }
+          : undefined,
+      },
+      include: {
+        ranges: true,
+        resultOpts: true,
+      },
     });
+  },
+  // parameter.service.js - Updated update function
+  update: async (parameterId, data) => {
+    const { ranges, resultOpts, createdById, ...parameterData } = data;
 
-    // If ranges are provided, delete existing and create new
-    if (ranges !== undefined) {
-      // Delete existing ranges
-      await tx.parameterRange.deleteMany({
-        where: { parameterId: Number(parameterId) }
+    return prisma.$transaction(async (tx) => {
+      // 1) Update parameter base data
+      await tx.testParameter.update({
+        where: { id: Number(parameterId) },
+        data: parameterData,
       });
 
-      // Create new ranges if provided
-      if (ranges && ranges.length > 0) {
-        // Filter out empty ranges
-        const validRanges = ranges.filter(range => 
-          range.lowerLimit !== null || 
-          range.upperLimit !== null || 
-          range.referenceRange
-        );
+      // 2) Update ranges (delete + recreate)
+      if (ranges !== undefined) {
+        await tx.parameterRange.deleteMany({
+          where: { parameterId: Number(parameterId) },
+        });
 
-        if (validRanges.length > 0) {
-          await tx.parameterRange.createMany({
-            data: validRanges.map(range => ({
-              parameterId: Number(parameterId),
-              lowerLimit: range.lowerLimit !== null ? parseFloat(range.lowerLimit) : null,
-              upperLimit: range.upperLimit !== null ? parseFloat(range.upperLimit) : null,
-              criticalLow: range.criticalLow !== null ? parseFloat(range.criticalLow) : null,
-              criticalHigh: range.criticalHigh !== null ? parseFloat(range.criticalHigh) : null,
-              referenceRange: range.referenceRange || null,
-              gender: range.gender || 'Both',
-              normalValueHtml: range.normalValueHtml || null,
-              specialConditionHtml: range.specialConditionHtml || null,
-              createdById: createdById || null
-            }))
-          });
+        if (Array.isArray(ranges) && ranges.length > 0) {
+          const validRanges = ranges.filter(
+            (r) =>
+              r.lowerLimit !== null ||
+              r.upperLimit !== null ||
+              r.criticalLow !== null ||
+              r.criticalHigh !== null ||
+              (r.referenceRange && r.referenceRange.trim())
+          );
+
+          if (validRanges.length > 0) {
+            await tx.parameterRange.createMany({
+              data: validRanges.map((r) => ({
+                parameterId: Number(parameterId),
+                lowerLimit:
+                  r.lowerLimit !== null && r.lowerLimit !== ""
+                    ? Number(r.lowerLimit)
+                    : null,
+                upperLimit:
+                  r.upperLimit !== null && r.upperLimit !== ""
+                    ? Number(r.upperLimit)
+                    : null,
+                criticalLow:
+                  r.criticalLow !== null && r.criticalLow !== ""
+                    ? Number(r.criticalLow)
+                    : null,
+                criticalHigh:
+                  r.criticalHigh !== null && r.criticalHigh !== ""
+                    ? Number(r.criticalHigh)
+                    : null,
+                referenceRange: r.referenceRange?.trim() || null,
+                gender: r.gender || "Both",
+                normalValueHtml: r.normalValueHtml || null,
+                specialConditionHtml: r.specialConditionHtml || null,
+                createdById: createdById ?? null,
+              })),
+            });
+          }
         }
       }
-    }
 
-    // Return updated parameter with ranges
-    return await tx.testParameter.findUnique({
-      where: { id: Number(parameterId) },
-      include: { 
-        ranges: true,
-        resultOpts: true 
+      // ✅ 3) Update result options (delete + recreate)
+      if (resultOpts !== undefined) {
+        await tx.resultOption.deleteMany({
+          where: { parameterId: Number(parameterId) },
+        });
+
+        if (Array.isArray(resultOpts) && resultOpts.length > 0) {
+          const validOpts = resultOpts
+            .filter((o) => (o?.label || o?.value)?.toString().trim())
+            .map((o) => ({
+              parameterId: Number(parameterId),
+              label: (o.label || o.value).toString().trim(),
+              value: (o.value || o.label).toString().trim(),
+              createdById: createdById ?? null,
+            }));
+
+          if (validOpts.length > 0) {
+            await tx.resultOption.createMany({ data: validOpts });
+          }
+        }
       }
+
+      // 4) Return updated parameter
+      return tx.testParameter.findUnique({
+        where: { id: Number(parameterId) },
+        include: { ranges: true, resultOpts: true },
+      });
     });
-  });
-},
+  },
 
   delete: async (parameterId) => {
     return prisma.testParameter.delete({
-      where: { id: Number(parameterId) }
+      where: { id: Number(parameterId) },
     });
   },
 
@@ -105,11 +139,11 @@ update: async (parameterId, data) => {
       orderBy: { order: "asc" },
       include: {
         ranges: true,
-        resultOpts: true
-      }
+        resultOpts: true,
+      },
     });
   },
-   listByTest: async (testId, gender = "Both") => {
+  listByTest: async (testId, gender = "Both") => {
     try {
       const tId = Number(testId);
       const g = (gender || "Both").trim();

@@ -150,21 +150,30 @@ export const getCart = async (req, res) => {
         patient: { select: { fullName: true, age: true } },
         cartItems: {
           include: {
-            patient: { select: { fullName: true, age: true } },
-            test: true,
-            package: true       
-          }
-        }
-      }
+            test: true, // single test cart item
+            package: {
+              include: {
+                checkupPackages: {
+                  include: {
+                    test: {select:{
+                      id:true
+                    }}, // ✅ tests inside package
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
 
     return res.json(cart ?? { cart: null, items: [] });
-
   } catch (err) {
     console.error("GET CART ERROR:", err);
     return res.status(500).json({ error: "Server error" });
   }
 };
+
 
 export const getAllCarts = async (req, res) => {
   try {

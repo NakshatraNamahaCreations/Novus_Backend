@@ -98,6 +98,12 @@ model City {
   diagnosticCenters DiagnosticCenter[]
 }
 
+model Sources {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+}
+
 model DiagnosticCenter {
   id      Int     @id @default(autoincrement())
   name    String
@@ -279,7 +285,7 @@ model Category {
   name   String
   order  Int?
   type   String?
-
+  bannerUrl  String?
   createdById Int? // ⭐ ADDED: Track who created the category
   createdBy   User? @relation(fields: [createdById], references: [id])
 
@@ -824,6 +830,7 @@ model Payment {
   paymentDate     DateTime      @default(now())
   transactionNote String?
   referenceId     String?
+  invoiceUrl       String?
   gatewayResponse Json?
   capturedAmount  Float?
 
@@ -1128,7 +1135,7 @@ model TestParameter {
   unit     String?
   notes    String?
   isActive Boolean @default(true)
-
+ options   Json? 
   createdById Int? // ⭐ ADDED: Track who created the parameter
   createdBy   User? @relation(fields: [createdById], references: [id])
 

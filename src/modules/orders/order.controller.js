@@ -9,6 +9,7 @@ import { whatsappQueue } from "../../queues/whatsapp.queue.js";
 import { acquireLock } from "../../utils/redisLock.js";
 import { markOrderReportReady } from "./order.service.js";
 import { vendorNotificationQueue } from "../../queues/vendorNotification.queue.js";
+import { invoiceQueue } from "../../queues/invoice.queue.js";
 
 const prisma = new PrismaClient();
 
@@ -77,12 +78,12 @@ export const createOrder = async (req, res) => {
           slotId,
         },
       });
-
+  const paymentId=`PAY-${Date.now()}`
       await tx.payment.create({
         data: {
           orderId: createdOrder.id,
           patientId,
-          paymentId: `PAY-${Date.now()}`,
+          paymentId: paymentId,
           paymentMethod: "UPI",
           paymentMode: "ONLINE",
           paymentStatus: "COMPLETED",
@@ -91,6 +92,8 @@ export const createOrder = async (req, res) => {
           paymentDate: new Date(),
         },
       });
+
+      await invoiceQueue.add("generate-invoice", { paymentId });
 
       return createdOrder;
     });
@@ -415,6 +418,8 @@ export const createAdminOrder = async (req, res) => {
       },
     });
 
+
+    
     return res.json({
       success: true,
       message: "Order created successfully",
@@ -2055,7 +2060,7 @@ export const addOrderPayment = async (req, res) => {
         paymentId,
         paymentMethod: paymentMode?.toUpperCase(), // Prisma ENUM
 
-        paymentStatus: "CAPTURED",
+        paymentStatus: "COMPLETED",
         amount,
         currency,
         paymentDate: new Date(),
@@ -2128,6 +2133,7 @@ export const addOrderPayment = async (req, res) => {
       });
     }
 
+       await invoiceQueue.add("generate-invoice", { paymentId });
     res.status(201).json({
       success: true,
       message: "Payment added to order successfully",
