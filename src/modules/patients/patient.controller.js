@@ -38,7 +38,7 @@ export const createPatient = async (req, res) => {
       passportNo,
       aadharNo,
       address,
-      initial
+      initial,
     } = req.body;
 
     // Basic validation
@@ -66,12 +66,26 @@ export const createPatient = async (req, res) => {
         relationship: relationship || "self",
         status: status || "active",
         isPrimary: isPrimary !== undefined ? isPrimary : true,
-         passportNo,
-      aadharNo,
-      address,
-      initial
+        passportNo,
+        aadharNo,
+        address,
+        initial,
       },
     });
+
+    await whatsappQueue.add(
+      "whatsapp.welcomeNewPatient", // 👈 keep it consistent with worker routing
+      {
+        contactNo,
+        patientName: patient?.fullName || "Customer",
+      },
+      {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 2000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+      }
+    );
 
     res.status(201).json({
       success: true,
@@ -122,7 +136,7 @@ export const loginOrRegister = async (req, res) => {
         message: "OTP sent successfully",
         contactNo,
         isNew: false,
-          otp:otp
+        otp: otp,
       });
     }
 
@@ -142,7 +156,6 @@ export const loginOrRegister = async (req, res) => {
       message: "Account created & OTP sent",
       contactNo,
       isNew: true,
-      otp:otp
     });
   } catch (error) {
     console.error("Error login/register:", error);
@@ -153,7 +166,6 @@ export const loginOrRegister = async (req, res) => {
 export const verifyOtp = async (req, res) => {
   try {
     const { contactNo, otp, fcmToken, platform } = req.body;
-    
 
     const patient = await prisma.patient.findFirst({
       where: { contactNo },
@@ -194,21 +206,19 @@ export const verifyOtp = async (req, res) => {
     }
 
     // after patient create + sendOtpSms
-await whatsappQueue.add(
-  "whatsapp.welcomeNewPatient", // 👈 keep it consistent with worker routing
-  {
-    contactNo,
-    patientName: patient?.fullName || "Customer",
-  },
-  {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 2000 },
-    removeOnComplete: true,
-    removeOnFail: false,
-  }
-);
-
-
+    await whatsappQueue.add(
+      "whatsapp.welcomeNewPatient", // 👈 keep it consistent with worker routing
+      {
+        contactNo,
+        patientName: patient?.fullName || "Customer",
+      },
+      {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 2000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+      }
+    );
 
     return res.json({
       message: "Login successful",
@@ -249,7 +259,7 @@ export const resendOtp = async (req, res) => {
     return res.json({
       message: "OTP resent successfully",
       contactNo,
-      otp:otp
+      otp: otp,
     });
   } catch (error) {
     console.error("Error resending OTP:", error);
@@ -257,13 +267,12 @@ export const resendOtp = async (req, res) => {
   }
 };
 
-
 // UPDATE PROFILE
 export const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
-    console.log("data",data)
+    console.log("data", data);
 
     // calculate age if dob is provided
     if (data.dob) {
@@ -287,8 +296,9 @@ export const updateProfile = async (req, res) => {
 export const addFamilyMember = async (req, res) => {
   try {
     const { primaryId } = req.params;
-    const { fullName, dob, gender, email, bloodType, relationship ,contactNo} = req.body;
-console.log("contactNo",contactNo)
+    const { fullName, dob, gender, email, bloodType, relationship, contactNo } =
+      req.body;
+    console.log("contactNo", contactNo);
     const data = {
       fullName,
       dob: dob ? new Date(dob) : null,
@@ -299,7 +309,7 @@ console.log("contactNo",contactNo)
       relationship,
       isPrimary: false,
       primaryId: Number(primaryId),
-      contactNo: contactNo
+      contactNo: contactNo,
     };
 
     const member = await prisma.patient.create({ data });
@@ -453,7 +463,6 @@ export const logout = async (req, res) => {
   }
 };
 
-
 // UPDATE STATUS
 export const updateStatus = async (req, res) => {
   try {
@@ -477,15 +486,12 @@ export const getAllPatients = async (req, res) => {
   try {
     let { page = 1, limit = 10, search = "", status = "" } = req.query;
 
-    // Convert pagination params to numbers
     page = Number(page);
     limit = Number(limit);
     const skip = (page - 1) * limit;
 
-    // Build where condition
-    let where = {};
+    const where = {};
 
-    // Search condition
     if (search) {
       where.OR = [
         { fullName: { contains: search, mode: "insensitive" } },
@@ -494,17 +500,25 @@ export const getAllPatients = async (req, res) => {
       ];
     }
 
-    // Status filter
     if (status && status !== "all") {
       where.status = status;
     }
 
-    // Fetch patients with pagination
     const patients = await prisma.patient.findMany({
       where,
       skip,
       take: limit,
       orderBy: { createdAt: "desc" },
+      include: {
+        primary: {
+          select: {
+            id: true,
+            fullName: true,
+            contactNo: true,
+            email: true,
+          },
+        },
+      },
     });
 
     const total = await prisma.patient.count({ where });
@@ -535,15 +549,17 @@ export const getPatientByMobile = async (req, res) => {
     const { mobile } = req.query;
 
     if (!mobile) {
-      return res.status(400).json({ success: false, message: "Mobile required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Mobile required" });
     }
 
     const patient = await prisma.patient.findFirst({
       where: { contactNo: mobile },
       include: {
         addresses: true,
-        orders: true
-      }
+        orders: true,
+      },
     });
 
     return res.json({
@@ -551,11 +567,8 @@ export const getPatientByMobile = async (req, res) => {
       exists: !!patient,
       patient,
     });
-
   } catch (error) {
     console.error("Fetch patient error:", error);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
-
-

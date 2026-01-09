@@ -1,18 +1,22 @@
 import { PrismaClient } from "@prisma/client";
-import { uploadToS3 } from "../../config/s3.js";
-import locationService from "../location/location.service.js";
-import { broadcastNewOrder } from "../../services/location.service.js";
-import redis from "../../config/redis.js";
 import dayjs from "dayjs";
-import { bookSlotTx } from "../../utils/bookSlotTx.js";
-import { whatsappQueue } from "../../queues/whatsapp.queue.js";
+import redis from "../../config/redis.js";
 import { acquireLock } from "../../utils/redisLock.js";
-import { markOrderReportReady } from "./order.service.js";
-import { vendorNotificationQueue } from "../../queues/vendorNotification.queue.js";
+import { bookSlotTx } from "../../utils/bookSlotTx.js"; // home slots
+import { bookCenterSlotTx } from "../../utils/bookCenterSlotTx.js"; // ✅ new
 import { invoiceQueue } from "../../queues/invoice.queue.js";
+import { whatsappQueue } from "../../queues/whatsapp.queue.js";
+import { vendorNotificationQueue } from "../../queues/vendorNotification.queue.js";
+import { broadcastNewOrder } from "../../services/location.service.js";
+import locationService from "../location/location.service.js";
+import {uploadToS3} from "../../config/s3.js"
+
+
+
+import { markOrderReportReady } from "./order.service.js";
+
 
 const prisma = new PrismaClient();
-
 const formatTime = (date) => dayjs(date).format("hh:mm A");
 
 export const createOrder = async (req, res) => {
@@ -33,9 +37,15 @@ export const createOrder = async (req, res) => {
       members,
       paymentStatus,
       merchantOrderId,
+
+      isHomeSample = false,
+
+      // home sample
       slotId,
-      isHomeSample,
+
+      // center sample
       centerId,
+      centerSlotId,
     } = req.body;
 
     if (!members?.length) {
@@ -47,15 +57,40 @@ export const createOrder = async (req, res) => {
       return res.status(400).json({ error: "Invalid date" });
     }
 
-    /* 🔐 REDIS LOCK (slot + date) */
-    const lockKey = `lock:slot:${slotId}:${dayjs(orderDate).format(
-      "YYYY-MM-DD"
-    )}`;
+    // ✅ Validate booking inputs
+    if (isHomeSample) {
+      if (!slotId)
+        return res
+          .status(400)
+          .json({ error: "slotId is required for home sample" });
+    } else {
+      if (!centerId)
+        return res
+          .status(400)
+          .json({ error: "centerId is required for center booking" });
+      if (!centerSlotId)
+        return res
+          .status(400)
+          .json({ error: "centerSlotId is required for center booking" });
+    }
+
+    /* 🔐 LOCK KEY */
+    const lockKey = isHomeSample
+      ? `lock:slot:${slotId}:${dayjs(orderDate).format("YYYY-MM-DD")}`
+      : `lock:centerSlot:${centerSlotId}:${dayjs(orderDate).format(
+          "YYYY-MM-DD"
+        )}`;
+
     lock = await acquireLock(lockKey);
 
     /* 🧠 DB TRANSACTION */
     const order = await prisma.$transaction(async (tx) => {
-      await bookSlotTx(tx, slotId, orderDate);
+      // ✅ book capacity
+      if (isHomeSample) {
+        await bookSlotTx(tx, Number(slotId), orderDate);
+      } else {
+        await bookCenterSlotTx(tx, Number(centerSlotId), orderDate);
+      }
 
       const createdOrder = await tx.order.create({
         data: {
@@ -73,17 +108,23 @@ export const createOrder = async (req, res) => {
           status: "pending",
           paymentStatus: paymentStatus || "pending",
           merchantOrderId,
-          isHomeSample,
-          centerId,
-          slotId,
+
+          isHomeSample: Boolean(isHomeSample),
+
+          // ✅ save either home slot or center slot
+          slotId: isHomeSample ? Number(slotId) : null,
+          centerId: isHomeSample ? null : Number(centerId),
+          centerSlotId: isHomeSample ? null : Number(centerSlotId),
         },
       });
-  const paymentId=`PAY-${Date.now()}`
+
+      const paymentId = `PAY-${Date.now()}`;
+
       await tx.payment.create({
         data: {
           orderId: createdOrder.id,
           patientId,
-          paymentId: paymentId,
+          paymentId,
           paymentMethod: "UPI",
           paymentMode: "ONLINE",
           paymentStatus: "COMPLETED",
@@ -98,22 +139,16 @@ export const createOrder = async (req, res) => {
       return createdOrder;
     });
 
-    /* 👥 MEMBERS (FAST BULK INSERT) */
+    /* 👥 MEMBERS */
     for (const m of members) {
       const orderMember = await prisma.orderMember.create({
-        data: {
-          orderId: order.id,
-          patientId: m.patientId,
-        },
+        data: { orderId: order.id, patientId: m.patientId },
       });
 
       if (Array.isArray(m.packages)) {
         for (const pkgId of m.packages) {
           await prisma.orderMemberPackage.create({
-            data: {
-              orderMemberId: orderMember.id,
-              packageId: Number(pkgId),
-            },
+            data: { orderMemberId: orderMember.id, packageId: Number(pkgId) },
           });
         }
       }
@@ -121,28 +156,36 @@ export const createOrder = async (req, res) => {
       if (Array.isArray(m.tests)) {
         for (const testId of m.tests) {
           await prisma.orderMemberPackage.create({
-            data: {
-              orderMemberId: orderMember.id,
-              testId: Number(testId),
-            },
+            data: { orderMemberId: orderMember.id, testId: Number(testId) },
           });
         }
       }
     }
 
-    /*  SOCKET */
+    // ✅ For notifications/broadcast you can still use address lat/long
     const address = await prisma.address.findUnique({
       where: { id: addressId },
     });
-
-    const slotData = await prisma.slot.findUnique({
-      where: { id: slotId },
-    });
-
     if (!address) return res.status(400).json({ error: "Address not found" });
 
     const lat = Number(address.latitude);
     const lng = Number(address.longitude);
+
+    // ✅ Slot label
+    let slotLabel = "";
+    if (isHomeSample) {
+      const slotData = await prisma.slot.findUnique({
+        where: { id: Number(slotId) },
+      });
+      slotLabel = slotData
+        ? `${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`
+        : "";
+    } else {
+      const cs = await prisma.centerSlot.findUnique({
+        where: { id: Number(centerSlotId) },
+      });
+      slotLabel = cs ? `${cs.startTime} - ${cs.endTime}` : "";
+    }
 
     await vendorNotificationQueue.add(
       "notify-new-order",
@@ -154,90 +197,57 @@ export const createOrder = async (req, res) => {
         testType,
         radiusKm: 5,
       },
-      {
-        jobId: `vendor-new-order-${order.id}`,
-      }
+      { jobId: `vendor-new-order-${order.id}` }
     );
 
-    const orderForBroadcast = {
-      orderId: order.id,
-      pincode: address.pincode?.toString(),
-      latitude: lat,
-      longitude: lng,
-      slot: `${formatTime(slotData.startTime)} - ${formatTime(
-        slotData.endTime
-      )}`,
-      date,
-      testType,
-      radiusKm: 5,
-      status: "pending",
-    };
-
-    /* ---------------------------------------------
-       5️⃣ CONDITIONS TO BROADCAST:
-       ✔ Today’s Order Only
-       ✔ testType MUST BE "Pathology"
-    --------------------------------------------- */
-
+    // ✅ Broadcast (same logic as you had)
     const today = new Date();
-
     const isToday =
       orderDate.getFullYear() === today.getFullYear() &&
       orderDate.getMonth() === today.getMonth() &&
       orderDate.getDate() === today.getDate();
 
     const io = req.app.get("io");
-
     if (io && isToday && testType === "PATHOLOGY") {
       await broadcastNewOrder(io, {
         id: order.id,
-        slot: `${formatTime(slotData.startTime)} - ${formatTime(
-          slotData.endTime
-        )}`,
+        slot: slotLabel,
         date: orderDate,
         testType,
         address: {
           latitude: lat,
           longitude: lng,
-          pincode: orderForBroadcast.pincode,
+          pincode: String(address.pincode || ""),
         },
         radiusKm: 5,
       });
     }
 
-    /* ---------------- REDIS CACHE (PENDING ORDERS) ---------------- */
+    // cache
     await redis.hSet(`order:${order.id}`, {
       orderId: String(order.id),
-      slotId: String(slotId),
       date: orderDate.toISOString(),
       status: "pending",
-      pincode: String(address.pincode),
+      pincode: String(address.pincode || ""),
       latitude: String(lat),
       longitude: String(lng),
-      testType: String(testType),
+      testType: String(testType || ""),
+
+      // ✅ store both (for debug)
+      isHomeSample: String(Boolean(isHomeSample)),
+      slotId: String(isHomeSample ? slotId : ""),
+      centerId: String(!isHomeSample ? centerId : ""),
+      centerSlotId: String(!isHomeSample ? centerSlotId : ""),
     });
 
-    console.log(`orders:pending:pincode:${String(address.pincode)}`);
     await redis.sAdd("orders:pending", String(order.id));
-    await redis.sAdd(
-      `orders:pending:pincode:${String(address.pincode)}`,
-      String(order.id)
-    );
-
     await redis.expire(`order:${order.id}`, 600);
-    await redis.expire(
-      `orders:pending:pincode:${String(address.pincode)}`,
-      600
-    );
 
-    /* 🚀 RESPOND IMMEDIATELY */
     res.json({
       success: true,
       orderId: order.id,
       orderNumber: order.orderNumber,
     });
-
-    /* 🟢 BACKGROUND: WhatsApp (enqueue minimal data only) */
 
     await whatsappQueue.add(
       "whatsapp.sendOrderAndPayment",
@@ -251,12 +261,12 @@ export const createOrder = async (req, res) => {
     if (lock?.release) await lock.release();
   }
 };
-
+// controllers/order.controller.js (or wherever createAdminOrder lives)
 export const createAdminOrder = async (req, res) => {
   try {
     const {
       patientId,
-      selectedTests,
+      selectedTests, // ✅ now contains both tests + packages
       addressId,
       homeCollection = false,
       registrationType,
@@ -274,152 +284,185 @@ export const createAdminOrder = async (req, res) => {
       finalAmount: bodyFinalAmount,
     } = req.body;
 
-    // Basic validation
+    /* -------------------- validation -------------------- */
     if (
       !patientId ||
-      !selectedTests ||
       !Array.isArray(selectedTests) ||
       selectedTests.length === 0
     ) {
       return res.status(400).json({
         success: false,
-        message: "Patient & tests required",
+        message: "Patient & items required",
       });
     }
 
-    // Helper to cast ints or return null
+    // ✅ Must have diagnosticCenterId (based on your current code)
+    if (!diagnosticCenterId) {
+      return res.status(400).json({
+        success: false,
+        message: "diagnosticCenterId is required",
+      });
+    }
+
     const castInt = (v) =>
       typeof v === "undefined" || v === null || v === "" ? null : Number(v);
 
-    // Generate unique order number
+    const toNumber = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const normalizeType = (t) => {
+      const type = String(t?.type || "").toLowerCase();
+      // accept: test/package/checkup
+      if (type === "package" || type === "checkup") return "package";
+      return "test";
+    };
+
+    // ✅ validate each selected item
+    for (const item of selectedTests) {
+      const id = Number(item?.id ?? item?.testId ?? item?.packageId);
+      if (!id || Number.isNaN(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Each selected item must have a valid id",
+        });
+      }
+
+      // If frontend sends type, we respect it; else infer a bit
+      const type = normalizeType(item);
+      if (type !== "test" && type !== "package") {
+        return res.status(400).json({
+          success: false,
+          message: "Each selected item must have a valid type: test | package",
+        });
+      }
+    }
+
+    /* -------------------- order number -------------------- */
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const count = await prisma.order.count({
       where: { orderNumber: { startsWith: `ORD${today}` } },
     });
     const orderNumber = `ORD${today}${String(count + 1).padStart(4, "0")}`;
 
-    // Compute totalAmount from selectedTests unless caller provided a totalAmount override
+    /* -------------------- totals -------------------- */
     const computedTotal = selectedTests.reduce(
-      (s, t) => s + Number((t && (t.price ?? t.amount ?? t.total)) || 0),
+      (sum, t) => sum + toNumber(t?.price ?? t?.amount ?? t?.total),
       0
     );
+
     const total =
-      typeof bodyTotalAmount !== "undefined" && bodyTotalAmount !== null
-        ? Number(bodyTotalAmount)
+      bodyTotalAmount !== undefined && bodyTotalAmount !== null
+        ? toNumber(bodyTotalAmount)
         : computedTotal;
 
-    // Determine discount / final amounts
     const discountAmt =
-      typeof discountAmount !== "undefined" && discountAmount !== null
-        ? Number(discountAmount)
-        : typeof discount !== "undefined" && discount !== null
-        ? Number(discount)
+      discountAmount !== undefined && discountAmount !== null
+        ? toNumber(discountAmount)
+        : discount !== undefined && discount !== null
+        ? toNumber(discount)
         : 0;
 
     const finalAmt =
-      typeof bodyFinalAmount !== "undefined" && bodyFinalAmount !== null
-        ? Number(bodyFinalAmount)
+      bodyFinalAmount !== undefined && bodyFinalAmount !== null
+        ? toNumber(bodyFinalAmount)
         : Math.max(0, total - discountAmt);
 
-    // Validate selectedTests have valid ids
-    for (const t of selectedTests) {
-      const testId = Number(t.id ?? t.testId ?? t.packageId);
-      if (!testId || Number.isNaN(testId)) {
-        return res.status(400).json({
-          success: false,
-          message: "Each selected test must have a valid id",
-        });
-      }
-    }
-
-    // Build data object for order.create
-    // Only include relation connect blocks when values are present
+    /* -------------------- order create data -------------------- */
     const dataToCreate = {
       orderNumber,
-      createdBy: {
-        connect: { id: req.user.id },
-      },
+      createdBy: { connect: { id: req.user.id } },
       patient: { connect: { id: Number(patientId) } },
-      orderType: registrationType ?? undefined,
+      orderType: registrationType ?? null,
       totalAmount: Number(total),
       discount:
-        typeof discount !== "undefined" && discount !== null
+        discount !== undefined && discount !== null
           ? Number(discount)
           : undefined,
       discountAmount:
         discountAmt !== undefined ? Number(discountAmt) : undefined,
       finalAmount: Number(finalAmt),
-      diagnosticCenter: {
-        connect: { id: Number(diagnosticCenterId) }, // ✅ CORRECT
-      },
 
+      diagnosticCenter: { connect: { id: Number(diagnosticCenterId) } },
       source: source ?? undefined,
       date: new Date(),
       isHomeSample: Boolean(homeCollection),
       remarks: [provisionalDiagnosis, notes, remark]
         .filter(Boolean)
         .join(" | "),
-      // NOTE: address, doctor, center, refCenter are added conditionally below
     };
 
-    // Conditionally add optional relation connects
-    if (castInt(addressId)) {
+    if (castInt(addressId))
       dataToCreate.address = { connect: { id: Number(addressId) } };
-    }
-    if (castInt(doctorId)) {
+    if (castInt(doctorId))
       dataToCreate.doctor = { connect: { id: Number(doctorId) } };
-    }
-    // if (castInt(centerId)) {
-    //   dataToCreate.center = { connect: { id: Number(centerId) } };
-    // }
-    if (castInt(refCenterId)) {
+    if (castInt(refCenterId))
       dataToCreate.refCenter = { connect: { id: Number(refCenterId) } };
-    }
 
-    // Create order, orderMember and orderMemberPackages in a transaction
+    /* -------------------- transaction -------------------- */
     const result = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({
-        data: dataToCreate,
-      });
+      const order = await tx.order.create({ data: dataToCreate });
 
       const orderMember = await tx.orderMember.create({
-        data: {
-          orderId: order.id,
-          patientId: Number(patientId),
-        },
+        data: { orderId: order.id, patientId: Number(patientId) },
       });
 
-      // create orderMemberPackage rows
-      const packageCreates = selectedTests.map((test) => {
-        const testId = Number(test.id ?? test.testId ?? test.packageId);
+      // ✅ IMPORTANT FIX:
+      // - if item.type === "package" -> set packageId
+      // - else -> set testId
+      const creates = selectedTests.map((item) => {
+        const id = Number(item?.id ?? item?.testId ?? item?.packageId);
+        const type = normalizeType(item);
+
         return tx.orderMemberPackage.create({
           data: {
             orderMemberId: orderMember.id,
-            testId,
+            testId: type === "test" ? id : null,
+            packageId: type === "package" ? id : null,
           },
         });
       });
 
-      await Promise.all(packageCreates);
+      await Promise.all(creates);
 
       return { orderId: order.id };
     });
 
-    // fetch created order with relations for response
+    /* -------------------- fetch created order -------------------- */
     const createdOrder = await prisma.order.findUnique({
       where: { id: result.orderId },
       include: {
         patient: true,
         address: true,
-        orderMembers: { include: { orderMemberPackages: true } },
+        orderMembers: {
+          include: {
+            orderMemberPackages: {
+              include: {
+                test: true, // ✅ if relation exists
+                package: true, // ✅ if relation exists
+              },
+            },
+          },
+        },
         doctor: true,
         refCenter: true,
         center: true,
+        diagnosticCenter: true,
       },
     });
 
+    await whatsappQueue.add(
+      "whatsapp.sendOrderConfirmed",
+      { orderId: result.orderId },
+      {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 2000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+      }
+    );
 
-    
     return res.json({
       success: true,
       message: "Order created successfully",
@@ -606,7 +649,7 @@ export const vendorStartJob = async (req, res) => {
         vendorId: vendorIdNumber,
         status: "on_the_way", // Set initial assignment status
       },
-      select: { id: true, vendorId: true ,address:true},
+      select: { id: true, vendorId: true, address: true },
     });
 
     // 2. Start location tracking (This handles the ON_THE_WAY status update and upsert)
@@ -825,7 +868,9 @@ export const getOrdersByPatientIdTrack = async (req, res) => {
   try {
     const patientId = Number(req.params.patientId);
     if (!Number.isFinite(patientId)) {
-      return res.status(400).json({ success: false, error: "Invalid patientId" });
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid patientId" });
     }
 
     const orders = await prisma.order.findMany({
@@ -835,7 +880,7 @@ export const getOrdersByPatientIdTrack = async (req, res) => {
             OR: [{ patientId }, { orderMembers: { some: { patientId } } }],
           },
           {
-            status: { not: "completed" }, // ✅ except completed
+            status: { not: "completed" },
           },
         ],
       },
@@ -849,7 +894,12 @@ export const getOrdersByPatientIdTrack = async (req, res) => {
           where: { patientId },
           include: {
             patient: {
-              select: { id: true, fullName: true, email: true, contactNo: true },
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                contactNo: true,
+              },
             },
             orderMemberPackages: {
               include: {
@@ -878,7 +928,70 @@ export const getOrdersByPatientIdTrack = async (req, res) => {
   }
 };
 
+export const getOrdersByPatientIdCompleted = async (req, res) => {
+  try {
+    const patientId = Number(req.params.patientId);
+    if (!Number.isFinite(patientId)) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid patientId" });
+    }
 
+    const orders = await prisma.order.findMany({
+      where: {
+        AND: [
+          {
+            OR: [{ patientId }, { orderMembers: { some: { patientId } } }],
+          },
+          {
+            status: "completed",
+          },
+        ],
+      },
+
+      include: {
+        patient: {
+          select: { id: true, fullName: true, email: true, contactNo: true },
+        },
+        address: true,
+        vendor: true,
+        orderMembers: {
+          where: { patientId },
+          include: {
+            patient: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                contactNo: true,
+              },
+            },
+            orderMemberPackages: {
+              include: {
+                package: {
+                  select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    actualPrice: true,
+                    offerPrice: true,
+                    imgUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.json({ success: true, orders });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: "Failed to fetch orders" });
+  }
+};
 
 export const getOrdersByPrimaryPatientId = async (req, res) => {
   try {
@@ -1135,6 +1248,15 @@ export const getAllOrders = async (req, res) => {
             city: true,
           },
         },
+        center: {
+          select: {
+            id: true,
+            name: true,
+            contactName: true,
+            address: true,
+            mobile: true,
+          },
+        },
       },
     });
 
@@ -1223,6 +1345,9 @@ export const getOrderById = async (req, res) => {
           select: {
             id: true,
             name: true,
+            contactName: true,
+            address: true,
+            mobile: true,
           },
         },
 
@@ -1470,7 +1595,7 @@ export const getOrderResultsById = async (req, res) => {
               ...omp.test,
               result: result
                 ? {
-                    id:result.id,
+                    id: result.id,
                     status: result.status,
                     reportedAt: result.reportedAt,
                     reportHtml: result.reportHtml,
@@ -1500,7 +1625,7 @@ export const getOrderResultsById = async (req, res) => {
                 ...cp.test,
                 result: result
                   ? {
-                    id:result.id,
+                      id: result.id,
                       status: result.status,
                       reportedAt: result.reportedAt,
                       reportHtml: result.reportHtml,
@@ -2133,7 +2258,7 @@ export const addOrderPayment = async (req, res) => {
       });
     }
 
-       await invoiceQueue.add("generate-invoice", { paymentId });
+    await invoiceQueue.add("generate-invoice", { paymentId });
     res.status(201).json({
       success: true,
       message: "Payment added to order successfully",
@@ -2295,6 +2420,8 @@ export const getOrderReports = async (req, res) => {
       diagnosticCenterId,
       status,
       source,
+      city, // ✅ NEW
+      pincode, // ✅ NEW
       page = 1,
       limit = 25,
     } = req.query;
@@ -2302,13 +2429,9 @@ export const getOrderReports = async (req, res) => {
     page = Number(page);
     limit = Number(limit);
 
-    let where = {};
+    const where = {};
 
-    // -------------------------------------
-    // ✅ APPLY DATE FILTERS ONLY IF PROVIDED
-    // -------------------------------------
-
-    // 📌 Single Date
+    // ✅ DATE FILTERS
     if (date && date !== "") {
       const d = dayjs(date).startOf("day");
       where.date = {
@@ -2317,7 +2440,6 @@ export const getOrderReports = async (req, res) => {
       };
     }
 
-    // 📌 Date Range (fromDate + toDate)
     if (fromDate && toDate && fromDate !== "" && toDate !== "") {
       where.date = {
         gte: dayjs(fromDate).startOf("day").toDate(),
@@ -2325,31 +2447,71 @@ export const getOrderReports = async (req, res) => {
       };
     }
 
-    // Remove empty date filter if created
-    if (where.date && Object.keys(where.date).length === 0) {
-      delete where.date;
-    }
-
-    // -------------------------------------
     // ✅ OTHER FILTERS
-    // -------------------------------------
     if (centerId) where.centerId = Number(centerId);
     if (refCenterId) where.refCenterId = Number(refCenterId);
     if (doctorId) where.doctorId = Number(doctorId);
     if (diagnosticCenterId)
       where.diagnosticCenterId = Number(diagnosticCenterId);
-
     if (status) where.status = status;
     if (source) where.source = source;
 
-    // -------------------------------------
-    // ✅ FETCH PAGINATED ORDERS
-    // -------------------------------------
+    // ✅ CITY / PINCODE FILTER (works for both Home Sample + Center Visit)
+    if ((city && city.trim()) || (pincode && pincode.trim())) {
+      const c = city?.trim();
+      const p = pincode?.trim();
+
+      where.OR = [
+        // 1) Match order address (home sample)
+        {
+          address: {
+            ...(c ? { city: { contains: c, mode: "insensitive" } } : {}),
+            ...(p ? { pincode: { contains: p, mode: "insensitive" } } : {}),
+          },
+        },
+
+        // 2) Match center details (center visit)
+        {
+          center: {
+            ...(p ? { pincode: { contains: p, mode: "insensitive" } } : {}),
+            ...(c
+              ? {
+                  city: {
+                    name: { contains: c, mode: "insensitive" },
+                  },
+                }
+              : {}),
+          },
+        },
+      ];
+    }
+
     const orders = await prisma.order.findMany({
       where,
       include: {
         patient: { select: { id: true, fullName: true, contactNo: true } },
-        center: { select: { id: true, name: true } },
+        address: {
+          select: {
+            id: true,
+            city: true,
+            state: true,
+            pincode: true,
+            address: true,
+          },
+        }, // ✅ IMPORTANT
+
+        center: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            mobile: true,
+            contactName: true,
+            pincode: true,
+            city: { select: { id: true, name: true } }, // ✅ IMPORTANT for city filter
+          },
+        },
+
         refCenter: { select: { id: true, name: true } },
         doctor: { select: { id: true, name: true } },
         vendor: { select: { id: true, name: true } },
@@ -2373,15 +2535,11 @@ export const getOrderReports = async (req, res) => {
           },
         },
       },
-
       orderBy: { id: "desc" },
       skip: (page - 1) * limit,
       take: limit,
     });
 
-    // -------------------------------------
-    // ✅ TOTAL COUNT (must use SAME where)
-    // -------------------------------------
     const total = await prisma.order.count({ where });
 
     return res.json({
@@ -2401,33 +2559,31 @@ export const getOrderReports = async (req, res) => {
 export const getOrdersExpiringSoon = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || 10);
     const skip = (pageNum - 1) * limitNum;
 
     const now = dayjs();
     const next30Min = now.add(30, "minute");
 
+    // ✅ common where
+    const where = {
+      vendorId: null,
+      status: "pending",
+      source: "app",
+      isHomeSample: true,
+
+      // ✅ FIX: slot is a relation -> use isNot / is
+      // slot: { isNot: null },
+      // (Alternative if you have slotId in model: slotId: { not: null })
+    };
+
     // 1️⃣ Count total orders
-    const totalOrders = await prisma.order.count({
-      where: {
-        vendorId: null,
-        status: "pending",
-        source: "app",
-        isHomeSample: true,
-        slot: { not: null },
-      },
-    });
+    const totalOrders = await prisma.order.count({ where });
 
     // 2️⃣ Fetch orders with pagination
     const orders = await prisma.order.findMany({
-      where: {
-        vendorId: null,
-        status: "pending",
-        source: "app",
-        isHomeSample: true,
-        slot: { not: null },
-      },
+      where,
       include: {
         patient: {
           select: {
@@ -2437,27 +2593,47 @@ export const getOrdersExpiringSoon = async (req, res) => {
           },
         },
         address: true,
+
+        // ✅ include slot if you need time info
+        slot: true,
       },
-      orderBy: {
-        date: "asc", // Sort by date ascending
-      },
+      orderBy: { date: "asc" },
       skip,
       take: limitNum,
     });
 
-    // 3️⃣ Calculate time left for each order
-    const ordersWithTimeLeft = orders.map((order) => {
-      const slotDateTime = dayjs(
-        `${dayjs(order.date).format("YYYY-MM-DD")} ${order.slot}`,
-        "YYYY-MM-DD hh:mm A"
-      );
-      const minsLeft = slotDateTime.diff(now, "minute");
+    // 3️⃣ Calculate mins left (based on slot relation fields)
+    // NOTE: adjust these based on your Slot model fields (startTime/endTime)
+    const ordersWithTimeLeft = orders
+      .map((order) => {
+        // If your Slot has startTime/endTime stored as "hh:mm A" strings
+        const slotLabel =
+          order.slot?.startTime && order.slot?.endTime
+            ? `${order.slot.startTime} - ${order.slot.endTime}`
+            : order.slot?.label || "";
 
-      return {
-        ...order,
-        minsLeft,
-      };
-    });
+        // We compute using slot.startTime (recommended)
+        const slotStart = order.slot?.startTime || null;
+
+        let minsLeft = null;
+        let slotDateTime = null;
+
+        if (slotStart) {
+          slotDateTime = dayjs(
+            `${dayjs(order.date).format("YYYY-MM-DD")} ${slotStart}`,
+            "YYYY-MM-DD hh:mm A"
+          );
+          minsLeft = slotDateTime.diff(now, "minute");
+        }
+
+        return {
+          ...order,
+          slotLabel,
+          minsLeft,
+        };
+      })
+      // ✅ Optional: only those expiring within next 30 mins (and not negative)
+      .filter((o) => typeof o.minsLeft === "number" && o.minsLeft >= 0 && o.minsLeft <= 30);
 
     res.json({
       success: true,
@@ -2466,12 +2642,14 @@ export const getOrdersExpiringSoon = async (req, res) => {
       page: pageNum,
       limit: limitNum,
       totalPages: Math.ceil(totalOrders / limitNum),
+      filteredCount: ordersWithTimeLeft.length,
     });
   } catch (error) {
     console.error("Expiring orders error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch expiring orders",
+      error: error?.message,
     });
   }
 };

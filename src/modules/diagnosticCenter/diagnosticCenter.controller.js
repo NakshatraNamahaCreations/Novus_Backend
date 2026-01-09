@@ -31,7 +31,7 @@ export const getDiagnosticCenters = async (req, res) => {
     const list = await prisma.diagnosticCenter.findMany({
       include: {
         city: true,
-        centers: true
+      
       }
     });
 

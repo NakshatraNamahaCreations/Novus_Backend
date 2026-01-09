@@ -20,7 +20,8 @@ import {
   getOrderReports,
   getOrdersExpiringSoon,
   getOrderResultsById,
-  getOrdersByPatientIdTrack
+  getOrdersByPatientIdTrack,
+  getOrdersByPatientIdCompleted
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
 import { authenticateUser } from "../../middlewares/auth.js";
@@ -54,6 +55,9 @@ router.put("/:id/cancel", cancelOrder);
 router.post("/:orderId/start-job", vendorStartJob);
 router.get("/by-patient/:patientId", getOrdersByPatientId);
 router.get("/by-patient-track/:patientId", getOrdersByPatientIdTrack);
+router.get("/by-patient-completed/:patientId", getOrdersByPatientIdCompleted);
+
+
 
 router.get("/by-primary/:patientId", getOrdersByPrimaryPatientId);
 router.get("/vendor/:vendorId/orders", getOrdersByVendor);

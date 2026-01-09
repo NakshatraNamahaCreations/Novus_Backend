@@ -2,123 +2,119 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-// ✅ CREATE Center
+/**
+ * CenterPackage schema is:
+ * model CenterPackage { centerId Int, testId Int, ... }
+ * So frontend must send: testIds = [1,2,3]
+ */
+
+/* ✅ CREATE Center */
 export const createCenter = async (req, res) => {
   try {
     const {
       name,
       contactName,
-      venue,
       address,
       email,
       alternativeEmail,
       mobile,
-      billType,
-      account,
-      emailReportConfig,
-      sendReportToPatient = false,
-      sendBillToPatient = false,
-      paymentType = "PrePaid",
-
-      city,
       lat,
       long,
-
-      packageIds = [],
+      cityId,
+      testIds = [],
     } = req.body;
 
-    // Required fields based on UI
-    if (!name || !venue || !address) {
-      return res
-        .status(400)
-        .json({ error: "Name, Venue, and Address are required" });
+    if (!name || !address) {
+      return res.status(400).json({ error: "Name and Address are required" });
     }
 
-    // Email optional, but must be unique if provided
+    // Email unique check
     if (email) {
       const exists = await prisma.center.findUnique({ where: { email } });
-      if (exists) {
-        return res.status(400).json({ error: "Email already registered" });
+      if (exists) return res.status(400).json({ error: "Email already registered" });
+    }
+
+    // Validate cityId
+    if (cityId) {
+      const cityExists = await prisma.city.findUnique({
+        where: { id: Number(cityId) },
+        select: { id: true },
+      });
+      if (!cityExists) {
+        return res.status(400).json({ error: "Invalid cityId" });
       }
     }
 
-    // Validate package IDs if provided
-    if (packageIds.length > 0) {
-      const validPackages = await prisma.package.findMany({
-        where: { id: { in: packageIds.map(Number) } },
+    // Validate testIds (because CenterPackage has testId)
+    if (Array.isArray(testIds) && testIds.length > 0) {
+      const validTests = await prisma.test.findMany({
+        where: { id: { in: testIds.map(Number) } },
         select: { id: true },
       });
 
-      const validIds = validPackages.map((p) => p.id);
-      const invalidIds = packageIds.filter(
-        (pid) => !validIds.includes(Number(pid))
-      );
+      const validSet = new Set(validTests.map((t) => t.id));
+      const invalidIds = testIds.filter((t) => !validSet.has(Number(t)));
 
-      if (invalidIds.length > 0) {
+      if (invalidIds.length) {
         return res
           .status(400)
-          .json({ error: `Invalid package IDs: ${invalidIds.join(", ")}` });
+          .json({ error: `Invalid testIds: ${invalidIds.join(", ")}` });
       }
     }
 
-    // Create center
     const center = await prisma.center.create({
       data: {
         name,
-        createdById:req.user.id,
-        contactName,
-        venue,
+        contactName: contactName || null,
         address,
-        email,
-        alternativeEmail,
-        mobile,
-        billType,
-        account,
-        emailReportConfig,
+        email: email || null,
+        alternativeEmail: alternativeEmail || null,
+        mobile: mobile || null,
+        lat: lat !== undefined && lat !== null && lat !== "" ? Number(lat) : null,
+        long: long !== undefined && long !== null && long !== "" ? Number(long) : null,
 
-        sendReportToPatient,
-        sendBillToPatient,
-        paymentType,
+        // ✅ FIX: use relation connect
+        ...(req.user?.id ? { createdBy: { connect: { id: Number(req.user.id) } } } : {}),
 
-        city: city || null,
-        lat: lat ? Number(lat) : null,
-        long: long ? Number(long) : null,
+        // ✅ City relation connect
+        ...(cityId ? { city: { connect: { id: Number(cityId) } } } : {}),
 
-        centerPackages:
-          packageIds.length > 0
-            ? {
-                create: packageIds.map((pid) => ({
-                  packageId: Number(pid),
-                })),
-              }
-            : undefined,
+        // ✅ test mapping
+        ...(Array.isArray(testIds) && testIds.length > 0
+          ? {
+              centerPackages: {
+                create: testIds.map((tid) => ({ testId: Number(tid) })),
+              },
+            }
+          : {}),
       },
-
-      include: { centerPackages: { include: { test: true } } },
+      include: {
+        city: true,
+        centerPackages: { include: { test: true } },
+      },
     });
 
-    res.status(201).json({ message: "Center created successfully", center });
+    return res.status(201).json({ message: "Center created successfully", center });
   } catch (error) {
     console.error("Error creating center:", error);
-    res.status(500).json({ error: "Failed to create center" });
+    return res.status(500).json({ error: "Failed to create center" });
   }
 };
-
-// ✅ GET ALL Centers with Pagination + Search
+/* ✅ GET ALL Centers with Pagination + Search */
 export const getAllCenters = async (req, res) => {
   try {
     const { page = 1, limit = 15, search = "" } = req.query;
-
-    const skip = (page - 1) * limit;
+    const take = Number(limit);
+    const skip = (Number(page) - 1) * take;
 
     const where = search
       ? {
           OR: [
             { name: { contains: search, mode: "insensitive" } },
-            { venue: { contains: search, mode: "insensitive" } },
             { email: { contains: search, mode: "insensitive" } },
             { mobile: { contains: search, mode: "insensitive" } },
-            { city: { contains: search, mode: "insensitive" } },
+            { address: { contains: search, mode: "insensitive" } },
+            { city: { is: { name: { contains: search, mode: "insensitive" } } } },
           ],
         }
       : {};
@@ -128,29 +124,30 @@ export const getAllCenters = async (req, res) => {
     const centers = await prisma.center.findMany({
       where,
       include: {
+        city: true,
         centerPackages: { include: { test: true } },
       },
-      orderBy: { name: "asc" }, // Alphabetical
-      skip: Number(skip),
-      take: Number(limit),
+      orderBy: { name: "asc" },
+      skip,
+      take,
     });
 
-    res.json({
+    return res.json({
       data: centers,
       meta: {
         total,
         page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / limit),
+        limit: take,
+        totalPages: Math.ceil(total / take),
       },
     });
   } catch (error) {
     console.error("Error fetching centers:", error);
-    res.status(500).json({ error: "Failed to fetch centers" });
+    return res.status(500).json({ error: "Failed to fetch centers" });
   }
 };
 
-// ✅ GET ONE Center
+/* ✅ GET ONE Center */
 export const getCenterById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -158,128 +155,142 @@ export const getCenterById = async (req, res) => {
     const center = await prisma.center.findUnique({
       where: { id: Number(id) },
       include: {
+        city: true,
         centerPackages: { include: { test: true } },
-        categories: {
-          include: { category: true },
-        },
+        categories: { include: { category: true } },
       },
     });
 
     if (!center) return res.status(404).json({ error: "Center not found" });
-
-    res.json(center);
+    return res.json(center);
   } catch (error) {
     console.error("Error fetching center:", error);
-    res.status(500).json({ error: "Failed to fetch center" });
+    return res.status(500).json({ error: "Failed to fetch center" });
   }
 };
 
-// ✅ UPDATE Center
+/* ✅ UPDATE Center */
 export const updateCenter = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const existing = await prisma.center.findUnique({
-      where: { id: Number(id) },
-    });
+    const existing = await prisma.center.findUnique({ where: { id: Number(id) } });
     if (!existing) return res.status(404).json({ error: "Center not found" });
 
     const {
       name,
       contactName,
-      venue,
       address,
       email,
       alternativeEmail,
       mobile,
-      billType,
-      account,
-      emailReportConfig,
-      sendReportToPatient,
-      sendBillToPatient,
-      paymentType,
-      city,
       lat,
       long,
-
-      packageIds = [],
+      cityId,
+      testIds = [],
     } = req.body;
 
     // Email unique check
     if (email && email !== existing.email) {
       const exists = await prisma.center.findUnique({ where: { email } });
-      if (exists) {
-        return res.status(400).json({ error: "Email already in use" });
+      if (exists) return res.status(400).json({ error: "Email already in use" });
+    }
+
+    // Validate cityId if provided
+    let cityData = {};
+    if (cityId === "" || cityId === null) {
+      cityData = { cityId: null };
+    } else if (cityId !== undefined) {
+      const city = await prisma.city.findUnique({ where: { id: Number(cityId) } });
+      if (!city) return res.status(400).json({ error: "Invalid cityId" });
+      cityData = { cityId: Number(cityId) };
+    }
+
+    // Validate testIds
+    if (Array.isArray(testIds) && testIds.length > 0) {
+      const validTests = await prisma.test.findMany({
+        where: { id: { in: testIds.map(Number) } },
+        select: { id: true },
+      });
+
+      const validIds = new Set(validTests.map((t) => t.id));
+      const invalidIds = testIds.filter((tid) => !validIds.has(Number(tid)));
+
+      if (invalidIds.length > 0) {
+        return res.status(400).json({
+          error: `Invalid testIds: ${invalidIds.join(", ")}`,
+        });
       }
     }
 
-    // Update center
     await prisma.center.update({
       where: { id: Number(id) },
       data: {
-        name,
-        contactName,
-        venue,
-        address,
-        email,
-        alternativeEmail,
-        mobile,
-        billType,
-        account,
-        emailReportConfig,
-        sendReportToPatient,
-        sendBillToPatient,
-        paymentType,
-        city,
-        lat: lat ? Number(lat) : null,
-        long: long ? Number(long) : null,
+        ...(name !== undefined ? { name } : {}),
+        ...(contactName !== undefined ? { contactName } : {}),
+        ...(address !== undefined ? { address } : {}),
+        ...(email !== undefined ? { email } : {}),
+        ...(alternativeEmail !== undefined ? { alternativeEmail } : {}),
+        ...(mobile !== undefined ? { mobile } : {}),
+        ...(lat !== undefined ? { lat: lat === "" || lat === null ? null : Number(lat) } : {}),
+        ...(long !== undefined ? { long: long === "" || long === null ? null : Number(long) } : {}),
+        ...cityData,
       },
     });
 
-    // Update packages
-    if (packageIds.length > 0) {
-      await prisma.centerPackage.deleteMany({
-        where: { centerId: Number(id) },
-      });
+    // Update tests mapping (replace all)
+    if (Array.isArray(testIds)) {
+      await prisma.centerPackage.deleteMany({ where: { centerId: Number(id) } });
 
-      await prisma.centerPackage.createMany({
-        data: packageIds.map((pid) => ({
-          centerId: Number(id),
-          packageId: Number(pid),
-        })),
-      });
+      if (testIds.length > 0) {
+        await prisma.centerPackage.createMany({
+          data: testIds.map((tid) => ({
+            centerId: Number(id),
+            testId: Number(tid),
+          })),
+        });
+      }
     }
 
     const updated = await prisma.center.findUnique({
       where: { id: Number(id) },
-      include: { centerPackages: { include: { test: true } } },
+      include: {
+        city: true,
+        centerPackages: { include: { test: true } },
+      },
     });
 
-    res.json({ message: "Center updated successfully", center: updated });
+    return res.json({ message: "Center updated successfully", center: updated });
   } catch (error) {
     console.error("Error updating center:", error);
-    res.status(500).json({ error: "Failed to update center" });
+    return res.status(500).json({ error: "Failed to update center" });
   }
 };
 
-// ✅ DELETE Center
+/* ✅ DELETE Center */
 export const deleteCenter = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const existing = await prisma.center.findUnique({
-      where: { id: Number(id) },
-    });
+    const existing = await prisma.center.findUnique({ where: { id: Number(id) } });
     if (!existing) return res.status(404).json({ error: "Center not found" });
+
+    // remove related mappings first (safe)
+    await prisma.centerPackage.deleteMany({ where: { centerId: Number(id) } });
 
     await prisma.center.delete({ where: { id: Number(id) } });
 
-    res.json({ message: "Center deleted successfully" });
+    return res.json({ message: "Center deleted successfully" });
   } catch (error) {
     console.error("Error deleting center:", error);
-    res.status(500).json({ error: "Failed to delete center" });
+    return res.status(500).json({ error: "Failed to delete center" });
   }
 };
+
+/* -----------------------------
+   Nearby Centers (unchanged logic, only include city if needed)
+------------------------------ */
+
 // Convert slot time string "02:30 PM" → Date object (today at that time)
 function getSlotDate(slotTimeString) {
   const [time, modifier] = slotTimeString.split(" ");
@@ -293,7 +304,6 @@ function getSlotDate(slotTimeString) {
   return d;
 }
 
-// ✅ NEARBY Centers
 export const getNearbyCenters = async (req, res) => {
   try {
     const {
@@ -305,25 +315,19 @@ export const getNearbyCenters = async (req, res) => {
       includeFullSlots = "false",
     } = req.query;
 
-    // validate lat/long
     const userLat = parseFloat(lat);
     const userLong = parseFloat(long);
     const distanceKm = parseFloat(radius);
 
     if (isNaN(userLat) || isNaN(userLong)) {
-      return res
-        .status(400)
-        .json({
-          error: "Latitude and longitude are required and must be numbers",
-        });
+      return res.status(400).json({
+        error: "Latitude and longitude are required and must be numbers",
+      });
     }
     if (isNaN(distanceKm) || distanceKm <= 0) {
-      return res
-        .status(400)
-        .json({ error: "Radius must be a positive number" });
+      return res.status(400).json({ error: "Radius must be a positive number" });
     }
 
-    // parse categoryIds if provided
     let categoryIdList = [];
     if (categoryIds && typeof categoryIds === "string") {
       categoryIdList = categoryIds
@@ -332,39 +336,19 @@ export const getNearbyCenters = async (req, res) => {
         .filter((n) => Number.isFinite(n) && n > 0);
     }
 
-    // parse date if provided
     let bookingDateStart = null;
     let bookingDateEnd = null;
     if (date) {
       const parsed = new Date(date);
       if (Number.isNaN(parsed.getTime())) {
-        return res
-          .status(400)
-          .json({ error: "Date must be in YYYY-MM-DD format" });
+        return res.status(400).json({ error: "Date must be in YYYY-MM-DD format" });
       }
-      // set start of day (00:00:00) and next day (exclusive)
-      bookingDateStart = new Date(
-        parsed.getFullYear(),
-        parsed.getMonth(),
-        parsed.getDate(),
-        0,
-        0,
-        0
-      );
-      bookingDateEnd = new Date(
-        parsed.getFullYear(),
-        parsed.getMonth(),
-        parsed.getDate() + 1,
-        0,
-        0,
-        0
-      );
+      bookingDateStart = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0);
+      bookingDateEnd = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate() + 1, 0, 0, 0);
     }
 
     const includeFull = String(includeFullSlots).toLowerCase() === "true";
 
-    // 1) Fetch nearby centers with distance using Haversine (6371 km earth radius)
-    // limit to 200 to avoid huge IN queries later
     const nearbyCenters = await prisma.$queryRaw`
       SELECT 
         c.*,
@@ -388,31 +372,22 @@ export const getNearbyCenters = async (req, res) => {
       return res.json({ count: 0, centers: [] });
     }
 
-    // sanitize (remove sensitive fields like password if present)
     const sanitized = nearbyCenters.map((row) => {
-      // ensure distance is a Number (some drivers return string)
       const { password, ...rest } = row;
       return {
         ...rest,
-        distance:
-          typeof rest.distance === "string"
-            ? parseFloat(rest.distance)
-            : rest.distance,
+        distance: typeof rest.distance === "string" ? parseFloat(rest.distance) : rest.distance,
       };
     });
 
     const centerIds = sanitized.map((c) => c.id).filter(Boolean);
-    if (centerIds.length === 0) {
-      return res.json({ count: 0, centers: [] });
-    }
+    if (centerIds.length === 0) return res.json({ count: 0, centers: [] });
 
-    // 2) Fetch categories for these centers (join table entries)
     const centerCategories = await prisma.centerCategory.findMany({
       where: { centerId: { in: centerIds } },
       include: { category: true },
     });
 
-    // 3) Fetch slots for these centers (use select to avoid schema mismatches)
     const centerSlots = await prisma.centerSlot.findMany({
       where: { centerId: { in: centerIds } },
       select: {
@@ -426,22 +401,15 @@ export const getNearbyCenters = async (req, res) => {
       },
     });
 
-    // 4) If date provided, fetch booking counts for each slot for that date (use range to handle DateTime)
-    let bookingMap = {}; // slotId -> bookedCount
+    let bookingMap = {};
     if (bookingDateStart && bookingDateEnd && centerSlots.length > 0) {
       const slotIds = centerSlots.map((s) => s.id);
       const slotBookings = await prisma.centerSlotBooking.findMany({
         where: {
           slotId: { in: slotIds },
-          date: {
-            gte: bookingDateStart,
-            lt: bookingDateEnd,
-          },
+          date: { gte: bookingDateStart, lt: bookingDateEnd },
         },
-        select: {
-          slotId: true,
-          count: true,
-        },
+        select: { slotId: true, count: true },
       });
 
       for (const b of slotBookings) {
@@ -449,34 +417,32 @@ export const getNearbyCenters = async (req, res) => {
       }
     }
 
-    // 5) If category filter is applied, filter centers (ANY-match)
     let filteredCenters = sanitized;
     if (categoryIdList.length > 0) {
-      const matched = centerCategories.filter((cc) =>
-        categoryIdList.includes(cc.categoryId)
-      );
+      const matched = centerCategories.filter((cc) => categoryIdList.includes(cc.categoryId));
       const allowedCenterIds = new Set(matched.map((m) => m.centerId));
-      filteredCenters = sanitized.filter((center) =>
-        allowedCenterIds.has(center.id)
-      );
-      if (filteredCenters.length === 0) {
-        return res.json({ count: 0, centers: [] });
-      }
+      filteredCenters = sanitized.filter((center) => allowedCenterIds.has(center.id));
+      if (filteredCenters.length === 0) return res.json({ count: 0, centers: [] });
     }
 
-    // 6) Compose final response: attach categories and slots (with availability if date provided)
+    const now = new Date();
+    const threeHoursLater = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+    const today = new Date();
+
+    const isToday =
+      bookingDateStart &&
+      bookingDateStart.getFullYear() === today.getFullYear() &&
+      bookingDateStart.getMonth() === today.getMonth() &&
+      bookingDateStart.getDate() === today.getDate();
+
     const responseCenters = filteredCenters.map((center) => {
-      // categories: map to simple { id, name }
       const cats = centerCategories
         .filter((cc) => cc.centerId === center.id && cc.category)
         .map((cc) => ({ id: cc.category.id, name: cc.category.name }));
 
-      // slots for this center
-      const allSlots = centerSlots.filter(
-        (s) => s.centerId === center.id && (s.isActive ?? true)
-      );
+      const allSlots = centerSlots.filter((s) => s.centerId === center.id && (s.isActive ?? true));
 
-      const slotsWithAvailability = allSlots.map((slot) => {
+      let slotsWithAvailability = allSlots.map((slot) => {
         const booked = bookingMap[slot.id] || 0;
         const available = (Number(slot.capacity) || 0) - booked;
         return {
@@ -490,125 +456,79 @@ export const getNearbyCenters = async (req, res) => {
         };
       });
 
-      // 3-HOUR GAP RULE
-      const now = new Date();
-      const threeHoursLater = new Date(now.getTime() + 3 * 60 * 60 * 1000);
-
-      let availableSlots = slotsWithAvailability;
-
-      // If date == today ⇒ apply 3-hour-gap rule
-      const today = new Date();
-      const isToday =
-        bookingDateStart &&
-        bookingDateStart.getFullYear() === today.getFullYear() &&
-        bookingDateStart.getMonth() === today.getMonth() &&
-        bookingDateStart.getDate() === today.getDate();
-
       if (isToday) {
-        availableSlots = availableSlots.filter((slot) => {
+        slotsWithAvailability = slotsWithAvailability.filter((slot) => {
           const slotStart = getSlotDate(slot.startTime);
-          return slotStart >= threeHoursLater; // must be >= now+3hr
+          return slotStart >= threeHoursLater;
         });
       }
 
-      // Also apply "slot must have capacity"
       if (!includeFull) {
-        availableSlots = availableSlots.filter((s) => s.availableCount > 0);
+        slotsWithAvailability = slotsWithAvailability.filter((s) => s.availableCount > 0);
       }
 
-      const finalSlots = availableSlots;
-
-      return {
-        ...center,
-        categories: cats,
-        slots: finalSlots,
-      };
+      return { ...center, categories: cats, slots: slotsWithAvailability };
     });
 
-    return res.json({
-      count: responseCenters.length,
-      centers: responseCenters,
-    });
+    return res.json({ count: responseCenters.length, centers: responseCenters });
   } catch (error) {
     console.error("Error fetching nearby centers:", error);
     return res.status(500).json({ error: "Failed to fetch nearby centers" });
   }
 };
 
+/* ✅ Assign Categories */
 export const assignCategoriesToCenter = async (req, res) => {
   try {
     const { id } = req.params;
     const { categoryIds = [] } = req.body;
 
-    // Validate center exists
-    const center = await prisma.center.findUnique({
-      where: { id: Number(id) },
-    });
+    const center = await prisma.center.findUnique({ where: { id: Number(id) } });
+    if (!center) return res.status(404).json({ error: "Center not found" });
 
-    if (!center) {
-      return res.status(404).json({ error: "Center not found" });
-    }
-
-    // Validate categories
     const validCategories = await prisma.category.findMany({
       where: { id: { in: categoryIds.map(Number) } },
+      select: { id: true },
     });
 
-    const validIds = validCategories.map((c) => c.id);
-    const invalidIds = categoryIds.filter(
-      (cid) => !validIds.includes(Number(cid))
-    );
+    const validIds = new Set(validCategories.map((c) => c.id));
+    const invalidIds = categoryIds.filter((cid) => !validIds.has(Number(cid)));
 
     if (invalidIds.length > 0) {
-      return res
-        .status(400)
-        .json({ error: `Invalid category IDs: ${invalidIds.join(", ")}` });
+      return res.status(400).json({ error: `Invalid category IDs: ${invalidIds.join(", ")}` });
     }
 
-    // Remove old categories
-    await prisma.centerCategory.deleteMany({
-      where: { centerId: Number(id) },
-    });
+    await prisma.centerCategory.deleteMany({ where: { centerId: Number(id) } });
 
-    // Insert new categories
-    await prisma.centerCategory.createMany({
-      data: categoryIds.map((cid) => ({
-        centerId: Number(id),
-        categoryId: Number(cid),
-      })),
-    });
+    if (categoryIds.length > 0) {
+      await prisma.centerCategory.createMany({
+        data: categoryIds.map((cid) => ({
+          centerId: Number(id),
+          categoryId: Number(cid),
+        })),
+      });
+    }
 
     const updated = await prisma.center.findUnique({
       where: { id: Number(id) },
-      include: {
-        categories: {
-          include: { category: true },
-        },
-      },
+      include: { categories: { include: { category: true } } },
     });
 
-    res.json({
-      message: "Categories assigned successfully",
-      center: updated,
-    });
+    return res.json({ message: "Categories assigned successfully", center: updated });
   } catch (error) {
     console.error("Error assigning categories:", error);
-    res.status(500).json({ error: "Failed to assign categories" });
+    return res.status(500).json({ error: "Failed to assign categories" });
   }
 };
 
+/* ✅ Create Slot */
 export const createCenterSlot = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, startTime, endTime, capacity = 0 } = req.body;
 
-    const center = await prisma.center.findUnique({
-      where: { id: Number(id) },
-    });
-
-    if (!center) {
-      return res.status(404).json({ error: "Center not found" });
-    }
+    const center = await prisma.center.findUnique({ where: { id: Number(id) } });
+    if (!center) return res.status(404).json({ error: "Center not found" });
 
     const slot = await prisma.centerSlot.create({
       data: {
@@ -620,13 +540,10 @@ export const createCenterSlot = async (req, res) => {
       },
     });
 
-    res.status(201).json({
-      message: "Slot created successfully",
-      slot,
-    });
+    return res.status(201).json({ message: "Slot created successfully", slot });
   } catch (error) {
     console.error("Error creating slot:", error);
-    res.status(500).json({ error: "Failed to create slot" });
+    return res.status(500).json({ error: "Failed to create slot" });
   }
 };
 
@@ -639,10 +556,10 @@ export const getCenterSlots = async (req, res) => {
       orderBy: { startTime: "asc" },
     });
 
-    res.json({ slots });
+    return res.json({ slots });
   } catch (error) {
     console.error("Error fetching center slots:", error);
-    res.status(500).json({ error: "Failed to fetch slots" });
+    return res.status(500).json({ error: "Failed to fetch slots" });
   }
 };
 
@@ -651,32 +568,24 @@ export const updateCenterSlot = async (req, res) => {
     const { slotId } = req.params;
     const { name, startTime, endTime, capacity, isActive } = req.body;
 
-    const slot = await prisma.centerSlot.findUnique({
-      where: { id: Number(slotId) },
-    });
-
-    if (!slot) {
-      return res.status(404).json({ error: "Slot not found" });
-    }
+    const slot = await prisma.centerSlot.findUnique({ where: { id: Number(slotId) } });
+    if (!slot) return res.status(404).json({ error: "Slot not found" });
 
     const updated = await prisma.centerSlot.update({
       where: { id: Number(slotId) },
       data: {
-        name,
-        startTime,
-        endTime,
-        capacity,
-        isActive,
+        ...(name !== undefined ? { name } : {}),
+        ...(startTime !== undefined ? { startTime } : {}),
+        ...(endTime !== undefined ? { endTime } : {}),
+        ...(capacity !== undefined ? { capacity: Number(capacity) } : {}),
+        ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
       },
     });
 
-    res.json({
-      message: "Slot updated successfully",
-      slot: updated,
-    });
+    return res.json({ message: "Slot updated successfully", slot: updated });
   } catch (error) {
     console.error("Error updating slot:", error);
-    res.status(500).json({ error: "Failed to update slot" });
+    return res.status(500).json({ error: "Failed to update slot" });
   }
 };
 
@@ -684,13 +593,11 @@ export const deleteCenterSlot = async (req, res) => {
   try {
     const { slotId } = req.params;
 
-    await prisma.centerSlot.delete({
-      where: { id: Number(slotId) },
-    });
+    await prisma.centerSlot.delete({ where: { id: Number(slotId) } });
 
-    res.json({ message: "Slot deleted successfully" });
+    return res.json({ message: "Slot deleted successfully" });
   } catch (error) {
     console.error("Error deleting slot:", error);
-    res.status(500).json({ error: "Failed to delete slot" });
+    return res.status(500).json({ error: "Failed to delete slot" });
   }
 };

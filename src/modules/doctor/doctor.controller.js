@@ -25,7 +25,7 @@ export const createDoctor = async (req, res) => {
       patientId 
     } = req.body;
 
-    console.log("patientId",req.body)
+    
     if (!name || !number) {
       return res.status(400).json({ message: "Name and number are required" });
     }

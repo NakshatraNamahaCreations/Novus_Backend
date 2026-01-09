@@ -1,4 +1,3 @@
-
 import { Worker, QueueEvents } from "bullmq";
 import dayjs from "dayjs";
 import { PrismaClient } from "@prisma/client";
@@ -93,7 +92,11 @@ const fetchOrder = async (orderId) => {
    Fetch patient-wise report URL (based on your model)
    pdfType: "plain" | "letterhead" | "full"
 ---------------------------------- */
-const fetchPatientReportUrl = async ({ orderId, patientId, pdfType = "full" }) => {
+const fetchPatientReportUrl = async ({
+  orderId,
+  patientId,
+  pdfType = "full",
+}) => {
   const row = await prisma.patientReportPdf.findUnique({
     where: {
       orderId_patientId: {
@@ -109,20 +112,17 @@ const fetchPatientReportUrl = async ({ orderId, patientId, pdfType = "full" }) =
   if (type === "plain") return row.plainPdfUrl || null;
   if (type === "letterhead") return row.letterheadPdfUrl || null;
 
-  // default: full
   return row.fullPdfUrl || null;
 };
 
 /* ----------------------------------
    Send REPORT message (ORDER-level reportUrl)
-   job.name: "whatsapp.sendReport"
 ---------------------------------- */
 const handleSendReport = async (order) => {
   const reportLink = order.reportUrl;
   if (!reportLink) throw new Error("Report URL not found yet on order");
 
   const testsStr = extractTestNames(order);
-
   const tpl = WHATSAPP_TEMPLATES.REPORT_SHARED_NOVUS;
 
   const variables = tpl.mapVariables({
@@ -143,13 +143,14 @@ const handleSendReport = async (order) => {
 };
 
 /* ----------------------------------
-   Send PATIENT-wise report (PatientReportPdf.fullPdfUrl etc.)
-   job.name: "whatsapp.sendPatientReport"
+   Send PATIENT-wise report
 ---------------------------------- */
-const handleSendPatientReport = async (order, { patientId, pdfType = "full" }) => {
+const handleSendPatientReport = async (
+  order,
+  { patientId, pdfType = "full" }
+) => {
   if (!patientId) throw new Error("Missing patientId");
 
-  // Find family member patient record from orderMembers (or fallback)
   const member = (order.orderMembers || []).find(
     (m) => Number(m.patientId) === Number(patientId)
   );
@@ -157,7 +158,6 @@ const handleSendPatientReport = async (order, { patientId, pdfType = "full" }) =
   const patient = member?.patient || order.patient;
   if (!patient?.contactNo) throw new Error("Patient phone not found");
 
-  // get correct PDF url
   const reportLink = await fetchPatientReportUrl({
     orderId: order.id,
     patientId,
@@ -171,7 +171,6 @@ const handleSendPatientReport = async (order, { patientId, pdfType = "full" }) =
   }
 
   const testsStr = extractTestNamesForPatient(order, patientId);
-
   const tpl = WHATSAPP_TEMPLATES.REPORT_SHARED_NOVUS;
 
   const variables = tpl.mapVariables({
@@ -191,17 +190,17 @@ const handleSendPatientReport = async (order, { patientId, pdfType = "full" }) =
   return { success: true, type: "patient-report", pdfType };
 };
 
-
+/* ----------------------------------
+   Welcome new patient (no orderId needed)
+---------------------------------- */
 const handleWelcomeNewPatient = async ({ contactNo, patientName }) => {
   const tpl = WHATSAPP_TEMPLATES.WELCOME_NEW_PATIENT;
 
-  console.log("patientName",patientName)
   const variables = tpl.mapVariables({
     customerName: safe(patientName, "Customer"),
     supportNumber: process.env.SUPPORT_PHONE || "8050065924",
   });
 
-  console.log("variables",variables)
   await WhatsAppMessage({
     phone: `${contactNo}`,
     templateId: tpl.templateId,
@@ -212,18 +211,16 @@ const handleWelcomeNewPatient = async ({ contactNo, patientName }) => {
   return { success: true, type: "welcome-new-patient" };
 };
 
-
 /* ----------------------------------
-   Send ORDER + PAYMENT messages
-   job.name: "whatsapp.sendOrderAndPayment"
+   ✅ NEW: Send only ORDER CONFIRMED
+   job.name: "whatsapp.sendOrderConfirmed"
 ---------------------------------- */
-const handleSendOrderAndPayment = async (order) => {
+const handleSendOrderConfirmed = async (order) => {
   const testsStr = extractTestNames(order);
 
-  // 1️⃣ ORDER CONFIRMED
-  const orderTemplate = WHATSAPP_TEMPLATES.ORDER_CONFIRMED;
+  const tpl = WHATSAPP_TEMPLATES.ORDER_CONFIRMED;
 
-  const orderVariables = orderTemplate.mapVariables({
+  const variables = tpl.mapVariables({
     customerName: safe(order.patient?.fullName, "Customer"),
     bookingId: safe(order.id),
     tests: safe(testsStr),
@@ -232,31 +229,37 @@ const handleSendOrderAndPayment = async (order) => {
       ? `${dayjs(order.slot.startTime).format("hh:mm A")} - ${dayjs(
           order.slot.endTime
         ).format("hh:mm A")}`
-      : "Scheduled Slot",
+      : "-",
     address: [
-      order.address?.houseNo,
-      order.address?.area,
-      order.address?.city,
-      order.address?.pincode,
+      order.address?.address || "NA",
+     
     ]
       .filter(Boolean)
       .join(", "),
     supportNumber: process.env.SUPPORT_PHONE || "8050065924",
   });
 
+
   await WhatsAppMessage({
     phone: order.patient?.contactNo,
-    templateId: orderTemplate.templateId,
-    message: orderTemplate.message,
-    variables: orderVariables,
+    templateId: tpl.templateId,
+    message: tpl.message,
+    variables,
   });
 
-  // 2️⃣ PAYMENT CONFIRMED
-  const paymentTemplate = WHATSAPP_TEMPLATES.PAYMENT_CONFIRMED;
+  return { success: true, type: "order-confirmed" };
+};
 
-  const paymentVariables = paymentTemplate.mapVariables({
+/* ----------------------------------
+   ✅ NEW: Send only PAYMENT CONFIRMED
+   job.name: "whatsapp.sendPaymentConfirmed"
+---------------------------------- */
+const handleSendPaymentConfirmed = async (order) => {
+  const tpl = WHATSAPP_TEMPLATES.PAYMENT_CONFIRMED;
+
+  const variables = tpl.mapVariables({
     customerName: safe(order.patient?.fullName, "Customer"),
-    amount: safe(order.totalAmount),
+    amount: safe(order.finalAmount),
     paymentMode: safe(order.paymentMode, "Online"),
     transactionId: safe(order.merchantOrderId, order.id),
     date: dayjs(order.createdAt || new Date()).format("DD MMM YYYY"),
@@ -264,11 +267,21 @@ const handleSendOrderAndPayment = async (order) => {
 
   await WhatsAppMessage({
     phone: order.patient?.contactNo,
-    templateId: paymentTemplate.templateId,
-    message: paymentTemplate.message,
-    variables: paymentVariables,
+    templateId: tpl.templateId,
+    message: tpl.message,
+    variables,
   });
 
+  return { success: true, type: "payment-confirmed" };
+};
+
+/* ----------------------------------
+   Existing: Send ORDER + PAYMENT (now uses the 2 new handlers)
+   job.name: "whatsapp.sendOrderAndPayment"
+---------------------------------- */
+const handleSendOrderAndPayment = async (order) => {
+  await handleSendOrderConfirmed(order);
+  await handleSendPaymentConfirmed(order);
   return { success: true, type: "order+payment" };
 };
 
@@ -295,13 +308,29 @@ new Worker(
       console.log("📩 WhatsApp job received:", job.id, job.name, job.data);
 
       switch (job.name) {
-        // ✅ NEW: jobs that don't need orderId
+        // ✅ jobs that don't need orderId
         case "whatsapp.welcomeNewPatient":
           return await handleWelcomeNewPatient({
             contactNo: job.data.contactNo,
             patientName: job.data.patientName,
-           
           });
+
+        // ✅ NEW: separate messages
+        case "whatsapp.sendOrderConfirmed": {
+          const { orderId } = job.data || {};
+          if (!orderId) throw new Error("Missing orderId");
+          const order = await fetchOrder(orderId);
+          if (!order) throw new Error("Order not found");
+          return await handleSendOrderConfirmed(order);
+        }
+
+        case "whatsapp.sendPaymentConfirmed": {
+          const { orderId } = job.data || {};
+          if (!orderId) throw new Error("Missing orderId");
+          const order = await fetchOrder(orderId);
+          if (!order) throw new Error("Order not found");
+          return await handleSendPaymentConfirmed(order);
+        }
 
         // ✅ existing jobs (need orderId)
         case "whatsapp.sendReport":
@@ -314,7 +343,8 @@ new Worker(
           const order = await fetchOrder(orderId);
           if (!order) throw new Error("Order not found");
 
-          if (job.name === "whatsapp.sendReport") return await handleSendReport(order);
+          if (job.name === "whatsapp.sendReport")
+            return await handleSendReport(order);
 
           if (job.name === "whatsapp.sendPatientReport") {
             return await handleSendPatientReport(order, {
@@ -323,6 +353,7 @@ new Worker(
             });
           }
 
+          // default (and whatsapp.sendOrderAndPayment)
           return await handleSendOrderAndPayment(order);
         }
       }

@@ -37,6 +37,7 @@ export const ResultService = {
           reportedById: payload.reportedById,
           createdById: payload.createdById,
           reportedAt: new Date(),
+          notes:payload.notes,
 
           // ⭐ RADIOLOGY REPORT
           ...(payload.testType === "RADIOLOGY" && {
@@ -148,7 +149,7 @@ export const ResultService = {
         collectedAt: payload.collectedAt,
         reportedAt: new Date(),
         reportedById: payload.reportedById,
-
+       notes:payload.notes,
         reportHtml: payload.reportHtml || null,
       },
     });
