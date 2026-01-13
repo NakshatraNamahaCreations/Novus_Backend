@@ -13,7 +13,6 @@ const formatChange = (current, previous) => {
   return `${sign}${diff.toFixed(1)}%`;
 };
 
-
 router.get("/kpi", async (req, res) => {
   try {
     const now = new Date();
@@ -112,19 +111,22 @@ router.get("/kpi", async (req, res) => {
 
 router.get("/chart", async (req, res) => {
   try {
-    const { range = "monthly" } = req.query; // options: daily, weekly, monthly
+    const { range = "monthly" } = req.query;
     const now = new Date();
 
-    // Determine date range
-    let startDate;
+    let startDate = new Date(now);
+
     if (range === "daily") {
-      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+      startDate.setDate(now.getDate() - 1);
     } else if (range === "weekly") {
-      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+      startDate.setDate(now.getDate() - 7);
     } else {
-      startDate = new Date(now.getFullYear(), now.getMonth() - 6, 1); // last 6 months
+      startDate.setDate(now.getDate() - 30);
     }
 
+    startDate.setHours(0, 0, 0, 0);
+
+  
     // Group orders by date
     const orderData = await prisma.order.groupBy({
       by: ["date"],
@@ -142,7 +144,6 @@ router.get("/chart", async (req, res) => {
       by: ["paymentDate"],
       where: {
         paymentDate: { gte: startDate },
-      
       },
       _sum: { amount: true },
       _count: { id: true },
@@ -154,14 +155,16 @@ router.get("/chart", async (req, res) => {
 
     orderData.forEach((o) => {
       const key = new Date(o.date).toISOString().split("T")[0];
-      if (!merged[key]) merged[key] = { time: key, orders: 0, revenue: 0, payments: 0 };
+      if (!merged[key])
+        merged[key] = { time: key, orders: 0, revenue: 0, payments: 0 };
       merged[key].orders = o._count.id;
       merged[key].revenue = o._sum.finalAmount || 0;
     });
 
     paymentData.forEach((p) => {
       const key = new Date(p.paymentDate).toISOString().split("T")[0];
-      if (!merged[key]) merged[key] = { time: key, orders: 0, revenue: 0, payments: 0 };
+      if (!merged[key])
+        merged[key] = { time: key, orders: 0, revenue: 0, payments: 0 };
       merged[key].payments = p._sum.amount || 0;
     });
 
@@ -174,8 +177,14 @@ router.get("/chart", async (req, res) => {
       success: true,
       range,
       totalOrders: orderData.reduce((acc, o) => acc + o._count.id, 0),
-      totalRevenue: orderData.reduce((acc, o) => acc + (o._sum.finalAmount || 0), 0),
-      totalPayments: paymentData.reduce((acc, p) => acc + (p._sum.amount || 0), 0),
+      totalRevenue: orderData.reduce(
+        (acc, o) => acc + (o._sum.finalAmount || 0),
+        0
+      ),
+      totalPayments: paymentData.reduce(
+        (acc, p) => acc + (p._sum.amount || 0),
+        0
+      ),
       chartData: result,
     });
   } catch (error) {
@@ -186,9 +195,5 @@ router.get("/chart", async (req, res) => {
     });
   }
 });
-
-
-
-
 
 export default router;

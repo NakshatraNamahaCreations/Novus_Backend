@@ -31,8 +31,7 @@ export const sendPushNotification = async ({
 
     const response = await admin.messaging().send(message);
 
-    console.log("response",response)
-
+  
     // ✅ SUCCESS
     return {
       success: true,

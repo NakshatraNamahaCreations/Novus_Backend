@@ -272,7 +272,7 @@ export const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
-    console.log("data", data);
+
 
     // calculate age if dob is provided
     if (data.dob) {

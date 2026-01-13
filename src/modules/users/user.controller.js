@@ -198,26 +198,28 @@ export const loginUser = async (req, res) => {
     if (!validPassword)
       return res.status(401).json({ error: "Invalid password" });
 
-    // ✅ Generate JWT token
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
+  
     // ✅ Mark user as active
     await prisma.user.update({
       where: { id: user.id },
       data: { isActive: true },
     });
 
-    // ✅ Send token as httpOnly cookie
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // use HTTPS only in prod
-      sameSite: "strict",
-      maxAge: 24 * 60 * 60 * 1000, // 1 day
-    });
+// ✅ Generate JWT token (10 minutes)
+const token = jwt.sign(
+  { id: user.id, email: user.email, role: user.role },
+  JWT_SECRET,
+  { expiresIn: "10m" }
+);
+
+// ✅ Send token as httpOnly cookie (10 minutes)
+res.cookie("token", token, {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "strict",
+  maxAge: 10 * 60 * 1000, // 10 minutes
+});
+
 
     // ✅ Respond with user info (no token in body)
     res.status(200).json({

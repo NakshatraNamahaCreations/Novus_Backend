@@ -445,7 +445,7 @@ export const getSpotlightHealthPackages = async (req, res) => {
       orderBy: { id: "desc" },
 
       include: {
-        category: { select: { id: true, name: true } },
+        category: { select: { id: true, name: true,imgUrl:true } },
         checkupPackages: {
           include: {
             test: {
@@ -525,23 +525,40 @@ export const getHealthPackagesByCategory = async (req, res) => {
     const { categoryId } = req.params;
     const { search = "", page = 1, limit = 100 } = req.query;
 
-    const currentPage = Number(page) || 1;
-    const pageSize = Number(limit) || 10;
+    const catId = Number(categoryId);
+    const currentPage = Math.max(1, Number(page) || 1);
+    const pageSize = Math.max(1, Number(limit) || 10);
+    const searchText = (search || "").trim();
 
-    if (!categoryId) {
-      return res.status(400).json({ error: "Category ID is required" });
+    if (!catId) {
+      return res.status(400).json({ error: "Valid Category ID is required" });
+    }
+
+    // ✅ Fetch category ONCE (returned at top-level)
+    const category = await prisma.category.findUnique({
+      where: { id: catId },
+      select: { id: true, name: true, bannerUrl: true },
+    });
+
+    if (!category) {
+      return res.status(404).json({ error: "Category not found" });
     }
 
     /* -------------------------------------------
        1️⃣ WHERE CONDITION (category + search)
     -------------------------------------------- */
     const whereCondition = {
-      categoryId: Number(categoryId),
-      ...(search
+      categoryId: catId,
+      ...(searchText
         ? {
             OR: [
-              { name: { contains: search, mode: "insensitive" } },
-              { category: { name: { contains: search, mode: "insensitive" } } }
+              { name: { contains: searchText, mode: "insensitive" } },
+              // ✅ relation filter safe for optional/required category relation
+              {
+                category: {
+                  is: { name: { contains: searchText, mode: "insensitive" } },
+                },
+              },
             ],
           }
         : {}),
@@ -554,18 +571,16 @@ export const getHealthPackagesByCategory = async (req, res) => {
       where: whereCondition,
     });
 
-    const totalPages = Math.ceil(totalCount / pageSize);
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
     /* -------------------------------------------
-       3️⃣ FETCH DATA
+       3️⃣ FETCH DATA (✅ no category include to avoid repeating)
     -------------------------------------------- */
     const rawData = await prisma.healthPackage.findMany({
       where: whereCondition,
       skip: (currentPage - 1) * pageSize,
       take: pageSize,
-
       include: {
-        category: { select: { id: true, name: true } },
         checkupPackages: {
           include: {
             test: {
@@ -576,12 +591,11 @@ export const getHealthPackagesByCategory = async (req, res) => {
           },
         },
       },
-
       orderBy: { id: "desc" },
     });
 
     /* -------------------------------------------
-       4️⃣ FORMAT RESPONSE
+       4️⃣ FORMAT RESPONSE (✅ category NOT repeated per item)
     -------------------------------------------- */
     const data = rawData.map((pkg) => {
       const tests = pkg.checkupPackages.map((cp) => ({
@@ -605,7 +619,7 @@ export const getHealthPackagesByCategory = async (req, res) => {
         reportWithin: pkg.reportWithin,
         reportUnit: pkg.reportUnit,
         discount: pkg.discount,
-        category: pkg.category,
+        categoryId: pkg.categoryId, // ✅ keep only id (optional)
         testType: "PATHOLOGY",
         tests,
         testCount: tests.length,
@@ -626,14 +640,15 @@ export const getHealthPackagesByCategory = async (req, res) => {
         hasNextPage: currentPage < totalPages,
         hasPrevPage: currentPage > 1,
       },
+      category, // ✅ returned ONCE
       data,
     });
-
   } catch (error) {
     console.error("Error fetching category packages:", error);
     return res.status(500).json({ error: "Failed to fetch category packages" });
   }
 };
+
 
 
 

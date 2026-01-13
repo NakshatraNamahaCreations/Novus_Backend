@@ -6,10 +6,7 @@ const prisma = new PrismaClient();
 // ✅ CREATE
 export const addCategory = async (req, res) => {
   try {
-  
-
     const { name, type, order, isPopular } = req.body;
-
 
     let imgUrl = null;
     let bannerUrl = null;
@@ -18,19 +15,19 @@ export const addCategory = async (req, res) => {
     const bannerFile = req.files?.banner?.[0];
 
     if (imageFile) imgUrl = await uploadToS3(imageFile, "categories");
-    if (bannerFile) bannerUrl = await uploadToS3(bannerFile, "category-banners");
+    if (bannerFile)
+      bannerUrl = await uploadToS3(bannerFile, "category-banners");
 
-const category = await prisma.category.create({
-  data: {
-    name,
-    type,
-    order: order ? Number(order) : null,
-    isPopular: isPopular === "true" || isPopular === true, // ✅ handle form-data string
-    imgUrl,
-    bannerUrl,
-  },
-});
-
+    const category = await prisma.category.create({
+      data: {
+        name,
+        type,
+        order: order ? Number(order) : null,
+        isPopular: isPopular === "true" || isPopular === true, // ✅ handle form-data string
+        imgUrl,
+        bannerUrl,
+      },
+    });
 
     res.status(201).json(category);
   } catch (error) {
@@ -46,8 +43,6 @@ export const getAllCategories = async (req, res) => {
 
     const where = {};
     if (type) where.type = type;
-
-    // popular=true => only categories that have bannerUrl (optional rule)
     if (popular === "true") where.bannerUrl = { not: null };
 
     const categories = await prisma.category.findMany({
@@ -106,24 +101,25 @@ export const updateCategory = async (req, res) => {
 
     // ✅ replace banner image
     if (bannerFile) {
-      if (existingCategory.bannerUrl) await deleteFromS3(existingCategory.bannerUrl);
+      if (existingCategory.bannerUrl)
+        await deleteFromS3(existingCategory.bannerUrl);
       bannerUrl = await uploadToS3(bannerFile, "category-banners");
     }
 
-   const updatedCategory = await prisma.category.update({
-  where: { id: Number(id) },
-  data: {
-    name: name ?? existingCategory.name,
-    type: type ?? existingCategory.type,
-    order: order !== undefined ? Number(order) : existingCategory.order,
-    isPopular:
-      isPopular !== undefined
-        ? (isPopular === "true" || isPopular === true)
-        : existingCategory.isPopular,
-    imgUrl,
-    bannerUrl,
-  },
-});
+    const updatedCategory = await prisma.category.update({
+      where: { id: Number(id) },
+      data: {
+        name: name ?? existingCategory.name,
+        type: type ?? existingCategory.type,
+        order: order !== undefined ? Number(order) : existingCategory.order,
+        isPopular:
+          isPopular !== undefined
+            ? isPopular === "true" || isPopular === true
+            : existingCategory.isPopular,
+        imgUrl,
+        bannerUrl,
+      },
+    });
 
     res.json(updatedCategory);
   } catch (error) {
@@ -145,7 +141,8 @@ export const deleteCategory = async (req, res) => {
       return res.status(404).json({ error: "Category not found" });
 
     if (existingCategory.imgUrl) await deleteFromS3(existingCategory.imgUrl);
-    if (existingCategory.bannerUrl) await deleteFromS3(existingCategory.bannerUrl);
+    if (existingCategory.bannerUrl)
+      await deleteFromS3(existingCategory.bannerUrl);
 
     await prisma.category.delete({ where: { id: Number(id) } });
 
@@ -173,5 +170,28 @@ export const getPopularCategories = async (req, res) => {
   } catch (e) {
     console.error("getPopularCategories error:", e);
     res.status(500).json({ error: "Failed to fetch popular categories" });
+  }
+};
+
+export const getBasedOnTestType = async (req, res) => {
+  try {
+    const { type, limit = 50 } = req.query;
+    const where = {};
+    if (type) where.type = type; 
+
+    const categories = await prisma.category.findMany({
+      where,
+      orderBy: [{ order: "asc" }, { createdAt: "desc" }],
+      take: Number(limit) || 50,
+    });
+
+    return res.json({
+      success: true,
+      categories,
+      total: categories.length,
+    });
+  } catch (e) {
+    console.error("getBasedOnTestType error:", e);
+    return res.status(500).json({ error: "Failed to fetch categories" });
   }
 };

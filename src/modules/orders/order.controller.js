@@ -9,12 +9,9 @@ import { whatsappQueue } from "../../queues/whatsapp.queue.js";
 import { vendorNotificationQueue } from "../../queues/vendorNotification.queue.js";
 import { broadcastNewOrder } from "../../services/location.service.js";
 import locationService from "../location/location.service.js";
-import {uploadToS3} from "../../config/s3.js"
-
-
+import { uploadToS3 } from "../../config/s3.js";
 
 import { markOrderReportReady } from "./order.service.js";
-
 
 const prisma = new PrismaClient();
 const formatTime = (date) => dayjs(date).format("hh:mm A");
@@ -261,51 +258,53 @@ export const createOrder = async (req, res) => {
     if (lock?.release) await lock.release();
   }
 };
-// controllers/order.controller.js (or wherever createAdminOrder lives)
 export const createAdminOrder = async (req, res) => {
   try {
     const {
       patientId,
-      selectedTests, // ✅ now contains both tests + packages
+      selectedTests,
+
+      // home collection
       addressId,
       homeCollection = false,
+
+      // order
       registrationType,
       provisionalDiagnosis,
       notes,
       remark,
+      source,
+
+      // relations
       diagnosticCenterId,
       refCenterId,
       doctorId,
-      source,
 
+      // center collection (frontend uses collectionCenterId)
+      centerId, // optional
+      collectionCenterId, // optional (preferred from your UI)
+      centerSlotId,
+      slotId, // optional (home slot OR optional in center flow)
+
+      // totals
       totalAmount: bodyTotalAmount,
       discount,
       discountAmount,
       finalAmount: bodyFinalAmount,
+
+      // date
+      date, // expected "YYYY-MM-DD" (home or order date)
+      homeCollectionDate, // optional if frontend sends this instead of date
     } = req.body;
 
-    /* -------------------- validation -------------------- */
-    if (
-      !patientId ||
-      !Array.isArray(selectedTests) ||
-      selectedTests.length === 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Patient & items required",
-      });
-    }
+    console.log("slotId", slotId);
+    console.log("date", date, "homeCollectionDate", homeCollectionDate);
 
-    // ✅ Must have diagnosticCenterId (based on your current code)
-    if (!diagnosticCenterId) {
-      return res.status(400).json({
-        success: false,
-        message: "diagnosticCenterId is required",
-      });
-    }
-
+    /* -------------------- helpers -------------------- */
     const castInt = (v) =>
-      typeof v === "undefined" || v === null || v === "" ? null : Number(v);
+      v === undefined || v === null || v === "" || Number.isNaN(Number(v))
+        ? null
+        : Number(v);
 
     const toNumber = (v) => {
       const n = Number(v);
@@ -314,22 +313,42 @@ export const createAdminOrder = async (req, res) => {
 
     const normalizeType = (t) => {
       const type = String(t?.type || "").toLowerCase();
-      // accept: test/package/checkup
       if (type === "package" || type === "checkup") return "package";
       return "test";
     };
 
-    // ✅ validate each selected item
+    const parseDateOrToday = (v) => {
+      // accepts "YYYY-MM-DD" or ISO string; fallback today
+      if (!v) return new Date();
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? new Date() : d;
+    };
+
+    /* -------------------- validation -------------------- */
+    if (!patientId || !Array.isArray(selectedTests) || selectedTests.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Patient & items required",
+      });
+    }
+
+    const diagId = castInt(diagnosticCenterId);
+    if (!diagId) {
+      return res.status(400).json({
+        success: false,
+        message: "diagnosticCenterId is required",
+      });
+    }
+
+    // validate selected items
     for (const item of selectedTests) {
-      const id = Number(item?.id ?? item?.testId ?? item?.packageId);
-      if (!id || Number.isNaN(id)) {
+      const id = castInt(item?.id ?? item?.testId ?? item?.packageId);
+      if (!id) {
         return res.status(400).json({
           success: false,
           message: "Each selected item must have a valid id",
         });
       }
-
-      // If frontend sends type, we respect it; else infer a bit
       const type = normalizeType(item);
       if (type !== "test" && type !== "package") {
         return res.status(400).json({
@@ -339,12 +358,49 @@ export const createAdminOrder = async (req, res) => {
       }
     }
 
+    // If home collection => address required + slotId required
+    if (Boolean(homeCollection)) {
+      const addr = castInt(addressId);
+      if (!addr) {
+        return res.status(400).json({
+          success: false,
+          message: "addressId is required for home collection",
+        });
+      }
+
+      const sId = castInt(slotId);
+      if (!sId) {
+        return res.status(400).json({
+          success: false,
+          message: "slotId is required for home collection",
+        });
+      }
+    } else {
+      // center collection => center + centerSlot required
+      const finalCenterId = castInt(centerId ?? collectionCenterId);
+      const cSlotId = castInt(centerSlotId);
+
+      if (!finalCenterId) {
+        return res.status(400).json({
+          success: false,
+          message: "collectionCenterId/centerId is required for center collection",
+        });
+      }
+      if (!cSlotId) {
+        return res.status(400).json({
+          success: false,
+          message: "centerSlotId is required for center collection",
+        });
+      }
+      // slotId is OPTIONAL for center collection (keep as optional)
+    }
+
     /* -------------------- order number -------------------- */
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const count = await prisma.order.count({
-      where: { orderNumber: { startsWith: `ORD${today}` } },
+      where: { orderNumber: { startsWith: `ORD${todayStr}` } },
     });
-    const orderNumber = `ORD${today}${String(count + 1).padStart(4, "0")}`;
+    const orderNumber = `ORD${todayStr}${String(count + 1).padStart(4, "0")}`;
 
     /* -------------------- totals -------------------- */
     const computedTotal = selectedTests.reduce(
@@ -369,62 +425,82 @@ export const createAdminOrder = async (req, res) => {
         ? toNumber(bodyFinalAmount)
         : Math.max(0, total - discountAmt);
 
-    /* -------------------- order create data -------------------- */
+    /* -------------------- date (fix 1970 issue) -------------------- */
+    const pickedDate = date || homeCollectionDate || null;
+    const orderDate = parseDateOrToday(pickedDate);
+
+    /* -------------------- build create data (SAFE CONNECTS) -------------------- */
     const dataToCreate = {
       orderNumber,
-      createdBy: { connect: { id: req.user.id } },
-      patient: { connect: { id: Number(patientId) } },
+      createdBy: { connect: { id: castInt(req.user?.id) } },
+      patient: { connect: { id: castInt(patientId) } },
+
       orderType: registrationType ?? null,
+
       totalAmount: Number(total),
-      discount:
-        discount !== undefined && discount !== null
-          ? Number(discount)
-          : undefined,
-      discountAmount:
-        discountAmt !== undefined ? Number(discountAmt) : undefined,
+      discount: discount !== undefined && discount !== null ? Number(discount) : 0,
+      discountAmount: Number(discountAmt),
       finalAmount: Number(finalAmt),
 
-      diagnosticCenter: { connect: { id: Number(diagnosticCenterId) } },
+      diagnosticCenter: { connect: { id: diagId } },
       source: source ?? undefined,
-      date: new Date(),
+
+      // ✅ always valid
+      date: orderDate,
+
       isHomeSample: Boolean(homeCollection),
-      remarks: [provisionalDiagnosis, notes, remark]
-        .filter(Boolean)
-        .join(" | "),
+      remarks: [provisionalDiagnosis, notes, remark].filter(Boolean).join(" | "),
     };
 
-    if (castInt(addressId))
-      dataToCreate.address = { connect: { id: Number(addressId) } };
-    if (castInt(doctorId))
-      dataToCreate.doctor = { connect: { id: Number(doctorId) } };
-    if (castInt(refCenterId))
-      dataToCreate.refCenter = { connect: { id: Number(refCenterId) } };
+    // ✅ connect slot ONLY when present (prevents Prisma "id must not be null")
+    const sId = castInt(slotId);
+    if (sId) dataToCreate.slot = { connect: { id: sId } };
+
+    // home collection relations
+    if (Boolean(homeCollection)) {
+      const addr = castInt(addressId);
+      if (addr) dataToCreate.address = { connect: { id: addr } };
+    }
+
+    // center collection relations
+    if (!Boolean(homeCollection)) {
+      const finalCenterId = castInt(centerId ?? collectionCenterId);
+      const cSlotId = castInt(centerSlotId);
+
+      if (finalCenterId) dataToCreate.center = { connect: { id: finalCenterId } };
+      if (cSlotId) dataToCreate.centerSlot = { connect: { id: cSlotId } };
+      // slot already handled safely above (optional)
+    }
+
+    // optional relations
+    const dId = castInt(doctorId);
+    if (dId) dataToCreate.doctor = { connect: { id: dId } };
+
+    const rId = castInt(refCenterId);
+    if (rId) dataToCreate.refCenter = { connect: { id: rId } };
 
     /* -------------------- transaction -------------------- */
     const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.create({ data: dataToCreate });
 
       const orderMember = await tx.orderMember.create({
-        data: { orderId: order.id, patientId: Number(patientId) },
+        data: { orderId: order.id, patientId: castInt(patientId) },
       });
 
-      // ✅ IMPORTANT FIX:
-      // - if item.type === "package" -> set packageId
-      // - else -> set testId
-      const creates = selectedTests.map((item) => {
-        const id = Number(item?.id ?? item?.testId ?? item?.packageId);
-        const type = normalizeType(item);
+      await Promise.all(
+        selectedTests.map((item) => {
+          const id = castInt(item?.id ?? item?.testId ?? item?.packageId);
+          const type = normalizeType(item);
 
-        return tx.orderMemberPackage.create({
-          data: {
-            orderMemberId: orderMember.id,
-            testId: type === "test" ? id : null,
-            packageId: type === "package" ? id : null,
-          },
-        });
-      });
-
-      await Promise.all(creates);
+          return tx.orderMemberPackage.create({
+            data: {
+              orderMemberId: orderMember.id,
+              testId: type === "test" ? id : null,
+              packageId: type === "package" ? id : null,
+            },
+          });
+        })
+      );
 
       return { orderId: order.id };
     });
@@ -439,8 +515,8 @@ export const createAdminOrder = async (req, res) => {
           include: {
             orderMemberPackages: {
               include: {
-                test: true, // ✅ if relation exists
-                package: true, // ✅ if relation exists
+                test: true,
+                package: true,
               },
             },
           },
@@ -448,20 +524,27 @@ export const createAdminOrder = async (req, res) => {
         doctor: true,
         refCenter: true,
         center: true,
+        centerSlot: true,
         diagnosticCenter: true,
+        slot: true, // ✅ include slot so UI/whatsapp can read startTime/endTime
       },
     });
 
-    await whatsappQueue.add(
-      "whatsapp.sendOrderConfirmed",
-      { orderId: result.orderId },
-      {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 2000 },
-        removeOnComplete: true,
-        removeOnFail: false,
-      }
-    );
+    // async notification (optional)
+    try {
+      await whatsappQueue.add(
+        "whatsapp.sendOrderConfirmed",
+        { orderId: result.orderId },
+        {
+          attempts: 3,
+          backoff: { type: "exponential", delay: 2000 },
+          removeOnComplete: true,
+          removeOnFail: false,
+        }
+      );
+    } catch (e) {
+      console.warn("WhatsApp queue failed:", e?.message);
+    }
 
     return res.json({
       success: true,
@@ -477,6 +560,7 @@ export const createAdminOrder = async (req, res) => {
     });
   }
 };
+
 
 export const acceptOrderByVendor = async (req, res) => {
   try {
@@ -1338,6 +1422,21 @@ export const getOrderById = async (req, res) => {
             name: true,
             number: true,
             city: true,
+          },
+        },
+        refCenter: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+            city: true,
+          },
+        },
+        doctor: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
           },
         },
 
@@ -2633,7 +2732,10 @@ export const getOrdersExpiringSoon = async (req, res) => {
         };
       })
       // ✅ Optional: only those expiring within next 30 mins (and not negative)
-      .filter((o) => typeof o.minsLeft === "number" && o.minsLeft >= 0 && o.minsLeft <= 30);
+      .filter(
+        (o) =>
+          typeof o.minsLeft === "number" && o.minsLeft >= 0 && o.minsLeft <= 30
+      );
 
     res.json({
       success: true,

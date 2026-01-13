@@ -15,6 +15,7 @@ enum PrescriptionFileType {
 enum Alignment {
   LEFT
   RIGHT
+  CENTER
 }
 
 enum TestResultStatus {
@@ -278,15 +279,15 @@ model Address {
 }
 
 model Category {
-  id          Int     @id @default(autoincrement())
-  imgUrl      String?
-  name        String
-  order       Int?
-  type        String?
-  bannerUrl   String?
-  createdById Int? // ⭐ ADDED: Track who created the category
-  createdBy   User?   @relation(fields: [createdById], references: [id])
-  isPopular   Boolean @default(false)
+  id            Int              @id @default(autoincrement())
+  imgUrl        String?
+  name          String
+  order         Int?
+  type          String?
+  bannerUrl     String?
+  createdById   Int? // ⭐ ADDED: Track who created the category
+  createdBy     User?            @relation(fields: [createdById], references: [id])
+  isPopular     Boolean          @default(false)
   subCategories SubCategory[]
   tests         Test[]
   packages      HealthPackage[]
@@ -334,7 +335,7 @@ model HealthPackage {
   status        String  @default("active")
   categoryId    Int?
   noOfParameter String?
-  testType      String?
+  testType      String? @default("PATHOLOGY")
   discount      Float   @default(0)
   showIn        ShowIn? @default(TEST)
   spotlight     Boolean @default(false)
@@ -553,6 +554,7 @@ model Center {
   mobile           String?
   lat              Float?
   long             Float?
+  isSelf           Boolean @default(false)
   status           String  @default("active")
 
   cityId Int?
@@ -584,8 +586,8 @@ model CenterSlot {
   capacity  Int     @default(0)
   isActive  Boolean @default(true)
 
-  center Center @relation(fields: [centerId], references: [id], onDelete: Cascade)
- orders   Order[]
+  center   Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  orders   Order[]
   bookings CenterSlotBooking[]
 }
 
@@ -639,13 +641,13 @@ model Order {
   addressId          Int?
   source             String?
 
-  isSelf          Boolean   @default(false)
+  isSelf          Boolean     @default(false)
   totalAmount     Float
   discount        Float?
   finalAmount     Float?
-  paymentStatus   String?   @default("pending")
+  paymentStatus   String?     @default("pending")
   paymentMode     String?
-  status          String    @default("pending")
+  status          String      @default("pending")
   testType        String?
   // slot            String?
   date            DateTime
@@ -655,21 +657,21 @@ model Order {
   assignmentNotes String?
   trackingId      String?
   reportUrl       String?
-  sampleCollected Boolean   @default(false)
-  reportReady     Boolean   @default(false)
-  isHomeSample    Boolean   @default(false)
+  sampleCollected Boolean     @default(false)
+  reportReady     Boolean     @default(false)
+  isHomeSample    Boolean     @default(false)
   cancelledBy     String?
   cancelledAt     DateTime?
   couponId        Int?
   couponCode      String?
   discountAmount  Float?
   slotId          Int?
-  slot            Slot?     @relation(fields: [slotId], references: [id])
+  slot            Slot?       @relation(fields: [slotId], references: [id])
   // ✅ ADD THIS
-  centerSlotId Int?
-  centerSlot   CenterSlot? @relation(fields: [centerSlotId], references: [id])
-  createdById Int?
-  createdBy   User? @relation(fields: [createdById], references: [id])
+  centerSlotId    Int?
+  centerSlot      CenterSlot? @relation(fields: [centerSlotId], references: [id])
+  createdById     Int?
+  createdBy       User?       @relation(fields: [createdById], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1132,6 +1134,7 @@ model TestParameter {
   type        String?
   order       Int?
   unit        String?
+  method      String?
   notes       String?
   isActive    Boolean @default(true)
   options     Json?

@@ -11,7 +11,8 @@ import {
 createCenterSlot,
 getCenterSlots,
 updateCenterSlot,
-deleteCenterSlot
+deleteCenterSlot,
+getAllCentersforadmin
 } from "./center.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -35,6 +36,8 @@ router.delete("/slot/:slotId", deleteCenterSlot);
 
 // READ ALL
 router.get("/", getAllCenters);
+router.get("/admin", getAllCentersforadmin);
+
 
 
 // READ ONE

@@ -100,6 +100,8 @@ export const createCenter = async (req, res) => {
     return res.status(500).json({ error: "Failed to create center" });
   }
 };
+
+
 /* ✅ GET ALL Centers with Pagination + Search */
 export const getAllCenters = async (req, res) => {
   try {
@@ -126,6 +128,97 @@ export const getAllCenters = async (req, res) => {
       include: {
         city: true,
         centerPackages: { include: { test: true } },
+      },
+      orderBy: { name: "asc" },
+      skip,
+      take,
+    });
+
+    return res.json({
+      data: centers,
+      meta: {
+        total,
+        page: Number(page),
+        limit: take,
+        totalPages: Math.ceil(total / take),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching centers:", error);
+    return res.status(500).json({ error: "Failed to fetch centers" });
+  }
+};
+
+
+/* ✅ GET ALL Centers with Pagination + Search */
+export const getAllCentersforadmin = async (req, res) => {
+  try {
+    const { page = 1, limit = 15, search = "" } = req.query;
+
+    // ✅ accept categoryId or categoryIds
+    let categoryIds = [];
+
+    if (req.query.categoryId) {
+      categoryIds = [Number(req.query.categoryId)];
+    } else if (req.query.categoryIds) {
+      if (Array.isArray(req.query.categoryIds)) {
+        categoryIds = req.query.categoryIds.map(Number).filter(Boolean);
+      } else {
+        categoryIds = String(req.query.categoryIds)
+          .split(",")
+          .map((x) => Number(x.trim()))
+          .filter(Boolean);
+      }
+    }
+
+    const take = Number(limit);
+    const skip = (Number(page) - 1) * take;
+
+    const where = {
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+              { mobile: { contains: search, mode: "insensitive" } },
+              { address: { contains: search, mode: "insensitive" } },
+              {
+                city: {
+                  is: { name: { contains: search, mode: "insensitive" } },
+                },
+              },
+            ],
+          }
+        : {}),
+
+      // ✅ category filter
+      ...(categoryIds.length > 0
+        ? {
+            categories: {
+              some: {
+                categoryId: { in: categoryIds },
+              },
+            },
+          }
+        : {}),
+    };
+
+    const total = await prisma.center.count({ where });
+
+    const centers = await prisma.center.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        contactName: true,
+        mobile: true,
+        email: true,
+        address: true,
+
+        // ✅ city
+        city: true,
+        centerSlots: true,
+   
       },
       orderBy: { name: "asc" },
       skip,

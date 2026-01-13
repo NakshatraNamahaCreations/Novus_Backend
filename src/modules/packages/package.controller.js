@@ -2,8 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 import csv from "csv-parser";
 import { Readable } from "stream";
-import fs from "fs";
-import path from "path";
+
 
 const prisma = new PrismaClient();
 
@@ -585,35 +584,57 @@ export const deleteTest = async (req, res) => {
 export const getTestsByCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
+    const catId = Number(categoryId);
 
-    const tests = await prisma.test.findMany({
-      where: { categoryId: Number(categoryId) },
+    if (!catId) {
+      return res.status(400).json({ error: "Valid Category ID is required" });
+    }
 
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
-        subCategory: true,
-
-        // ⭐ RETURN NUMBER OF PARAMETERS
-        _count: {
-          select: {
-            parameters: true, // returns how many parameters the test has
-          },
-        },
-      },
+    // ✅ Fetch category ONCE
+    const category = await prisma.category.findUnique({
+      where: { id: catId },
+      select: { id: true, name: true, type: true ,bannerUrl:true},
     });
 
-    res.json(tests);
+    if (!category) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+
+    // ✅ Fetch tests (no category include to avoid repeating)
+    const rawTests = await prisma.test.findMany({
+      where: { categoryId: catId },
+      include: {
+        subCategory: true,
+        _count: { select: { parameters: true } },
+      },
+      orderBy: { id: "desc" },
+    });
+
+    // ✅ Format response
+    const tests = rawTests.map((t) => ({
+      id: t.id,
+      name: t.name,
+      price: t.price,
+      offerPrice: t.offerPrice,
+      type: t.type,
+      categoryId: t.categoryId,
+      subCategory: t.subCategory,
+      parametersCount: t._count.parameters,
+      // include any other fields you need from your test model
+    }));
+
+    return res.json({
+      success: true,
+      category, // ✅ once
+      tests:rawTests,
+      total: tests.length,
+    });
   } catch (error) {
     console.error("Error fetching tests by category:", error);
-    res.status(500).json({ error: "Failed to fetch tests by category" });
+    return res.status(500).json({ error: "Failed to fetch tests by category" });
   }
 };
+
 
 export const getTestsBySubCategory = async (req, res) => {
   try {

@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Checkup" ALTER COLUMN "testType" SET DEFAULT 'PATHOLOGY';

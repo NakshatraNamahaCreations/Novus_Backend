@@ -5,7 +5,7 @@ import {
   getAllCategories,
   getCategoryById,
   updateCategory,
-  deleteCategory,getPopularCategories
+  deleteCategory,getPopularCategories,getBasedOnTestType
 } from "./category.controller.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -20,6 +20,8 @@ const categoryUpload = upload.fields([
 router.post("/", categoryUpload, addCategory);
 router.get("/", getAllCategories);
 router.get("/popular", getPopularCategories);
+router.get("/type", getBasedOnTestType);
+
 
 router.get("/:id", getCategoryById);
 router.put("/:id", categoryUpload, updateCategory);

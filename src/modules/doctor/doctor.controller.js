@@ -22,20 +22,22 @@ export const createDoctor = async (req, res) => {
       sendEmail,
       consultingDoctor,
       number,
-      patientId 
+      patientId,
     } = req.body;
 
-    
     if (!name || !number) {
       return res.status(400).json({ message: "Name and number are required" });
     }
 
     const exist = await prisma.doctor.findUnique({
       where: { number },
+      select: { id: true, name:true, number:true }, // lightweight check
     });
 
     if (exist) {
-      return res.status(409).json({ message: "Doctor already exists with this number" });
+      return res
+        .status(409)
+        .json({ message: "Doctor already exists with this number", doctor:exist });
     }
 
     const doctor = await prisma.doctor.create({
@@ -57,14 +59,22 @@ export const createDoctor = async (req, res) => {
         sendEmail: sendEmail ?? false,
         consultingDoctor: consultingDoctor ?? false,
         number,
-        patientId 
+        patientId,
+      },
+      select: {
+        id: true,
+        name: true,
+        number: true,
       },
     });
 
-    res.status(201).json({ message: "Doctor created successfully", doctor });
+    return res.status(201).json({
+      message: "Doctor created successfully",
+      doctor,
+    });
   } catch (error) {
     console.error("Create Doctor Error:", error);
-    res.status(500).json({ message: "Internal Server Error" });
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 };
 
@@ -110,24 +120,32 @@ export const updateDoctor = async (req, res) => {
 
     const existingDoctor = await prisma.doctor.findUnique({
       where: { id: Number(id) },
+      select: { id: true },
     });
 
     if (!existingDoctor) {
       return res.status(404).json({ message: "Doctor not found" });
     }
 
-    const updated = await prisma.doctor.update({
+    const updatedDoctor = await prisma.doctor.update({
       where: { id: Number(id) },
-      data: { ...req.body }, // Automatically updates all fields
+      data: {
+        ...req.body, // updates all passed fields
+      },
+      select: {
+        id: true,
+        name: true,
+        number: true,
+      },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Doctor updated successfully",
-      doctor: updated,
+      doctor: updatedDoctor,
     });
   } catch (error) {
     console.error("Update Doctor Error:", error);
-    res.status(500).json({ message: "Internal Server Error" });
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 };
 
@@ -167,7 +185,12 @@ export const getDoctorsByPatientId = async (req, res) => {
 
     const doctors = await prisma.doctor.findMany({
       where: {
-        patientId: Number(patientId), // filter by patientId
+        patientId: Number(patientId),
+      },
+      select: {
+        id: true,
+        name: true,
+        number: true, // or "phone" if that's your field name
       },
       orderBy: {
         name: "asc",
@@ -180,9 +203,9 @@ export const getDoctorsByPatientId = async (req, res) => {
       });
     }
 
-    res.status(200).json({ doctors });
+    return res.status(200).json({ doctors });
   } catch (error) {
     console.error("Get Doctors By PatientId Error:", error);
-    res.status(500).json({ message: "Internal Server Error" });
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 };

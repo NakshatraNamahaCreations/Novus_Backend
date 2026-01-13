@@ -74,6 +74,31 @@ Thank you for choosing *Novus Health Labs.*`,
   },
 
 
+CENTER_VISIT: {
+  templateId: process.env.WABRIDGE_CENTER_VISIT_TEMPLATE_ID,
+  message: `Dear {{1}},
+
+Thank you for choosing Novus Health Labs. Please visit our center for your test as scheduled.
+
+*Centre Details:*
+• Test(s): *{{2}}*
+• Centre Name: *{{3}}*
+• Centre Address: *{{4}}*
+
+Doctor prescription (if any)
+
+Regards,
+*Novus Health Labs*`,
+  mapVariables: ({ customerName, tests, centerName, centerAddress }) => [
+    customerName,      // {{1}}
+    tests,             // {{2}}
+    centerName,        // {{3}}
+    centerAddress,     // {{4}}
+  ],
+},
+
+
+
 
   // ⭐ NEW — feedback_request_novus
   FEEDBACK_REQUEST_NOVUS: {

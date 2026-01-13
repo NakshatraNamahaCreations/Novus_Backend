@@ -2,7 +2,7 @@ import { Worker, QueueEvents } from "bullmq";
 import dayjs from "dayjs";
 import { PrismaClient } from "@prisma/client";
 
-import { queueRedis } from "../config/redisQueue.js"; // ✅ same redis connection
+import { queueRedis } from "../config/redisQueue.js"; 
 import { WhatsAppMessage } from "../utils/whatsapp.js";
 import { WHATSAPP_TEMPLATES } from "../templates/whatsapp.templates.js";
 
@@ -218,27 +218,59 @@ const handleWelcomeNewPatient = async ({ contactNo, patientName }) => {
 const handleSendOrderConfirmed = async (order) => {
   const testsStr = extractTestNames(order);
 
-  const tpl = WHATSAPP_TEMPLATES.ORDER_CONFIRMED;
+  // ✅ Choose template based on home vs center
+  const tpl = order?.isHomeSample
+    ? WHATSAPP_TEMPLATES.ORDER_CONFIRMED   // Home Sample template
+    : WHATSAPP_TEMPLATES.CENTER_VISIT;     // Center Visit template
 
-  const variables = tpl.mapVariables({
-    customerName: safe(order.patient?.fullName, "Customer"),
-    bookingId: safe(order.id),
-    tests: safe(testsStr),
-    collectionDate: dayjs(order.date).format("DD MMM YYYY"),
-    timeSlot: order.slot
-      ? `${dayjs(order.slot.startTime).format("hh:mm A")} - ${dayjs(
-          order.slot.endTime
-        ).format("hh:mm A")}`
-      : "-",
-    address: [
-      order.address?.address || "NA",
-     
-    ]
-      .filter(Boolean)
-      .join(", "),
-    supportNumber: process.env.SUPPORT_PHONE || "8050065924",
-  });
+  // ✅ Build variables per template
+  let variables = [];
 
+  if (order?.isHomeSample) {
+    // HOME SAMPLE (ORDER_CONFIRMED)
+    variables = tpl.mapVariables({
+      customerName: safe(order.patient?.fullName, "Customer"),
+      bookingId: safe(order.id),
+      tests: safe(testsStr),
+      collectionDate: order?.date
+        ? dayjs(order.date).format("DD MMM YYYY")
+        : "-",
+      timeSlot: order?.slot
+        ? `${dayjs(order.slot.startTime).format("hh:mm A")} - ${dayjs(
+            order.slot.endTime
+          ).format("hh:mm A")}${order.slot?.name ? ` (${order.slot.name})` : ""}`
+        : "-",
+      address: [
+        order.address?.address,
+        order.address?.landmark,
+        order.address?.city?.name || order.address?.city,
+        order.address?.state,
+        order.address?.pincode,
+      ]
+        .filter(Boolean)
+        .join(", "),
+      supportNumber: process.env.SUPPORT_PHONE || "8050065924",
+    });
+  } else {
+    // CENTER VISIT (CENTER_VISIT)
+    variables = tpl.mapVariables({
+      customerName: safe(order.patient?.fullName, "Customer"),
+      collectionDate: safe(testsStr, "-"), // your CENTER_VISIT template uses {{2}} for tests
+      collectedBy: safe(order.center?.name, "Novus Center"), // {{3}} centre name
+      centerAddress: [
+        order.center?.address,
+        order.center?.city?.name || order.center?.city,
+        order.center?.pincode,
+      ]
+        .filter(Boolean)
+        .join(", "), // {{4}} centre address
+    });
+
+    // ⚠️ Your CENTER_VISIT.mapVariables currently accepts only
+    // ({ customerName, collectionDate, collectedBy })
+    // but template message has 4 vars ({{1}}..{{4}})
+    // So FIX it like below in template definition.
+  }
 
   await WhatsAppMessage({
     phone: order.patient?.contactNo,
@@ -247,8 +279,9 @@ const handleSendOrderConfirmed = async (order) => {
     variables,
   });
 
-  return { success: true, type: "order-confirmed" };
+  return { success: true, type: order?.isHomeSample ? "order-confirmed" : "center-visit" };
 };
+
 
 /* ----------------------------------
    ✅ NEW: Send only PAYMENT CONFIRMED
