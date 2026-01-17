@@ -3,143 +3,253 @@ import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 
 const prisma = new PrismaClient();
 
-// CREATE Spotlight Banner
-export const addSpotlightBanner = async (req, res) => {
-  try {
-    const { subCategoryId } = req.body;
+/* ---------------- helpers ---------------- */
+const toInt = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
-    // validate subCategory
-    const subCat = await prisma.subCategory.findUnique({
-      where: { id: Number(subCategoryId) },
-    });
-    if (!subCat) return res.status(400).json({ error: "Invalid subCategoryId" });
+const normalizeShowIn = (showIn) => {
+  // allow:
+  // - showIn: ["HOME_MIDDLE","HOME_END"] (array)
+  // - showIn: "HOME_MIDDLE" (string)
+  // - showIn: '["HOME_MIDDLE","HOME_END"]' (stringified JSON)
+  if (!showIn) return [];
 
-    if (!req.file) {
-      return res.status(400).json({ error: "Image is required" });
+  if (Array.isArray(showIn)) return showIn;
+
+  if (typeof showIn === "string") {
+    const trimmed = showIn.trim();
+
+    // JSON string array
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
     }
 
-    const imgUrl = await uploadToS3(req.file, "spotlight-banners");
+    // single enum value string
+    return [trimmed];
+  }
 
-    const banner = await prisma.spotlightBanner.create({
+  return [];
+};
+
+const validateTarget = ({ testId, packageId }) => {
+  const hasTest = !!testId;
+  const hasPackage = !!packageId;
+
+  if (hasTest && hasPackage) return "Provide either testId OR packageId, not both.";
+  if (!hasTest && !hasPackage) return "Provide testId OR packageId.";
+  return null;
+};
+
+const includeTarget = {
+  test: { select: { id: true, name: true } },
+  package: { select: { id: true, name: true } },
+};
+
+/* ---------------- CREATE Spotlight ---------------- */
+export const addSpotlight = async (req, res) => {
+  try {
+    const testId = toInt(req.body.testId);
+    const packageId = toInt(req.body.packageId);
+    const showIn = normalizeShowIn(req.body.showIn);
+
+    const err = validateTarget({ testId, packageId });
+    if (err) return res.status(400).json({ error: err });
+
+    if (!req.file) return res.status(400).json({ error: "Image is required" });
+
+    if (!showIn.length) {
+      return res.status(400).json({ error: "showIn is required (array of places)" });
+    }
+
+    // verify target exists
+    if (testId) {
+      const test = await prisma.test.findUnique({ where: { id: testId } });
+      if (!test) return res.status(400).json({ error: "Invalid testId" });
+    }
+    if (packageId) {
+      const pkg = await prisma.healthPackage.findUnique({ where: { id: packageId } });
+      if (!pkg) return res.status(400).json({ error: "Invalid packageId" });
+    }
+
+    const imgUrl = await uploadToS3(req.file, "spotlights");
+
+    const spotlight = await prisma.spotlightBanner.create({
       data: {
         imgUrl,
-        subCategoryId: Number(subCategoryId),
+        showIn,
+        ...(testId ? { testId } : {}),
+        ...(packageId ? { packageId } : {}),
+        // if you have auth middleware:
+        // createdById: req.user?.id ?? null,
       },
+      include: includeTarget,
     });
 
-    res.status(201).json(banner);
+    return res.status(201).json({
+      success: true,
+      message: "Spotlight created successfully",
+      spotlight,
+    });
   } catch (error) {
-    console.error("Error creating spotlight banner:", error);
-    res.status(500).json({ error: "Failed to create spotlight banner" });
+    console.error("Error creating spotlight:", error);
+    return res.status(500).json({ error: "Failed to create spotlight" });
   }
 };
 
-// READ ALL Spotlight Banners
-export const getAllSpotlightBanners = async (req, res) => {
+/* ---------------- READ ALL Spotlights ---------------- */
+export const getAllSpotlights = async (req, res) => {
   try {
-    const banners = await prisma.spotlightBanner.findMany({
-      include: { subCategory: true },
+    // optional filter: ?showIn=HOME_MIDDLE
+    const showInFilter = req.query.showIn ? String(req.query.showIn) : null;
+
+    const where = showInFilter
+      ? { showIn: { has: showInFilter } }
+      : {};
+
+    const spotlights = await prisma.spotlightBanner.findMany({
+      where,
+      orderBy: { id: "desc" },
+      include: includeTarget,
     });
-    res.json(banners);
+
+    res.json(spotlights);
   } catch (error) {
-    console.error("Error fetching spotlight banners:", error);
-    res.status(500).json({ error: "Failed to fetch spotlight banners" });
+    console.error("Error fetching spotlights:", error);
+    res.status(500).json({ error: "Failed to fetch spotlights" });
   }
 };
 
-// READ ONE Spotlight Banner
-export const getSpotlightBannerById = async (req, res) => {
+/* ---------------- READ ONE Spotlight ---------------- */
+export const getSpotlightById = async (req, res) => {
   try {
-    const { id } = req.params;
-    const banner = await prisma.spotlightBanner.findUnique({
-      where: { id: Number(id) },
-      include: { subCategory: true },
+    const id = toInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+
+    const spotlight = await prisma.spotlightBanner.findUnique({
+      where: { id },
+      include: includeTarget,
     });
 
-    if (!banner) return res.status(404).json({ error: "Spotlight banner not found" });
+    if (!spotlight) return res.status(404).json({ error: "Spotlight not found" });
 
-    res.json(banner);
+    res.json(spotlight);
   } catch (error) {
-    console.error("Error fetching spotlight banner:", error);
-    res.status(500).json({ error: "Failed to fetch spotlight banner" });
+    console.error("Error fetching spotlight:", error);
+    res.status(500).json({ error: "Failed to fetch spotlight" });
   }
 };
 
-// UPDATE Spotlight Banner
-export const updateSpotlightBanner = async (req, res) => {
+/* ---------------- UPDATE Spotlight ---------------- */
+export const updateSpotlight = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { subCategoryId } = req.body;
+    const id = toInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
-    const existing = await prisma.spotlightBanner.findUnique({ where: { id: Number(id) } });
-    if (!existing) return res.status(404).json({ error: "Spotlight banner not found" });
+    const existing = await prisma.spotlightBanner.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "Spotlight not found" });
 
-    let imgUrl = existing.imgUrl;
-    if (req.file) {
-      if (existing.imgUrl) {
-        await deleteFromS3(existing.imgUrl);
+    const testId = req.body.testId !== undefined ? toInt(req.body.testId) : undefined;
+    const packageId =
+      req.body.packageId !== undefined ? toInt(req.body.packageId) : undefined;
+
+    const showIn = req.body.showIn !== undefined
+      ? normalizeShowIn(req.body.showIn)
+      : undefined;
+
+    // validate target only if changing
+    if (testId !== undefined || packageId !== undefined) {
+      const nextTestId = testId === undefined ? existing.testId : testId;
+      const nextPackageId = packageId === undefined ? existing.packageId : packageId;
+
+      const err = validateTarget({ testId: nextTestId, packageId: nextPackageId });
+      if (err) return res.status(400).json({ error: err });
+
+      if (nextTestId) {
+        const test = await prisma.test.findUnique({ where: { id: nextTestId } });
+        if (!test) return res.status(400).json({ error: "Invalid testId" });
       }
-      imgUrl = await uploadToS3(req.file, "spotlight-banners");
+
+      if (nextPackageId) {
+        const pkg = await prisma.healthPackage.findUnique({
+          where: { id: nextPackageId },
+        });
+        if (!pkg) return res.status(400).json({ error: "Invalid packageId" });
+      }
     }
 
-    let finalSubCategoryId = existing.subCategoryId;
-    if (subCategoryId) {
-      const subCat = await prisma.subCategory.findUnique({
-        where: { id: Number(subCategoryId) },
-      });
-      if (!subCat) return res.status(400).json({ error: "Invalid subCategoryId" });
-      finalSubCategoryId = subCat.id;
+    // showIn validation if provided
+    if (showIn !== undefined && !showIn.length) {
+      return res.status(400).json({ error: "showIn cannot be empty" });
+    }
+
+    // image update
+    let imgUrl = existing.imgUrl;
+    if (req.file) {
+      if (existing.imgUrl) await deleteFromS3(existing.imgUrl);
+      imgUrl = await uploadToS3(req.file, "spotlights");
     }
 
     const updated = await prisma.spotlightBanner.update({
-      where: { id: Number(id) },
+      where: { id },
       data: {
         imgUrl,
-        subCategoryId: finalSubCategoryId,
+        ...(showIn !== undefined ? { showIn } : {}),
+        ...(testId !== undefined ? { testId } : {}),
+        ...(packageId !== undefined ? { packageId } : {}),
+        // updatedById: req.user?.id ?? null, // if you add this field later
       },
+      include: includeTarget,
     });
 
     res.json(updated);
   } catch (error) {
-    console.error("Error updating spotlight banner:", error);
-    res.status(500).json({ error: "Failed to update spotlight banner" });
+    console.error("Error updating spotlight:", error);
+    res.status(500).json({ error: "Failed to update spotlight" });
   }
 };
 
-// DELETE Spotlight Banner
-export const deleteSpotlightBanner = async (req, res) => {
+/* ---------------- DELETE Spotlight ---------------- */
+export const deleteSpotlight = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = toInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
-    const existing = await prisma.spotlightBanner.findUnique({ where: { id: Number(id) } });
-    if (!existing) return res.status(404).json({ error: "Spotlight banner not found" });
+    const existing = await prisma.spotlightBanner.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "Spotlight not found" });
 
-    if (existing.imgUrl) {
-      await deleteFromS3(existing.imgUrl);
-    }
+    if (existing.imgUrl) await deleteFromS3(existing.imgUrl);
 
-    await prisma.spotlightBanner.delete({ where: { id: Number(id) } });
+    await prisma.spotlightBanner.delete({ where: { id } });
 
-    res.json({ message: "Spotlight banner deleted successfully" });
+    res.json({ message: "Spotlight deleted successfully" });
   } catch (error) {
-    console.error("Error deleting spotlight banner:", error);
-    res.status(500).json({ error: "Failed to delete spotlight banner" });
+    console.error("Error deleting spotlight:", error);
+    res.status(500).json({ error: "Failed to delete spotlight" });
   }
 };
 
-// GET Spotlight Banners by SubCategory
-export const getSpotlightBannersBySubCategory = async (req, res) => {
+/* ---------------- GET Spotlights by showIn ---------------- */
+// GET /api/spotlights/show-in/:place  (place=HOME_MIDDLE)
+export const getSpotlightsByShowIn = async (req, res) => {
   try {
-    const { subCategoryId } = req.params;
+    const place = String(req.params.place);
 
-    const banners = await prisma.spotlightBanner.findMany({
-      where: { subCategoryId: Number(subCategoryId) },
-      include: { subCategory: true },
+    const spotlights = await prisma.spotlightBanner.findMany({
+      where: { showIn: { has: place } },
+      orderBy: { id: "desc" },
+      include: includeTarget,
     });
 
-    res.json(banners);
+    res.json(spotlights);
   } catch (error) {
-    console.error("Error fetching spotlight banners by subCategory:", error);
-    res.status(500).json({ error: "Failed to fetch spotlight banners by subCategory" });
+    console.error("Error fetching spotlights by showIn:", error);
+    res.status(500).json({ error: "Failed to fetch spotlights" });
   }
 };

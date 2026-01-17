@@ -66,38 +66,56 @@ export const registerVendor = async (req, res) => {
 
 export const loginVendor = async (req, res) => {
   try {
-    const { number, password } = req.body;
+    const { number, password, fcmToken, platform } = req.body;
 
-    if (!number) {
-      return res.status(400).json({ error: "Please enter the number" });
-    }
+    if (!number) return res.status(400).json({ error: "Please enter the number" });
+    if (!password) return res.status(400).json({ error: "Please enter the password" });
 
-    if (!password) {
-      return res.status(400).json({ error: "Please enter the password" });
-    }
-
-    const vendor = await prisma.vendor.findUnique({
-      where: { number },
-    });
-
+    const vendor = await prisma.vendor.findUnique({ where: { number } });
     if (!vendor) return res.status(404).json({ error: "Vendor not found" });
 
     const isPasswordValid = await bcrypt.compare(password, vendor.password);
-    if (!isPasswordValid)
-      return res.status(401).json({ error: "Invalid credentials" });
+    if (!isPasswordValid) return res.status(401).json({ error: "Invalid credentials" });
 
-    if (vendor.block)
-      return res.status(403).json({ error: "Account blocked by admin" });
+    if (vendor.block) return res.status(403).json({ error: "Account blocked by admin" });
+
+    // ✅ Mark vendor online + active
+    await prisma.vendor.update({
+      where: { id: vendor.id },
+      data: {
+        isOnline: true,
+        status: "active", // change if you use different string
+      },
+    });
+
+    // ✅ Save/update vendor device token if provided
+    if (fcmToken && String(fcmToken).trim()) {
+      const tokenStr = String(fcmToken).trim();
+
+      await prisma.vendorDevice.deleteMany({
+        where: {
+          fcmToken: tokenStr,
+          vendorId: { not: vendor.id },
+        },
+      });
+
+      await prisma.vendorDevice.upsert({
+        where: { fcmToken: tokenStr },
+        update: {
+          vendorId: vendor.id,
+          platform: platform ? String(platform) : undefined,
+        },
+        create: {
+          vendorId: vendor.id,
+          fcmToken: tokenStr,
+          platform: platform ? String(platform) : null,
+        },
+      });
+    }
 
     const token = jwt.sign({ id: vendor.id }, JWT_SECRET, { expiresIn: "7d" });
 
-    // 🛡️ SANITIZE VENDOR DATA
-    const cleanVendor = {
-      id: vendor.id,
-      name: vendor.name,
-      email: vendor.email,
-      number: vendor.number,
-    };
+   
 
     return res.json({
       message: "Login successful",
@@ -110,12 +128,83 @@ export const loginVendor = async (req, res) => {
   }
 };
 
+
+
 // ✅ LOGOUT (client just deletes token)
 export const logoutVendor = async (req, res) => {
-  // JWT logout = client deletes token
-  res.json({ message: "Vendor logged out successfully" });
+  try {
+ 
+    const { fcmToken,vendorId } = req.body;
+
+    // ✅ remove only this device token (recommended)
+    if (fcmToken && String(fcmToken).trim()) {
+      await prisma.vendorDevice.deleteMany({
+        where: {
+          vendorId,
+          fcmToken: String(fcmToken).trim(),
+        },
+      });
+    }
+
+    // ✅ Mark vendor offline (optional: also status inactive)
+    await prisma.vendor.update({
+      where: { id: vendorId },
+      data: {
+        isOnline: false,
+        status: "inactive", // optional, use if you want
+      },
+    });
+
+    return res.json({ message: "Vendor logged out successfully" });
+  } catch (error) {
+    console.error("logoutVendor error:", error);
+    return res.status(500).json({ error: "Failed to logout vendor" });
+  }
 };
 
+
+export const updateVendorFcmToken = async (req, res) => {
+  try {
+    const {vendorId} = req.params;
+    const { fcmToken, platform } = req.body;
+
+    if (!fcmToken || !String(fcmToken).trim()) {
+      return res.status(400).json({ error: "fcmToken is required" });
+    }
+
+    const tokenStr = String(fcmToken).trim();
+
+    // ✅ If token belongs to some other vendor, remove it
+    await prisma.vendorDevice.deleteMany({
+      where: {
+        fcmToken: tokenStr,
+        vendorId: { not: vendorId },
+      },
+    });
+
+    // ✅ Upsert (fcmToken is unique)
+    const device = await prisma.vendorDevice.upsert({
+      where: { fcmToken: tokenStr },
+      update: {
+        vendorId,
+        platform: platform ? String(platform) : undefined,
+      },
+      create: {
+        vendorId,
+        fcmToken: tokenStr,
+        platform: platform ? String(platform) : null,
+      },
+    });
+
+    return res.json({
+      message: "Device token updated",
+      device,
+    });
+  } catch (error) {
+    console.error("updateVendorFcmToken error:", error);
+    return res.status(500).json({ error: "Failed to update device token" });
+  }
+};
 export const sendOtp = async (req, res) => {
   try {
     const { number } = req.body;

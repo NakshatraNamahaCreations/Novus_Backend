@@ -6,7 +6,7 @@ import {
   getBannerById,
   updateBanner,
   deleteBanner,
-  getBannersBySubCategory,
+
 } from "./banner.controller.js";
 
 const router = express.Router();
@@ -19,7 +19,6 @@ router.get("/:id", getBannerById);                          // READ ONE
 router.put("/:id", upload.single("image"), updateBanner);   // UPDATE
 router.delete("/:id", deleteBanner);                        // DELETE
 
-// Filter
-router.get("/subcategory/:subCategoryId", getBannersBySubCategory);
+
 
 export default router;

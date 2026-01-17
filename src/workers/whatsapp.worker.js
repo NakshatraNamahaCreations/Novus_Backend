@@ -2,7 +2,7 @@ import { Worker, QueueEvents } from "bullmq";
 import dayjs from "dayjs";
 import { PrismaClient } from "@prisma/client";
 
-import { queueRedis } from "../config/redisQueue.js"; 
+import { queueRedis } from "../config/redisQueue.js";
 import { WhatsAppMessage } from "../utils/whatsapp.js";
 import { WHATSAPP_TEMPLATES } from "../templates/whatsapp.templates.js";
 
@@ -28,9 +28,10 @@ const extractTestNames = (order) => {
       }
     }
 
-    return names.size ? Array.from(names).join(", ") : "As per prescription";
-  } catch (err) {
-    console.error("extractTestNames error:", err);
+    return names.size > 0
+      ? Array.from(names).join(", ")
+      : "As per prescription";
+  } catch {
     return "As per prescription";
   }
 };
@@ -80,6 +81,7 @@ const fetchOrder = async (orderId) => {
             },
           },
         },
+        center: true,
       },
     });
   } catch (err) {
@@ -220,11 +222,14 @@ const handleSendOrderConfirmed = async (order) => {
 
   // ✅ Choose template based on home vs center
   const tpl = order?.isHomeSample
-    ? WHATSAPP_TEMPLATES.ORDER_CONFIRMED   // Home Sample template
-    : WHATSAPP_TEMPLATES.CENTER_VISIT;     // Center Visit template
+    ? WHATSAPP_TEMPLATES.ORDER_CONFIRMED // Home Sample template
+    : WHATSAPP_TEMPLATES.CENTER_VISIT; // Center Visit template
 
   // ✅ Build variables per template
   let variables = [];
+
+  // console.log("tpl", tpl);
+  // console.log("order?.isHomeSample", order?.isHomeSample);
 
   if (order?.isHomeSample) {
     // HOME SAMPLE (ORDER_CONFIRMED)
@@ -238,7 +243,9 @@ const handleSendOrderConfirmed = async (order) => {
       timeSlot: order?.slot
         ? `${dayjs(order.slot.startTime).format("hh:mm A")} - ${dayjs(
             order.slot.endTime
-          ).format("hh:mm A")}${order.slot?.name ? ` (${order.slot.name})` : ""}`
+          ).format("hh:mm A")}${
+            order.slot?.name ? ` (${order.slot.name})` : ""
+          }`
         : "-",
       address: [
         order.address?.address,
@@ -252,24 +259,25 @@ const handleSendOrderConfirmed = async (order) => {
       supportNumber: process.env.SUPPORT_PHONE || "8050065924",
     });
   } else {
-    // CENTER VISIT (CENTER_VISIT)
+    const testsStr = extractTestNames(order);
+
+    const centerAddress = [
+      order.center?.address,
+      order.center?.city?.name || order.center?.city,
+      order.center?.pincode,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
     variables = tpl.mapVariables({
       customerName: safe(order.patient?.fullName, "Customer"),
-      collectionDate: safe(testsStr, "-"), // your CENTER_VISIT template uses {{2}} for tests
-      collectedBy: safe(order.center?.name, "Novus Center"), // {{3}} centre name
-      centerAddress: [
-        order.center?.address,
-        order.center?.city?.name || order.center?.city,
-        order.center?.pincode,
-      ]
-        .filter(Boolean)
-        .join(", "), // {{4}} centre address
+      tests: safe(testsStr, "As per prescription"),
+      centerName: safe(
+        order.center?.name || order.address?.centerName,
+        "Novus Health Labs"
+      ),
+      centerAddress: safe(centerAddress, "N/A"),
     });
-
-    // ⚠️ Your CENTER_VISIT.mapVariables currently accepts only
-    // ({ customerName, collectionDate, collectedBy })
-    // but template message has 4 vars ({{1}}..{{4}})
-    // So FIX it like below in template definition.
   }
 
   await WhatsAppMessage({
@@ -279,9 +287,11 @@ const handleSendOrderConfirmed = async (order) => {
     variables,
   });
 
-  return { success: true, type: order?.isHomeSample ? "order-confirmed" : "center-visit" };
+  return {
+    success: true,
+    type: order?.isHomeSample ? "order-confirmed" : "center-visit",
+  };
 };
-
 
 /* ----------------------------------
    ✅ NEW: Send only PAYMENT CONFIRMED

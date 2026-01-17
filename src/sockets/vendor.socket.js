@@ -1,14 +1,13 @@
+// sockets/vendor.socket.js
 import redis from "../config/redis.js";
+import { istDateKey, orderKeys } from "../utils/orderRedis.js";
 
-/* -------------------------
-   Utility: Safe Redis CMD wrapper (forces strings)
--------------------------- */
+/* Safe Redis CMD wrapper (forces strings) */
 function r(...args) {
-  return args.map(a => String(a));
+  return args.map((a) => String(a));
 }
 
 export default function vendorSocket(io, socket) {
-
   /* -----------------------------
        VENDOR JOIN
   ------------------------------ */
@@ -16,104 +15,154 @@ export default function vendorSocket(io, socket) {
     try {
       if (!vendorId) return;
 
-      vendorId = String(vendorId);
+      const vendorIdStr = String(vendorId);
+      const pincodeStr = pincode ? String(pincode).trim() : "";
 
-      socket.join(`vendor_${vendorId}`);
-      if (pincode) socket.join(`pin_${pincode}`);
+      socket.join(`vendor_${vendorIdStr}`);
+      if (pincodeStr) socket.join(`pin_${pincodeStr}`);
 
-      await redis.set(`socketVendor:${socket.id}`, vendorId);
+      await redis.set(`socketVendor:${socket.id}`, vendorIdStr, { EX: 60 * 60 * 6 });
 
       // Restore previous vendor metadata
-      const prev = await redis.hGetAll(`vendor:${vendorId}`);
+      const prev = await redis.hGetAll(`vendor:${vendorIdStr}`);
 
-      const finalLat = latitude ?? prev.latitude ?? "";
-      const finalLng = longitude ?? prev.longitude ?? "";
+      const finalLat = latitude ?? (prev.latitude ? Number(prev.latitude) : null);
+      const finalLng = longitude ?? (prev.longitude ? Number(prev.longitude) : null);
 
-      // Restore GEO location
-      if (finalLat && finalLng) {
-        await redis.sendCommand(r(
-          "GEOADD",
-          "vendors:geo",
-          finalLng,
-          finalLat,
-          vendorId
-        ));
+      // Restore GEO location for vendors
+      if (Number.isFinite(finalLat) && Number.isFinite(finalLng)) {
+        await redis.sendCommand(r("GEOADD", "vendors:geo", finalLng, finalLat, vendorIdStr));
       }
 
       // Save vendor metadata
-      await redis.hSet(`vendor:${vendorId}`, {
-        vendorId,
-        pincode: String(pincode || prev.pincode || ""),
-        latitude: String(finalLat || ""),
-        longitude: String(finalLng || ""),
+      await redis.hSet(`vendor:${vendorIdStr}`, {
+        vendorId: vendorIdStr,
+        pincode: String(pincodeStr || prev.pincode || ""),
+        latitude: String(Number.isFinite(finalLat) ? finalLat : ""),
+        longitude: String(Number.isFinite(finalLng) ? finalLng : ""),
         online: "true",
-        updatedAt: String(Date.now())
+        updatedAt: String(Date.now()),
       });
+      await redis.expire(`vendor:${vendorIdStr}`, 60 * 60 * 6);
 
-      console.log("✔ VENDOR JOINED:", vendorId);
+      console.log("✔ VENDOR JOINED:", vendorIdStr, pincodeStr);
 
-      // Send pending jobs to this vendor
-      await sendPendingOrdersToVendor(
-        socket, vendorId, pincode, finalLat, finalLng
-      );
-
+      // Send only TODAY pending orders
+      await sendTodaysPendingOrdersToVendor(socket, vendorIdStr, pincodeStr, finalLat, finalLng);
     } catch (err) {
       console.error("vendorJoin error:", err);
     }
   });
-
 
   /* -----------------------------
       LOCATION UPDATE
   ------------------------------ */
   socket.on("locationUpdate", async ({ vendorId, latitude, longitude, pincode }) => {
     try {
-      vendorId = String(vendorId);
+      const vendorIdStr = String(vendorId);
+      if (!vendorIdStr) return;
+      if (typeof latitude !== "number" || typeof longitude !== "number") return;
 
-      if (!vendorId || typeof latitude !== "number" || typeof longitude !== "number") return;
+      const pincodeStr = pincode ? String(pincode).trim() : "";
 
-      await redis.sendCommand(r(
-        "GEOADD",
-        "vendors:geo",
-        longitude,
-        latitude,
-        vendorId
-      ));
+      await redis.sendCommand(r("GEOADD", "vendors:geo", longitude, latitude, vendorIdStr));
 
-      await redis.hSet(`vendor:${vendorId}`, {
-        vendorId,
-        pincode: String(pincode || (await redis.hGet(`vendor:${vendorId}`, "pincode"))),
+      await redis.hSet(`vendor:${vendorIdStr}`, {
+        vendorId: vendorIdStr,
+        pincode: pincodeStr,
         latitude: String(latitude),
         longitude: String(longitude),
-        updatedAt: String(Date.now())
+        updatedAt: String(Date.now()),
       });
+      await redis.expire(`vendor:${vendorIdStr}`, 60 * 60 * 6);
 
-      await redis.expire(`vendor:${vendorId}`, 120);
+      await redis.set(`socketVendor:${socket.id}`, vendorIdStr, { EX: 60 * 60 * 6 });
 
-      await redis.set(`socketVendor:${socket.id}`, vendorId, {
-        EX: 60 * 60 * 6,
-      });
-
-      io.to(`vendor_${vendorId}`).emit("vendorLive", {
-        vendorId,
+      io.to(`vendor_${vendorIdStr}`).emit("vendorLive", {
+        vendorId: vendorIdStr,
         latitude,
         longitude,
-        pincode,
+        pincode: pincodeStr,
       });
 
+      // Optional: re-push today's orders after location update
+      await sendTodaysPendingOrdersToVendor(socket, vendorIdStr, pincodeStr, latitude, longitude);
     } catch (err) {
       console.error("locationUpdate error:", err);
     }
   });
 
+  /* -----------------------------
+      ACCEPT ORDER (removes from pending redis)
+  ------------------------------ */
+  socket.on("acceptOrder", async ({ vendorId, orderId }) => {
+    try {
+      const vendorIdStr = String(vendorId);
+      const orderIdStr = String(orderId);
+      if (!vendorIdStr || !orderIdStr) return;
+
+      const orderHash = `order:${orderIdStr}`;
+      const order = await redis.hGetAll(orderHash);
+      if (!order || !Object.keys(order).length) return;
+
+      if (order.status !== "pending") return;
+
+      // Mark accepted
+      await redis.hSet(orderHash, {
+        status: "accepted",
+        acceptedBy: vendorIdStr,
+        acceptedAt: String(Date.now()),
+      });
+
+      // Remove from pending indexes
+      const dateKey = order.dateKey || istDateKey(new Date(order.date));
+      const pincodeStr = String(order.pincode || "").trim();
+      const { pendingDateSet, pendingPincodeSet, orderGeo } = orderKeys({
+        orderId: orderIdStr,
+        dateKey,
+        pincode: pincodeStr,
+      });
+
+      await redis.sRem(pendingDateSet, orderIdStr);
+      if (pincodeStr) await redis.sRem(pendingPincodeSet, orderIdStr);
+      await redis.sendCommand(["ZREM", orderGeo, orderIdStr]).catch(() => {});
+      await redis.sendCommand(["SREM", orderGeo, orderIdStr]).catch(() => {});
+      await redis.sendCommand(["ZREM", orderGeo, orderIdStr]).catch(() => {});
+      // GEO is stored as a sorted set internally; use ZREM
+      await redis.sendCommand(["ZREM", orderGeo, orderIdStr]).catch(() => {});
+
+      // Tell others to remove from list
+      io.emit("removeOrderFromList", { orderId: Number(orderIdStr) });
+      io.to(`vendor_${vendorIdStr}`).emit("orderAccepted", { orderId: Number(orderIdStr) });
+    } catch (err) {
+      console.error("acceptOrder error:", err);
+    }
+  });
 
   /* -----------------------------
-      MANUAL REMOVE ORDER
+      REJECT ORDER (vendor-specific)
+  ------------------------------ */
+  socket.on("rejectOrder", async ({ vendorId, orderId }) => {
+    try {
+      const vendorIdStr = String(vendorId);
+      const orderIdStr = String(orderId);
+      if (!vendorIdStr || !orderIdStr) return;
+
+      await redis.sAdd(`rejected:${orderIdStr}`, vendorIdStr);
+      await redis.expire(`rejected:${orderIdStr}`, 60 * 60 * 48); // keep 2 days
+
+      socket.emit("removeOrderFromList", { orderId: Number(orderIdStr) });
+    } catch (err) {
+      console.error("rejectOrder error:", err);
+    }
+  });
+
+  /* -----------------------------
+      MANUAL REMOVE ORDER (client local)
   ------------------------------ */
   socket.on("removeOrder", ({ orderId }) => {
     socket.emit("removeOrderFromList", { orderId });
   });
-
 
   /* -----------------------------
       DISCONNECT
@@ -121,110 +170,93 @@ export default function vendorSocket(io, socket) {
   socket.on("disconnect", async () => {
     try {
       const vendorId = await redis.get(`socketVendor:${socket.id}`);
-
       if (vendorId) {
         await redis.hSet(`vendor:${vendorId}`, {
           online: "false",
-          lastSeen: String(Date.now())
+          lastSeen: String(Date.now()),
         });
       }
-
       await redis.del(`socketVendor:${socket.id}`);
-
       console.log("❌ VENDOR DISCONNECTED:", vendorId);
     } catch (err) {
       console.error("disconnect error", err);
     }
   });
-
 }
 
-
-
 /* ------------------------------------------------------------
-   🔥 SEND PENDING ORDERS TO VENDOR (on login/reconnect)
+   ✅ SEND TODAY’S PENDING ORDERS TO VENDOR (pincode + geo)
 ------------------------------------------------------------- */
-async function sendPendingOrdersToVendor(socket, vendorId, pincode, latitude, longitude) {
+async function sendTodaysPendingOrdersToVendor(socket, vendorId, pincode, latitude, longitude) {
   try {
-    vendorId = String(vendorId);
+    const todayKey = istDateKey(new Date());
 
-    const orderKeys = await redis.keys("order:*");
-    if (!orderKeys.length) return;
+    // 1) PINCODE MATCH (today only)
+    if (pincode) {
+      const { pendingPincodeSet } = orderKeys({
+        orderId: "0",
+        dateKey: todayKey,
+        pincode,
+      });
 
-    for (const key of orderKeys) {
-      const order = await redis.hGetAll(key);
+      const ids = await redis.sMembers(pendingPincodeSet);
 
-      if (!order || order.status !== "pending") continue;
+      for (const orderId of ids) {
+        const rejected = await redis.sIsMember(`rejected:${orderId}`, vendorId);
+        if (rejected) continue;
 
-      /* ---------------------------
-         FIX: Only show today's jobs
-      ---------------------------- */
-      if (!order.date) continue; // safety
+        const order = await redis.hGetAll(`order:${orderId}`);
+        if (!order || !Object.keys(order).length) continue;
+        if (order.status !== "pending") continue;
 
-      const orderDate = new Date(order.date);
-      const today = new Date();
-
-      const isToday =
-        orderDate.getFullYear() === today.getFullYear() &&
-        orderDate.getMonth() === today.getMonth() &&
-        orderDate.getDate() === today.getDate();
-
-      if (!isToday) continue;
-
-      const orderId = order.orderId;
-
-      /* 🚫 Skip if vendor rejected earlier */
-      const rejected = await redis.sIsMember(`rejected:${orderId}`, vendorId);
-      if (rejected) continue;
-
-      /* 1️⃣ PINCODE MATCH */
-      if (pincode && order.pincode === String(pincode)) {
         socket.emit("orderForPincode", {
-  orderId: order.orderId,
-  pincode: order.pincode,
-  latitude: order.latitude,
-  longitude: order.longitude,
-  slot: order.slot,
-  date: order.date,
-  testType: order.testType
-});
-
-      }
-
-      /* 2️⃣ RADIUS MATCH using GEO */
-      if (latitude && longitude && order.latitude && order.longitude) {
-
-        const res = await redis.sendCommand(r(
-          "GEORADIUS",
-          "vendors:geo",
-          order.longitude,
-          order.latitude,
-          5,  // km
-          "km",
-          "WITHDIST"
-        ));
-
-        if (Array.isArray(res)) {
-          for (const item of res) {
-            if (String(item[0]) === vendorId) {
-              const distanceKm = parseFloat(item[1]);
-          socket.emit("orderNearby", {
-  orderId: order.orderId,
-  latitude: order.latitude,
-  longitude: order.longitude,
-  slot: order.slot,
-  date: order.date,
-  testType: order.testType,
-  distanceKm
-});
-
-            }
-          }
-        }
+          orderId: Number(order.orderId),
+          pincode: order.pincode,
+          latitude: Number(order.latitude),
+          longitude: Number(order.longitude),
+          slot: order.slot || "",
+          date: order.date,
+          testType: order.testType,
+          isReplay: true,
+        });
       }
     }
 
+    // 2) RADIUS MATCH (today geo index)
+    if (typeof latitude === "number" && typeof longitude === "number") {
+      const orderGeo = `orders:geo:date:${todayKey}`;
+
+      // find orders near vendor (5km)
+      const nearby = await redis.sendCommand(
+        r("GEORADIUS", orderGeo, longitude, latitude, 5, "km", "WITHDIST")
+      );
+
+      if (Array.isArray(nearby)) {
+        for (const item of nearby) {
+          const orderId = String(item[0]);
+          const distanceKm = parseFloat(item[1]);
+
+          const rejected = await redis.sIsMember(`rejected:${orderId}`, vendorId);
+          if (rejected) continue;
+
+          const order = await redis.hGetAll(`order:${orderId}`);
+          if (!order || !Object.keys(order).length) continue;
+          if (order.status !== "pending") continue;
+
+          socket.emit("orderNearby", {
+            orderId: Number(order.orderId),
+            latitude: Number(order.latitude),
+            longitude: Number(order.longitude),
+            slot: order.slot || "",
+            date: order.date,
+            testType: order.testType,
+            distanceKm,
+            isReplay: true,
+          });
+        }
+      }
+    }
   } catch (err) {
-    console.error("sendPendingOrdersToVendor error:", err);
+    console.error("sendTodaysPendingOrdersToVendor error:", err);
   }
 }

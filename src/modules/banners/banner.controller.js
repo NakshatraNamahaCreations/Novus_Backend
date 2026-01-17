@@ -3,36 +3,62 @@ import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 
 const prisma = new PrismaClient();
 
-// CREATE Banner
+/* ---------------- helpers ---------------- */
+const toInt = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const validateTarget = ({ testId, packageId }) => {
+  const hasTest = !!testId;
+  const hasPackage = !!packageId;
+
+  if (hasTest && hasPackage) {
+    return "Provide either testId OR packageId, not both.";
+  }
+  if (!hasTest && !hasPackage) {
+    return "Provide testId OR packageId.";
+  }
+  return null;
+};
+
+/* ---------------- CREATE Banner ---------------- */
 export const addBanner = async (req, res) => {
   try {
-    const { subCategoryId } = req.body;
+    const testId = toInt(req.body.testId);
+    const packageId = toInt(req.body.packageId);
 
-    // ✅ Validate image
+    const err = validateTarget({ testId, packageId });
+    if (err) return res.status(400).json({ error: err });
+
     if (!req.file) {
       return res.status(400).json({ error: "Image is required" });
     }
 
-    // ✅ Upload to S3 (adjust to your upload logic)
-    const imgUrl = await uploadToS3(req.file, "banners");
-
-    // ✅ If subCategoryId provided, verify existence
-    let subCategory = null;
-    if (subCategoryId) {
-      subCategory = await prisma.subCategory.findUnique({
-        where: { id: Number(subCategoryId) },
-      });
-
-      if (!subCategory) {
-        return res.status(400).json({ error: "Invalid subCategoryId" });
-      }
+    // ✅ verify target exists
+    if (testId) {
+      const test = await prisma.test.findUnique({ where: { id: testId } });
+      if (!test) return res.status(400).json({ error: "Invalid testId" });
     }
 
-    // ✅ Create banner — include subCategoryId only if provided
+    if (packageId) {
+      const pkg = await prisma.healthPackage.findUnique({
+        where: { id: packageId },
+      });
+      if (!pkg) return res.status(400).json({ error: "Invalid packageId" });
+    }
+
+    const imgUrl = await uploadToS3(req.file, "banners");
+
     const banner = await prisma.banner.create({
       data: {
         imgUrl,
-        ...(subCategoryId ? { subCategoryId: Number(subCategoryId) } : {}),
+        ...(testId ? { testId } : {}),
+        ...(packageId ? { packageId } : {}),
+      },
+      include: {
+        test: { select: { id: true, name: true } },
+        package: { select: { id: true, name: true } },
       },
     });
 
@@ -47,12 +73,15 @@ export const addBanner = async (req, res) => {
   }
 };
 
-
-// READ ALL Banners
+/* ---------------- READ ALL ---------------- */
 export const getAllBanners = async (req, res) => {
   try {
     const banners = await prisma.banner.findMany({
-      include: { subCategory: true },
+      orderBy: { id: "desc" },
+      include: {
+        test: { select: { id: true, name: true } },
+        package: { select: { id: true, name: true } },
+      },
     });
     res.json(banners);
   } catch (error) {
@@ -61,14 +90,18 @@ export const getAllBanners = async (req, res) => {
   }
 };
 
-// READ ONE Banner
+/* ---------------- READ ONE ---------------- */
 export const getBannerById = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = toInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const banner = await prisma.banner.findUnique({
-      where: { id: Number(id) },
-      include: { subCategory: true },
+      where: { id },
+      include: {
+        test: { select: { id: true, name: true } },
+        package: { select: { id: true, name: true } },
+      },
     });
 
     if (!banner) return res.status(404).json({ error: "Banner not found" });
@@ -80,37 +113,59 @@ export const getBannerById = async (req, res) => {
   }
 };
 
-// UPDATE Banner
+/* ---------------- UPDATE ---------------- */
 export const updateBanner = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { subCategoryId } = req.body;
+    const id = toInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
-    const existing = await prisma.banner.findUnique({ where: { id: Number(id) } });
+    const testId = req.body.testId !== undefined ? toInt(req.body.testId) : undefined;
+    const packageId = req.body.packageId !== undefined ? toInt(req.body.packageId) : undefined;
+
+    const existing = await prisma.banner.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: "Banner not found" });
 
+    // if user is trying to change target, validate
+    if (testId !== undefined || packageId !== undefined) {
+      const nextTestId = testId === undefined ? existing.testId : testId;
+      const nextPackageId = packageId === undefined ? existing.packageId : packageId;
+
+      const err = validateTarget({
+        testId: nextTestId,
+        packageId: nextPackageId,
+      });
+      if (err) return res.status(400).json({ error: err });
+
+      if (nextTestId) {
+        const test = await prisma.test.findUnique({ where: { id: nextTestId } });
+        if (!test) return res.status(400).json({ error: "Invalid testId" });
+      }
+
+      if (nextPackageId) {
+        const pkg = await prisma.healthPackage.findUnique({
+          where: { id: nextPackageId },
+        });
+        if (!pkg) return res.status(400).json({ error: "Invalid packageId" });
+      }
+    }
+
+    // image update
     let imgUrl = existing.imgUrl;
     if (req.file) {
-      if (existing.imgUrl) {
-        await deleteFromS3(existing.imgUrl);
-      }
+      if (existing.imgUrl) await deleteFromS3(existing.imgUrl);
       imgUrl = await uploadToS3(req.file, "banners");
     }
 
-    let finalSubCategoryId = existing.subCategoryId;
-    if (subCategoryId) {
-      const subCat = await prisma.subCategory.findUnique({
-        where: { id: Number(subCategoryId) },
-      });
-      if (!subCat) return res.status(400).json({ error: "Invalid subCategoryId" });
-      finalSubCategoryId = subCat.id;
-    }
-
     const updated = await prisma.banner.update({
-      where: { id: Number(id) },
+      where: { id },
       data: {
         imgUrl,
-        subCategoryId: finalSubCategoryId,
+        ...(testId !== undefined ? { testId } : {}),
+        ...(packageId !== undefined ? { packageId } : {}),
+      },
+      include: {
+        test: { select: { id: true, name: true } },
+        package: { select: { id: true, name: true } },
       },
     });
 
@@ -121,40 +176,22 @@ export const updateBanner = async (req, res) => {
   }
 };
 
-// DELETE Banner
+/* ---------------- DELETE ---------------- */
 export const deleteBanner = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = toInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
-    const existing = await prisma.banner.findUnique({ where: { id: Number(id) } });
+    const existing = await prisma.banner.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: "Banner not found" });
 
-    if (existing.imgUrl) {
-      await deleteFromS3(existing.imgUrl);
-    }
+    if (existing.imgUrl) await deleteFromS3(existing.imgUrl);
 
-    await prisma.banner.delete({ where: { id: Number(id) } });
+    await prisma.banner.delete({ where: { id } });
 
     res.json({ message: "Banner deleted successfully" });
   } catch (error) {
     console.error("Error deleting banner:", error);
     res.status(500).json({ error: "Failed to delete banner" });
-  }
-};
-
-// GET Banners by SubCategory
-export const getBannersBySubCategory = async (req, res) => {
-  try {
-    const { subCategoryId } = req.params;
-
-    const banners = await prisma.banner.findMany({
-      where: { subCategoryId: Number(subCategoryId) },
-      include: { subCategory: true },
-    });
-
-    res.json(banners);
-  } catch (error) {
-    console.error("Error fetching banners by subCategory:", error);
-    res.status(500).json({ error: "Failed to fetch banners by subCategory" });
   }
 };

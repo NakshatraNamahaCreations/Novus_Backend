@@ -10,11 +10,24 @@ import { vendorNotificationQueue } from "../../queues/vendorNotification.queue.j
 import { broadcastNewOrder } from "../../services/location.service.js";
 import locationService from "../location/location.service.js";
 import { uploadToS3 } from "../../config/s3.js";
+import { istDateKey, isTodayIST, secondsToKeepForOrderDate, orderKeys } from "../../utils/orderRedis.js";
 
 import { markOrderReportReady } from "./order.service.js";
 
 const prisma = new PrismaClient();
 const formatTime = (date) => dayjs(date).format("hh:mm A");
+
+
+import utc from "dayjs/plugin/utc.js";
+import tz from "dayjs/plugin/timezone.js";
+
+
+dayjs.extend(utc);
+dayjs.extend(tz);
+
+
+
+
 
 export const createOrder = async (req, res) => {
   let lock;
@@ -56,27 +69,18 @@ export const createOrder = async (req, res) => {
 
     // ✅ Validate booking inputs
     if (isHomeSample) {
-      if (!slotId)
-        return res
-          .status(400)
-          .json({ error: "slotId is required for home sample" });
+      if (!slotId) {
+        return res.status(400).json({ error: "slotId is required for home sample" });
+      }
     } else {
-      if (!centerId)
-        return res
-          .status(400)
-          .json({ error: "centerId is required for center booking" });
-      if (!centerSlotId)
-        return res
-          .status(400)
-          .json({ error: "centerSlotId is required for center booking" });
+      if (!centerId) return res.status(400).json({ error: "centerId is required for center booking" });
+      if (!centerSlotId) return res.status(400).json({ error: "centerSlotId is required for center booking" });
     }
 
     /* 🔐 LOCK KEY */
     const lockKey = isHomeSample
       ? `lock:slot:${slotId}:${dayjs(orderDate).format("YYYY-MM-DD")}`
-      : `lock:centerSlot:${centerSlotId}:${dayjs(orderDate).format(
-          "YYYY-MM-DD"
-        )}`;
+      : `lock:centerSlot:${centerSlotId}:${dayjs(orderDate).format("YYYY-MM-DD")}`;
 
     lock = await acquireLock(lockKey);
 
@@ -107,13 +111,14 @@ export const createOrder = async (req, res) => {
           merchantOrderId,
 
           isHomeSample: Boolean(isHomeSample),
-
-          // ✅ save either home slot or center slot
           slotId: isHomeSample ? Number(slotId) : null,
           centerId: isHomeSample ? null : Number(centerId),
           centerSlotId: isHomeSample ? null : Number(centerSlotId),
         },
       });
+      console.log("slotId",slotId)
+
+      console.log("createdOrder",createdOrder)
 
       const paymentId = `PAY-${Date.now()}`;
 
@@ -132,7 +137,6 @@ export const createOrder = async (req, res) => {
       });
 
       await invoiceQueue.add("generate-invoice", { paymentId });
-
       return createdOrder;
     });
 
@@ -152,6 +156,8 @@ export const createOrder = async (req, res) => {
 
       if (Array.isArray(m.tests)) {
         for (const testId of m.tests) {
+          // ⚠️ If you actually have orderMemberTest table, use it.
+          // Keeping your original line but this looks like a schema bug:
           await prisma.orderMemberPackage.create({
             data: { orderMemberId: orderMember.id, testId: Number(testId) },
           });
@@ -160,35 +166,31 @@ export const createOrder = async (req, res) => {
     }
 
     // ✅ For notifications/broadcast you can still use address lat/long
-    const address = await prisma.address.findUnique({
-      where: { id: addressId },
-    });
+    const address = await prisma.address.findUnique({ where: { id: addressId } });
     if (!address) return res.status(400).json({ error: "Address not found" });
 
     const lat = Number(address.latitude);
     const lng = Number(address.longitude);
+    const pincodeStr = String(address.pincode || "").trim();
 
     // ✅ Slot label
     let slotLabel = "";
     if (isHomeSample) {
-      const slotData = await prisma.slot.findUnique({
-        where: { id: Number(slotId) },
-      });
+      const slotData = await prisma.slot.findUnique({ where: { id: Number(slotId) } });
       slotLabel = slotData
         ? `${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`
         : "";
     } else {
-      const cs = await prisma.centerSlot.findUnique({
-        where: { id: Number(centerSlotId) },
-      });
+      const cs = await prisma.centerSlot.findUnique({ where: { id: Number(centerSlotId) } });
       slotLabel = cs ? `${cs.startTime} - ${cs.endTime}` : "";
     }
 
+    // ✅ Always enqueue vendor notification (your existing flow)
     await vendorNotificationQueue.add(
       "notify-new-order",
       {
         orderId: order.id,
-        pincode: address.pincode,
+        pincode: pincodeStr,
         latitude: lat,
         longitude: lng,
         testType,
@@ -197,53 +199,81 @@ export const createOrder = async (req, res) => {
       { jobId: `vendor-new-order-${order.id}` }
     );
 
-    // ✅ Broadcast (same logic as you had)
-    const today = new Date();
-    const isToday =
-      orderDate.getFullYear() === today.getFullYear() &&
-      orderDate.getMonth() === today.getMonth() &&
-      orderDate.getDate() === today.getDate();
+    /* -----------------------------
+       ✅ REDIS: store until accepted/rejected
+       ✅ INDEX BY ORDER DATE (IST)
+    ------------------------------ */
+    const dateKey = istDateKey(orderDate);
+    const ttl = secondsToKeepForOrderDate(orderDate, 2);
 
-    const io = req.app.get("io");
-    if (io && isToday && testType === "PATHOLOGY") {
-      await broadcastNewOrder(io, {
-        id: order.id,
-        slot: slotLabel,
-        date: orderDate,
-        testType,
-        address: {
-          latitude: lat,
-          longitude: lng,
-          pincode: String(address.pincode || ""),
-        },
-        radiusKm: 5,
-      });
-    }
+    const { orderHash, pendingDateSet, pendingPincodeSet, orderGeo } = orderKeys({
+      orderId: order.id,
+      dateKey,
+      pincode: pincodeStr,
+    });
 
-    // cache
-    await redis.hSet(`order:${order.id}`, {
+    // order hash
+    await redis.hSet(orderHash, {
       orderId: String(order.id),
       date: orderDate.toISOString(),
+      dateKey: String(dateKey),
       status: "pending",
-      pincode: String(address.pincode || ""),
+      pincode: pincodeStr,
       latitude: String(lat),
       longitude: String(lng),
       testType: String(testType || ""),
+      slot: String(slotLabel || ""),
 
-      // ✅ store both (for debug)
       isHomeSample: String(Boolean(isHomeSample)),
       slotId: String(isHomeSample ? slotId : ""),
       centerId: String(!isHomeSample ? centerId : ""),
       centerSlotId: String(!isHomeSample ? centerSlotId : ""),
+      createdAt: String(Date.now()),
     });
 
-    await redis.sAdd("orders:pending", String(order.id));
-    await redis.expire(`order:${order.id}`, 600);
+    // pending indexes
+    await redis.sAdd(pendingDateSet, String(order.id));
+    await redis.sAdd(pendingPincodeSet, String(order.id));
 
+    // geo index for radius matching
+    if (Number.isFinite(lng) && Number.isFinite(lat)) {
+      await redis.sendCommand(["GEOADD", orderGeo, String(lng), String(lat), String(order.id)]);
+    }
+
+    // expiries (not 600 seconds!)
+    await redis.expire(orderHash, ttl);
+    await redis.expire(pendingDateSet, ttl);
+    await redis.expire(pendingPincodeSet, ttl);
+    await redis.expire(orderGeo, ttl);
+
+    /* -----------------------------
+       ✅ LIVE EMIT ONLY IF TODAY (IST)
+    ------------------------------ */
+    const io = req.app.get("io");
+    const shouldBroadcastNow = isTodayIST(orderDate);
+
+    if (io && shouldBroadcastNow) {
+      await broadcastNewOrder(io, {
+        id: order.id,
+        date: orderDate,
+        testType,
+        radiusKm: 5,
+        slot: slotLabel,
+        address: {
+          pincode: pincodeStr,
+          latitude: lat,
+          longitude: lng,
+        },
+      });
+    }
+
+    // respond
     res.json({
       success: true,
       orderId: order.id,
       orderNumber: order.orderNumber,
+      dateKey,
+      broadcasted: Boolean(shouldBroadcastNow),
     });
 
     await whatsappQueue.add(
@@ -325,7 +355,11 @@ export const createAdminOrder = async (req, res) => {
     };
 
     /* -------------------- validation -------------------- */
-    if (!patientId || !Array.isArray(selectedTests) || selectedTests.length === 0) {
+    if (
+      !patientId ||
+      !Array.isArray(selectedTests) ||
+      selectedTests.length === 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Patient & items required",
@@ -383,7 +417,8 @@ export const createAdminOrder = async (req, res) => {
       if (!finalCenterId) {
         return res.status(400).json({
           success: false,
-          message: "collectionCenterId/centerId is required for center collection",
+          message:
+            "collectionCenterId/centerId is required for center collection",
         });
       }
       if (!cSlotId) {
@@ -438,7 +473,8 @@ export const createAdminOrder = async (req, res) => {
       orderType: registrationType ?? null,
 
       totalAmount: Number(total),
-      discount: discount !== undefined && discount !== null ? Number(discount) : 0,
+      discount:
+        discount !== undefined && discount !== null ? Number(discount) : 0,
       discountAmount: Number(discountAmt),
       finalAmount: Number(finalAmt),
 
@@ -449,7 +485,9 @@ export const createAdminOrder = async (req, res) => {
       date: orderDate,
 
       isHomeSample: Boolean(homeCollection),
-      remarks: [provisionalDiagnosis, notes, remark].filter(Boolean).join(" | "),
+      remarks: [provisionalDiagnosis, notes, remark]
+        .filter(Boolean)
+        .join(" | "),
     };
 
     // ✅ connect slot ONLY when present (prevents Prisma "id must not be null")
@@ -467,7 +505,8 @@ export const createAdminOrder = async (req, res) => {
       const finalCenterId = castInt(centerId ?? collectionCenterId);
       const cSlotId = castInt(centerSlotId);
 
-      if (finalCenterId) dataToCreate.center = { connect: { id: finalCenterId } };
+      if (finalCenterId)
+        dataToCreate.center = { connect: { id: finalCenterId } };
       if (cSlotId) dataToCreate.centerSlot = { connect: { id: cSlotId } };
       // slot already handled safely above (optional)
     }
@@ -576,7 +615,7 @@ export const acceptOrderByVendor = async (req, res) => {
     const io = req.app.get("io");
 
     /* --------------------------------------------------------
-       STEP 1 — Get order details
+       STEP 1 — Get order details (need pincode for redis + room)
     ---------------------------------------------------------*/
     const orderDetails = await prisma.order.findUnique({
       where: { id: Number(orderId) },
@@ -585,18 +624,18 @@ export const acceptOrderByVendor = async (req, res) => {
         date: true,
         slot: true,
         vendorId: true,
+        status: true,
+        address: { select: { pincode: true } },
       },
     });
 
-    if (!orderDetails)
-      return res
-        .status(404)
-        .json({ success: false, message: "Order not found" });
+    if (!orderDetails) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
 
-    if (orderDetails.vendorId)
-      return res
-        .status(400)
-        .json({ success: false, message: "Order already accepted" });
+    if (orderDetails.vendorId) {
+      return res.status(400).json({ success: false, message: "Order already accepted" });
+    }
 
     /* --------------------------------------------------------
        STEP 2 — Slot conflict check
@@ -621,17 +660,13 @@ export const acceptOrderByVendor = async (req, res) => {
        STEP 3 — Atomic transaction (ORDER + EARNINGS)
     ---------------------------------------------------------*/
     const result = await prisma.$transaction(async (tx) => {
-      // 1️⃣ Recheck order
       const existing = await tx.order.findUnique({
         where: { id: Number(orderId) },
         select: { vendorId: true },
       });
 
-      if (existing.vendorId) {
-        throw new Error("Order already accepted");
-      }
+      if (existing?.vendorId) throw new Error("Order already accepted");
 
-      // 2️⃣ Accept order
       const updatedOrder = await tx.order.update({
         where: { id: Number(orderId) },
         data: {
@@ -644,14 +679,11 @@ export const acceptOrderByVendor = async (req, res) => {
         },
       });
 
-      // 3️⃣ Get earning config (latest or first)
       const earningConfig = await tx.vendorEarningConfig.findFirst({
         orderBy: { createdAt: "desc" },
       });
-
       const baseAmount = earningConfig?.baseAmount || 0;
 
-      // 4️⃣ Fetch vendor current earnings
       const vendor = await tx.vendor.findUnique({
         where: { id: Number(vendorId) },
         select: { earnings: true },
@@ -659,13 +691,11 @@ export const acceptOrderByVendor = async (req, res) => {
 
       const newBalance = (vendor?.earnings || 0) + baseAmount;
 
-      // 5️⃣ Update vendor balance
       await tx.vendor.update({
         where: { id: Number(vendorId) },
         data: { earnings: newBalance },
       });
 
-      // 6️⃣ Insert earnings history
       if (baseAmount > 0) {
         await tx.earningsHistory.create({
           data: {
@@ -683,27 +713,155 @@ export const acceptOrderByVendor = async (req, res) => {
     });
 
     /* --------------------------------------------------------
-       STEP 4 — Remove from Redis
+       STEP 4 — Remove from Redis (NEW + OLD keys) + verify + logs
     ---------------------------------------------------------*/
-    await redis.del(`order:${orderId}`);
+    const dateKey = istDateKey(orderDetails.date);
+    const pincodeStr = String(orderDetails.address?.pincode || "").trim();
+    const idStr = String(orderId);
+
+    // NEW keys
+    const orderHash = `order:${idStr}`;
+    const pendingDateSet = `orders:pending:date:${dateKey}`;
+    const pendingPincodeSetNew = pincodeStr
+      ? `orders:pending:date:${dateKey}:pincode:${pincodeStr}`
+      : null;
+    const orderGeoNew = `orders:geo:date:${dateKey}`;
+
+    // OLD keys (backward compatible)
+    const pendingAllOld = `orders:pending`;
+    const pendingPincodeSetOld = pincodeStr
+      ? `orders:pending:pincode:${pincodeStr}`
+      : null;
+
+    console.log("🧹 Redis cleanup start:", {
+      orderId: idStr,
+      dateKey,
+      pincodeStr,
+      keys: {
+        orderHash,
+        pendingDateSet,
+        pendingPincodeSetNew,
+        orderGeoNew,
+        pendingAllOld,
+        pendingPincodeSetOld,
+      },
+    });
+
+    const cleanupResults = await Promise.allSettled([
+      // delete order hash
+      redis.del(orderHash),
+
+      // NEW indexes
+      redis.sRem(pendingDateSet, idStr),
+      pendingPincodeSetNew ? redis.sRem(pendingPincodeSetNew, idStr) : Promise.resolve(0),
+      redis.sendCommand(["ZREM", orderGeoNew, idStr]).catch(() => 0),
+
+      // OLD indexes
+      redis.sRem(pendingAllOld, idStr).catch(() => 0),
+      pendingPincodeSetOld ? redis.sRem(pendingPincodeSetOld, idStr).catch(() => 0) : Promise.resolve(0),
+
+      // rejected set
+      redis.del(`rejected:${idStr}`).catch(() => 0),
+    ]);
+
+    // Map results
+    const [
+      delHash,
+      sremDate,
+      sremNewPin,
+      zremGeo,
+      sremOldAll,
+      sremOldPin,
+      delRejected,
+    ] = cleanupResults.map((r) => (r.status === "fulfilled" ? r.value : `ERR:${r.reason?.message}`));
+
+    // Verify (after cleanup)
+    const verify = await Promise.allSettled([
+      redis.exists(orderHash),
+      redis.sIsMember(pendingDateSet, idStr),
+      pendingPincodeSetNew ? redis.sIsMember(pendingPincodeSetNew, idStr) : Promise.resolve(false),
+      redis.sendCommand(["ZSCORE", orderGeoNew, idStr]).catch(() => null),
+      redis.sIsMember(pendingAllOld, idStr).catch(() => false),
+      pendingPincodeSetOld ? redis.sIsMember(pendingPincodeSetOld, idStr).catch(() => false) : Promise.resolve(false),
+    ]);
+
+    const [
+      hashExists,
+      stillInDateSet,
+      stillInNewPinSet,
+      geoScore,
+      stillInOldAll,
+      stillInOldPin,
+    ] = verify.map((r) => (r.status === "fulfilled" ? r.value : `ERR:${r.reason?.message}`));
+
+    console.log("✅ Redis cleanup results:", {
+      delHash,
+      sremDate,
+      sremNewPin,
+      zremGeo,
+      sremOldAll,
+      sremOldPin,
+      delRejected,
+    });
+
+    console.log("🔎 Redis verify after cleanup:", {
+      hashExists,               // should be 0
+      stillInDateSet,           // should be false
+      stillInNewPinSet,         // should be false
+      geoScore,                 // should be null
+      stillInOldAll,            // should be false
+      stillInOldPin,            // should be false
+    });
 
     /* --------------------------------------------------------
-       STEP 5 — Socket notifications
+       STEP 5 — Socket notifications (remove immediately for others)
     ---------------------------------------------------------*/
     io.to(`vendor_${vendorId}`).emit("orderAccepted", {
-      orderId,
-      vendorId,
+      orderId: Number(orderId),
+      vendorId: Number(vendorId),
       order: result,
     });
 
-    io.emit("orderRemoved", { orderId });
+    if (pincodeStr) {
+      io.to(`pin_${pincodeStr}`).emit("removeOrderFromList", {
+        orderId: Number(orderId),
+      });
+    }
+
+    // global fallback (safe)
+    io.emit("removeOrderFromList", { orderId: Number(orderId) });
+
+    // legacy
+    io.emit("orderRemoved", { orderId: Number(orderId) });
 
     return res.json({
       success: true,
       message: "Order accepted successfully",
       order: result,
+      redisCleanup: {
+        dateKey,
+        pincode: pincodeStr,
+        removed: {
+          delHash,
+          sremDate,
+          sremNewPin,
+          zremGeo,
+          sremOldAll,
+          sremOldPin,
+          delRejected,
+        },
+        verify: {
+          hashExists,
+          stillInDateSet,
+          stillInNewPinSet,
+          geoScore,
+          stillInOldAll,
+          stillInOldPin,
+        },
+      },
     });
   } catch (error) {
+    console.error("acceptOrderByVendor error:", error);
     return res.status(400).json({
       success: false,
       message: error.message || "Failed to accept order",
@@ -1039,6 +1197,12 @@ export const getOrdersByPatientIdCompleted = async (req, res) => {
         },
         address: true,
         vendor: true,
+         payments: {
+          select: {
+            id: true,
+            invoiceUrl: true,
+          },
+        },
         orderMembers: {
           where: { patientId },
           include: {
@@ -1105,6 +1269,12 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
             fullName: true,
             email: true,
             contactNo: true,
+          },
+        },
+        payments: {
+          select: {
+            id: true,
+            invoiceUrl: true,
           },
         },
 
@@ -1403,6 +1573,13 @@ export const getOrderById = async (req, res) => {
             alcoholConsumption: true,
             exerciseFrequency: true,
           },
+        },
+        payments:{
+          select:{
+            id:true,
+            invoiceUrl:true
+
+          }
         },
         address: {
           select: {

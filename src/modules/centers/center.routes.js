@@ -6,23 +6,21 @@ import {
   updateCenter,
   deleteCenter,
   getNearbyCenters,
-
   assignCategoriesToCenter,
-createCenterSlot,
-getCenterSlots,
-updateCenterSlot,
-deleteCenterSlot,
-getAllCentersforadmin
+  createCenterSlot,
+  getCenterSlots,
+  updateCenterSlot,
+  deleteCenterSlot,
+  getAllCentersforadmin,
 } from "./center.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
 const router = express.Router();
 
-
 router.get("/nearby", getNearbyCenters);
 
 // CREATE
-router.post("/",authenticateUser, createCenter);
+router.post("/", authenticateUser, createCenter);
 router.post("/:id/categories", assignCategoriesToCenter);
 router.post("/:id/slots", createCenterSlot);
 router.get("/:id/slots", getCenterSlots);
@@ -30,15 +28,9 @@ router.get("/:id/slots", getCenterSlots);
 router.put("/slot/:slotId", updateCenterSlot);
 router.delete("/slot/:slotId", deleteCenterSlot);
 
-
-
-
-
 // READ ALL
 router.get("/", getAllCenters);
 router.get("/admin", getAllCentersforadmin);
-
-
 
 // READ ONE
 router.get("/:id", getCenterById);

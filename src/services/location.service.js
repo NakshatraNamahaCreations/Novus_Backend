@@ -1,55 +1,52 @@
+// modules/location/location.service.js
 import redis from "../config/redis.js";
 
 /**
- * Broadcast new order to nearby vendors.
+ * ✅ PRODUCTION-SAFE BROADCAST (Pincode + Nearby but NOT cross-pincode)
+ *
+ * Rules:
+ * 1) orderForPincode -> only vendors joined in pin_<orderPincode>
+ * 2) orderNearby     -> only vendors within radius AND whose saved vendor.pincode == order.pincode
+ *
+ * So: vendor 560061 will NOT receive job of 560060 even if nearby.
  */
 export async function broadcastNewOrder(io, order) {
   try {
-  
     const { address } = order;
     if (!address) return;
 
-    const orderId = order.id.toString();
+    const orderIdStr = String(order.id);
+    const orderPincode = String(address.pincode || "").trim();
+    const lat = Number(address.latitude);
+    const lng = Number(address.longitude);
 
-    /* ---------------------------
-       1️⃣  PINCODE BROADCAST
-    --------------------------- */
-    if (address.pincode) {
-      // Get all vendors listening to that pincode
-      const vendorRoom = io.sockets.adapter.rooms.get(`pin_${address.pincode}`);
-
-      if (vendorRoom) {
-        for (const socketId of vendorRoom) {
-          const vendorId = await redis.get(`socketVendor:${socketId}`);
-
-          // skip rejected vendors
-          const rejected = await redis.sIsMember(
-            `rejected:${orderId}`,
-            vendorId
-          );
-          if (rejected) continue;
-
-          io.to(socketId).emit("orderForPincode", order);
-        }
-      }
+    /* -------------------------------------------------------
+       1) PINCODE ROOM BROADCAST (STRICT)
+    -------------------------------------------------------- */
+    if (orderPincode) {
+      io.to(`pin_${orderPincode}`).emit("orderForPincode", {
+        orderId: order.id,
+        pincode: orderPincode,
+        latitude: lat,
+        longitude: lng,
+        slot: order.slot || "",
+        date: order.date,
+        testType: order.testType,
+        isReplay: false,
+      });
     }
 
-    /* ---------------------------
-       2️⃣  RADIUS BROADCAST (GEO)
-    --------------------------- */
-    if (
-      typeof address.latitude === "number" &&
-      typeof address.longitude === "number"
-    ) {
-      const RADIUS_KM = order.radiusKm || 5;
-
-
+    /* -------------------------------------------------------
+       2) RADIUS BROADCAST (NEARBY) BUT SAME PINCODE ONLY
+    -------------------------------------------------------- */
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      const RADIUS_KM = Number(order.radiusKm || 5);
 
       const res = await redis.sendCommand([
         "GEORADIUS",
         "vendors:geo",
-        String(address.longitude),
-        String(address.latitude),
+        String(lng),
+        String(lat),
         String(RADIUS_KM),
         "km",
         "WITHDIST",
@@ -57,25 +54,27 @@ export async function broadcastNewOrder(io, order) {
 
       if (Array.isArray(res)) {
         for (const item of res) {
-          const vendorId = item[0].toString();
+          const vendorId = String(item[0]);
           const distanceKm = parseFloat(item[1]);
 
-          // ❌ skip rejected vendors
-          const rejected = await redis.sIsMember(
-            `rejected:${orderId}`,
-            vendorId
-          );
+          // 🚫 skip rejected vendors for this order
+          const rejected = await redis.sIsMember(`rejected:${orderIdStr}`, vendorId);
           if (rejected) continue;
+
+          // ✅ FILTER: vendor must have SAME pincode as order
+          const vendorPincode = await redis.hGet(`vendor:${vendorId}`, "pincode");
+          if (String(vendorPincode || "").trim() !== orderPincode) continue;
+
           io.to(`vendor_${vendorId}`).emit("orderNearby", {
-            
             orderId: order.id,
-            pincode: order.address.pincode,
-            latitude: order.address.latitude,
-            longitude: order.address.longitude,
-            slot: order.slot || "9:00 pM",
+            pincode: orderPincode,
+            latitude: lat,
+            longitude: lng,
+            slot: order.slot || "",
             date: order.date,
             testType: order.testType,
             distanceKm,
+            isReplay: false,
           });
         }
       }

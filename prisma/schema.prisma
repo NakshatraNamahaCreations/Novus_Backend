@@ -71,25 +71,79 @@ model Pincode {
 }
 
 model Banner {
-  id            Int          @id @default(autoincrement())
-  imgUrl        String
-  subCategoryId Int?
-  subCategory   SubCategory? @relation(fields: [subCategoryId], references: [id])
-  createdById   Int? // ⭐ ADDED: Track who created the banner
-  createdBy     User?        @relation(fields: [createdById], references: [id])
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  id     Int    @id @default(autoincrement())
+  imgUrl String
+
+  testId Int?
+  test   Test? @relation(fields: [testId], references: [id], onDelete: SetNull)
+
+  packageId Int?
+  package   HealthPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+
+  createdById Int?
+  createdBy   User? @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([testId])
+  @@index([packageId])
+  @@index([createdById])
+}
+
+enum SpotlightShowIn {
+  HOME_MIDDLE
+  HOME_END
 }
 
 model SpotlightBanner {
-  id            Int         @id @default(autoincrement())
-  imgUrl        String
-  subCategoryId Int
-  subCategory   SubCategory @relation(fields: [subCategoryId], references: [id])
-  createdById   Int? // ⭐ ADDED: Track who created the banner
-  createdBy     User?       @relation(fields: [createdById], references: [id])
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id     Int    @id @default(autoincrement())
+  imgUrl String
+
+  showIn SpotlightShowIn[]
+
+  testId Int?
+  test   Test? @relation(fields: [testId], references: [id], onDelete: SetNull)
+
+  packageId Int?
+  package   HealthPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+
+  createdById Int?
+  createdBy   User? @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([testId])
+  @@index([packageId])
+  @@index([createdById])
+  @@index([showIn])
+}
+
+model CollectionPrice {
+  id Int @id @default(autoincrement())
+
+  // Scope (you can use one or more)
+  centerId Int?
+  cityId   Int?
+  pincode  String?
+
+  price Float
+
+  isActive Boolean @default(true)
+
+  createdById Int?
+  createdBy   User? @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  center Center? @relation(fields: [centerId], references: [id])
+  city   City?   @relation(fields: [cityId], references: [id])
+
+  @@index([centerId])
+  @@index([cityId])
+  @@index([pincode])
 }
 
 model City {
@@ -98,6 +152,7 @@ model City {
 
   diagnosticCenters DiagnosticCenter[]
   centers           Center[]
+  collectionPrices  CollectionPrice[]
 }
 
 model Sources {
@@ -169,6 +224,7 @@ model User {
 
   createdNotifications  Notification[]
   createdTestParameters TestParameter[]
+  collectionPrices      CollectionPrice[]
 
   // Payment relations FIXED
   createdPayments Payment[] @relation("PaymentCreatedBy")
@@ -292,6 +348,7 @@ model Category {
   tests         Test[]
   packages      HealthPackage[]
   centers       CenterCategory[]
+  ESignatureCategory ESignatureCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -307,10 +364,8 @@ model SubCategory {
   createdById Int? // ⭐ ADDED: Track who created the subcategory
   createdBy   User? @relation(fields: [createdById], references: [id])
 
-  category         Category          @relation(fields: [catId], references: [id])
-  tests            Test[]
-  spotlightBanners SpotlightBanner[]
-  banners          Banner[]
+  category Category @relation(fields: [catId], references: [id])
+  tests    Test[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -348,6 +403,8 @@ model HealthPackage {
   cartItems           CartItem[]
   OrderCheckup        OrderCheckup[]
   orderMemberPackages OrderMemberPackage[]
+  banners             Banner[]
+  spotlightBanners    SpotlightBanner[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -394,6 +451,8 @@ model Test {
   parameters          TestParameter[]
   patientResults      PatientTestResult[]
   orderMemberPackages OrderMemberPackage[]
+  banners             Banner[]
+  spotlightBanners    SpotlightBanner[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -486,7 +545,7 @@ model Vendor {
   locationHistory VendorLocation[]
   reviews         VendorReview[]
   payments        Payment[]
-
+  devices VendorDevice[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -565,10 +624,11 @@ model Center {
   createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
 
-  orders      Order[]
-  payments    Payment[]
-  centerSlots CenterSlot[]
-  categories  CenterCategory[]
+  orders           Order[]
+  payments         Payment[]
+  centerSlots      CenterSlot[]
+  categories       CenterCategory[]
+  collectionPrices CollectionPrice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -731,12 +791,29 @@ model ESignature {
   qualification String?
   designation   String?
   signatureImg  String
-  categories    String[] // multiple selected categories
   alignment     Alignment @default(LEFT)
-  isDefault     Boolean   @default(false)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // ✅ categories via relation table
+  categories    ESignatureCategory[]
+}
+
+model ESignatureCategory {
+  id          Int @id @default(autoincrement())
+
+  signatureId Int
+  signature   ESignature @relation(fields: [signatureId], references: [id], onDelete: Cascade)
+
+  categoryId  Int
+  category    Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  // ✅ default per category
+  isDefault   Boolean @default(false)
+
+  @@unique([signatureId, categoryId])
+
+  @@index([categoryId])
+  @@index([signatureId])
+  @@index([isDefault])
 }
 
 model OrderMember {
@@ -1265,4 +1342,16 @@ model PatientReportPdf {
   @@unique([orderId, patientId])
   @@index([orderId])
   @@index([patientId])
+}
+
+model VendorDevice {
+  id        Int      @id @default(autoincrement())
+  vendorId  Int
+  fcmToken  String   @unique
+  platform  String?  // android / ios / web
+  createdAt DateTime @default(now())
+
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
 }

@@ -2,6 +2,13 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+
+const toBool = (v, fallback = false) => {
+  if (v === true || v === false) return v;
+  if (typeof v === "string") return v.toLowerCase() === "true";
+  return fallback;
+};
+
 /**
  * CenterPackage schema is:
  * model CenterPackage { centerId Int, testId Int, ... }
@@ -21,69 +28,72 @@ export const createCenter = async (req, res) => {
       lat,
       long,
       cityId,
+      isSelf,
       testIds = [],
     } = req.body;
 
-    if (!name || !address) {
+    const cleanName = String(name || "").trim();
+    const cleanAddress = String(address || "").trim();
+
+    if (!cleanName || !cleanAddress) {
       return res.status(400).json({ error: "Name and Address are required" });
     }
 
-    // Email unique check
+    // ✅ Email unique check
     if (email) {
       const exists = await prisma.center.findUnique({ where: { email } });
       if (exists) return res.status(400).json({ error: "Email already registered" });
     }
 
-    // Validate cityId
+    // ✅ Validate cityId
     if (cityId) {
       const cityExists = await prisma.city.findUnique({
         where: { id: Number(cityId) },
         select: { id: true },
       });
-      if (!cityExists) {
-        return res.status(400).json({ error: "Invalid cityId" });
-      }
+      if (!cityExists) return res.status(400).json({ error: "Invalid cityId" });
     }
 
-    // Validate testIds (because CenterPackage has testId)
-    if (Array.isArray(testIds) && testIds.length > 0) {
+    // ✅ Normalize testIds
+    const testIdNums = Array.isArray(testIds)
+      ? testIds.map(Number).filter((n) => Number.isFinite(n) && n > 0)
+      : [];
+
+    if (testIdNums.length > 0) {
       const validTests = await prisma.test.findMany({
-        where: { id: { in: testIds.map(Number) } },
+        where: { id: { in: testIdNums } },
         select: { id: true },
       });
 
       const validSet = new Set(validTests.map((t) => t.id));
-      const invalidIds = testIds.filter((t) => !validSet.has(Number(t)));
-
+      const invalidIds = testIdNums.filter((t) => !validSet.has(t));
       if (invalidIds.length) {
-        return res
-          .status(400)
-          .json({ error: `Invalid testIds: ${invalidIds.join(", ")}` });
+        return res.status(400).json({ error: `Invalid testIds: ${invalidIds.join(", ")}` });
       }
     }
 
     const center = await prisma.center.create({
       data: {
-        name,
-        contactName: contactName || null,
-        address,
+        name: cleanName,
+        contactName: contactName ? String(contactName).trim() : null,
+        address: cleanAddress,
         email: email || null,
         alternativeEmail: alternativeEmail || null,
         mobile: mobile || null,
+        isSelf: toBool(isSelf, false), // ✅ FIXED
         lat: lat !== undefined && lat !== null && lat !== "" ? Number(lat) : null,
         long: long !== undefined && long !== null && long !== "" ? Number(long) : null,
 
-        // ✅ FIX: use relation connect
-        ...(req.user?.id ? { createdBy: { connect: { id: Number(req.user.id) } } } : {}),
+        ...(req.user?.id
+          ? { createdBy: { connect: { id: Number(req.user.id) } } }
+          : {}),
 
-        // ✅ City relation connect
         ...(cityId ? { city: { connect: { id: Number(cityId) } } } : {}),
 
-        // ✅ test mapping
-        ...(Array.isArray(testIds) && testIds.length > 0
+        ...(testIdNums.length > 0
           ? {
               centerPackages: {
-                create: testIds.map((tid) => ({ testId: Number(tid) })),
+                create: testIdNums.map((tid) => ({ testId: tid })),
               },
             }
           : {}),
@@ -100,6 +110,7 @@ export const createCenter = async (req, res) => {
     return res.status(500).json({ error: "Failed to create center" });
   }
 };
+
 
 
 /* ✅ GET ALL Centers with Pagination + Search */
@@ -280,6 +291,7 @@ export const updateCenter = async (req, res) => {
       lat,
       long,
       cityId,
+      isSelf,
       testIds = [],
     } = req.body;
 
@@ -316,20 +328,22 @@ export const updateCenter = async (req, res) => {
       }
     }
 
-    await prisma.center.update({
-      where: { id: Number(id) },
-      data: {
-        ...(name !== undefined ? { name } : {}),
-        ...(contactName !== undefined ? { contactName } : {}),
-        ...(address !== undefined ? { address } : {}),
-        ...(email !== undefined ? { email } : {}),
-        ...(alternativeEmail !== undefined ? { alternativeEmail } : {}),
-        ...(mobile !== undefined ? { mobile } : {}),
-        ...(lat !== undefined ? { lat: lat === "" || lat === null ? null : Number(lat) } : {}),
-        ...(long !== undefined ? { long: long === "" || long === null ? null : Number(long) } : {}),
-        ...cityData,
-      },
-    });
+await prisma.center.update({
+  where: { id: Number(id) },
+  data: {
+    ...(name !== undefined ? { name: String(name).trim() } : {}),
+    ...(contactName !== undefined ? { contactName: contactName ? String(contactName).trim() : null } : {}),
+    ...(address !== undefined ? { address: address ? String(address).trim() : null } : {}),
+    ...(email !== undefined ? { email: email || null } : {}),
+    ...(alternativeEmail !== undefined ? { alternativeEmail: alternativeEmail || null } : {}),
+    ...(mobile !== undefined ? { mobile: mobile || null } : {}),
+    ...(isSelf !== undefined ? { isSelf: toBool(isSelf, existing.isSelf) } : {}), // ✅ FIXED
+    ...(lat !== undefined ? { lat: lat === "" || lat === null ? null : Number(lat) } : {}),
+    ...(long !== undefined ? { long: long === "" || long === null ? null : Number(long) } : {}),
+    ...cityData,
+  },
+});
+
 
     // Update tests mapping (replace all)
     if (Array.isArray(testIds)) {

@@ -198,28 +198,26 @@ export const loginUser = async (req, res) => {
     if (!validPassword)
       return res.status(401).json({ error: "Invalid password" });
 
-  
     // ✅ Mark user as active
     await prisma.user.update({
       where: { id: user.id },
       data: { isActive: true },
     });
 
-// ✅ Generate JWT token (10 minutes)
-const token = jwt.sign(
-  { id: user.id, email: user.email, role: user.role },
-  JWT_SECRET,
-  { expiresIn: "10m" }
-);
+    // ✅ Generate JWT token (2 hours)
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: "2h" }
+    );
 
-// ✅ Send token as httpOnly cookie (10 minutes)
-res.cookie("token", token, {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "strict",
-  maxAge: 10 * 60 * 1000, // 10 minutes
-});
-
+    // ✅ Send token as httpOnly cookie (2 hours)
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 2 * 60 * 60 * 1000, // 2 hours in milliseconds
+    });
 
     // ✅ Respond with user info (no token in body)
     res.status(200).json({
@@ -432,11 +430,10 @@ export const changePassword = async (req, res) => {
   }
 };
 
-
 export const changePassword1 = async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log("userId",userId)
+    console.log("userId", userId);
     const { currentPassword, newPassword, confirmPassword } = req.body;
 
     if (!currentPassword || !newPassword || !confirmPassword) {
@@ -461,10 +458,7 @@ export const changePassword1 = async (req, res) => {
       where: { id: userId },
     });
 
-    const isMatch = await bcrypt.compare(
-      currentPassword,
-      user.password
-    );
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
 
     if (!isMatch) {
       return res.status(401).json({
@@ -485,7 +479,6 @@ export const changePassword1 = async (req, res) => {
     res.status(500).json({ message: "Failed to change password" });
   }
 };
-
 
 export const getCurrentUser = async (req, res) => {
   try {

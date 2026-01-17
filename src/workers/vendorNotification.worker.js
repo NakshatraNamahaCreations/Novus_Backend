@@ -3,18 +3,17 @@ import { queueRedis } from "../config/redisQueue.js";
 import { PrismaClient } from "@prisma/client";
 import { sendPushNotification } from "../modules/notifications/notification.service.js";
 
-
 const prisma = new PrismaClient();
-
 
 export const vendorNotificationWorker = new Worker(
   "vendor-notifications",
   async (job) => {
-    const { orderId, pincode, latitude, longitude, testType, radiusKm } =
-      job.data;
+    const { orderId, latitude, longitude, testType, radiusKm } = job.data;
 
-    // 🔍 Find vendors by GEO
-    const vendors = await queueRedis.sendCommand([
+    if (latitude == null || longitude == null) return;
+
+    // ✅ Redis GEORADIUS returns vendorIds (members) as strings
+    const vendorIds = await queueRedis.sendCommand([
       "GEORADIUS",
       "vendors:geo",
       String(longitude),
@@ -23,41 +22,44 @@ export const vendorNotificationWorker = new Worker(
       "km"
     ]);
 
-    for (const vendorId of vendors.map(v => v[0])) {
+    // vendorIds can be: ["12","18", ...]
+    for (const vendorIdStr of vendorIds) {
+      const vendorId = Number(vendorIdStr);
+      if (!vendorId) continue;
+
       // ❌ Skip rejected vendors
       const rejected = await queueRedis.sIsMember(
         `rejected:${orderId}`,
-        vendorId
+        String(vendorId)
       );
       if (rejected) continue;
 
-      // 🟢 Check online status
-      const isOnline = await queueRedis.exists(
-        `vendor:online:${vendorId}`
-      );
+      // 🟢 If online -> socket will handle
+      const isOnline = await queueRedis.exists(`vendor:online:${vendorId}`);
+      if (isOnline) continue;
 
-      if (isOnline) {
-        // ONLINE vendors already get socket event
-        continue;
-      }
-
-      // 🔔 OFFLINE vendors → PUSH
-      const vendor = await prisma.vendor.findUnique({
-        where: { id: Number(vendorId) },
+      // ✅ Fetch ALL device tokens for this vendor
+      const devices = await prisma.vendorDevice.findMany({
+        where: { vendorId },
         select: { fcmToken: true }
       });
 
-      if (!vendor?.fcmToken) continue;
+      if (!devices?.length) continue;
 
-      await sendPushNotification({
-        token: vendor.fcmToken,
-        title: "New Job Available",
-        body: `New ${testType} order near you`,
-        data: {
-          orderId: String(orderId),
-          type: "NEW_ORDER"
-        }
-      });
+      // 🔔 Send push to each token
+      for (const d of devices) {
+        if (!d?.fcmToken) continue;
+
+        await sendPushNotification({
+          token: d.fcmToken,
+          title: "New Job Available",
+          body: `New ${testType} order near you`,
+          data: {
+            orderId: String(orderId),
+            type: "NEW_ORDER"
+          }
+        });
+      }
     }
   },
   {

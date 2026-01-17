@@ -15,6 +15,7 @@ import {
   sendOtp,
   verifyOtp,
   addVendorEarning,
+  updateVendorFcmToken
 } from "./vendor.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -29,6 +30,9 @@ router.post("/logout", logoutVendor);
 router.post("/send-otp", sendOtp);
 router.post("/earnings", addVendorEarning);
 router.post("/reviews", addVendorReview);
+router.post("/device-token/:vendorId", updateVendorFcmToken);
+
+
 
 // 📌 Verify OTP & Login
 router.post("/verify-otp", verifyOtp);
