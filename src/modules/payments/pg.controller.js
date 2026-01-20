@@ -185,3 +185,38 @@ export const verifyPhonePePayment = async (req, res) => {
     });
   }
 };
+
+
+export const redirectapp = async (req, res) => {
+  try {
+    console.log("req.query")
+
+  
+
+    return res.json({
+      success: true,
+      
+    });
+  } catch (err) {
+    console.error("Create Payment Error:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+
+export const callackapp = async (req, res) => {
+  try {
+    console.log("req.query")
+
+  
+
+    return res.json({
+      success: true,
+      
+    });
+  } catch (err) {
+    console.error("Create Payment Error:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+

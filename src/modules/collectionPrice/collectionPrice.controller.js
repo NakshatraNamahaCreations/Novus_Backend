@@ -4,6 +4,13 @@ const prisma = new PrismaClient();
 
 /* ---------------- helpers ---------------- */
 const toInt = (v) => {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const toNum = (v) => {
+  if (v === undefined || v === null || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
@@ -63,6 +70,9 @@ export const createCollectionPrice = async (req, res) => {
 
     const price = Number(req.body.price);
 
+    // ✅ NEW: minAmount (alias: min)
+    const minAmount = toNum(req.body.minAmount ?? req.body.min) ?? 0;
+
     // ✅ guard against NaN / 0
     if (centerId !== null && (!Number.isInteger(centerId) || centerId <= 0)) {
       return res.status(400).json({ error: "Invalid centerId" });
@@ -72,6 +82,9 @@ export const createCollectionPrice = async (req, res) => {
     }
     if (!Number.isFinite(price) || price < 0) {
       return res.status(400).json({ error: "Valid price is required" });
+    }
+    if (!Number.isFinite(minAmount) || minAmount < 0) {
+      return res.status(400).json({ error: "Valid minAmount is required (>= 0)" });
     }
 
     // ✅ verify FK exists
@@ -92,6 +105,7 @@ export const createCollectionPrice = async (req, res) => {
         centerId,
         cityId,
         pincode,
+        minAmount, // ✅ NEW
         price,
         isActive: true,
         createdById,
@@ -111,7 +125,6 @@ export const createCollectionPrice = async (req, res) => {
   } catch (error) {
     console.error("Error creating collection price:", error);
 
-    // ✅ helpful error for FK
     if (error.code === "P2003") {
       return res.status(400).json({
         error: "Foreign key failed: centerId/cityId does not exist. Please select a valid Center/City.",
@@ -119,10 +132,17 @@ export const createCollectionPrice = async (req, res) => {
       });
     }
 
+    // if you add @@unique([centerId, cityId, pincode, minAmount]) you may get P2002 here
+    if (error.code === "P2002") {
+      return res.status(409).json({
+        error: "Duplicate rule: a row already exists for the same centerId/cityId/pincode/minAmount slab.",
+        details: error.meta,
+      });
+    }
+
     return res.status(500).json({ error: "Failed to create collection price" });
   }
 };
-
 
 /* ---------------- READ ALL (with filters) ---------------- */
 export const getCollectionPrices = async (req, res) => {
@@ -132,10 +152,14 @@ export const getCollectionPrices = async (req, res) => {
     const pincode = normalizePincode(req.query.pincode);
     const isActive = req.query.isActive !== undefined ? toBool(req.query.isActive) : undefined;
 
+    // ✅ NEW: filter by minAmount (alias: min)
+    const minAmount = toNum(req.query.minAmount ?? req.query.min);
+
     const where = {
       ...(centerId !== null && centerId !== undefined ? { centerId } : {}),
       ...(cityId !== null && cityId !== undefined ? { cityId } : {}),
       ...(pincode ? { pincode } : {}),
+      ...(minAmount !== null && minAmount !== undefined ? { minAmount } : {}),
       ...(isActive !== undefined && isActive !== null ? { isActive } : {}),
     };
 
@@ -149,7 +173,7 @@ export const getCollectionPrices = async (req, res) => {
       },
     });
 
-    res.json({ success: true, collectionPrices: rows });
+    res.json({ success: true, collectionPrices: [...rows] });
   } catch (error) {
     console.error("Error fetching collection prices:", error);
     res.status(500).json({ error: "Failed to fetch collection prices" });
@@ -193,11 +217,20 @@ export const updateCollectionPrice = async (req, res) => {
     const cityId = req.body.cityId !== undefined ? toInt(req.body.cityId) : undefined;
     const pincode = req.body.pincode !== undefined ? normalizePincode(req.body.pincode) : undefined;
 
+    // ✅ NEW: minAmount update (alias: min)
+    const minAmount =
+      req.body.minAmount !== undefined || req.body.min !== undefined
+        ? (toNum(req.body.minAmount ?? req.body.min) ?? 0)
+        : undefined;
+
     const price = req.body.price !== undefined ? Number(req.body.price) : undefined;
     const isActive = req.body.isActive !== undefined ? toBool(req.body.isActive) : undefined;
 
     if (price !== undefined && (!Number.isFinite(price) || price < 0)) {
       return res.status(400).json({ error: "Valid price is required" });
+    }
+    if (minAmount !== undefined && (!Number.isFinite(minAmount) || minAmount < 0)) {
+      return res.status(400).json({ error: "Valid minAmount is required (>= 0)" });
     }
 
     // verify foreign keys if changed
@@ -216,9 +249,9 @@ export const updateCollectionPrice = async (req, res) => {
         ...(centerId !== undefined ? { centerId } : {}),
         ...(cityId !== undefined ? { cityId } : {}),
         ...(pincode !== undefined ? { pincode } : {}),
+        ...(minAmount !== undefined ? { minAmount } : {}), // ✅ NEW
         ...(price !== undefined ? { price } : {}),
         ...(isActive !== undefined && isActive !== null ? { isActive } : {}),
-        // updatedAt auto
       },
       include: {
         center: { select: { id: true, name: true } },
@@ -230,6 +263,14 @@ export const updateCollectionPrice = async (req, res) => {
     res.json({ success: true, message: "Updated", collectionPrice: updated });
   } catch (error) {
     console.error("Error updating collection price:", error);
+
+    if (error.code === "P2002") {
+      return res.status(409).json({
+        error: "Duplicate rule: a row already exists for the same centerId/cityId/pincode/minAmount slab.",
+        details: error.meta,
+      });
+    }
+
     res.status(500).json({ error: "Failed to update collection price" });
   }
 };
@@ -253,26 +294,37 @@ export const deleteCollectionPrice = async (req, res) => {
 };
 
 /* ---------------- RESOLVE best price ---------------- */
-// GET /api/collection-prices/resolve?centerId=1&cityId=2&pincode=560001
+// GET /api/collection-prices/resolve?centerId=1&cityId=2&pincode=560001&amount=850
 export const resolveCollectionPrice = async (req, res) => {
   try {
     const centerId = toInt(req.query.centerId);
     const cityId = toInt(req.query.cityId);
     const pincode = normalizePincode(req.query.pincode);
 
-    // at least one input is recommended, but not required because default exists
+    // ✅ NEW: amount used to pick best slab (aliases supported)
+    const amount = toNum(req.query.amount ?? req.query.orderAmount ?? req.query.minAmount ?? req.query.min);
+    const hasAmount = amount !== null && amount !== undefined;
+
+    if (hasAmount && amount < 0) {
+      return res.status(400).json({ error: "amount must be >= 0" });
+    }
+
     const conditions = buildResolveWhere({ centerId, cityId, pincode });
 
-    // We try in order and return first match
     for (const where of conditions) {
-      // remove undefined keys (Prisma doesn’t like undefined in nested where sometimes)
       const cleanWhere = Object.fromEntries(
         Object.entries(where).filter(([, v]) => v !== undefined)
       );
 
       const found = await prisma.collectionPrice.findFirst({
-        where: cleanWhere,
-        orderBy: { id: "desc" }, // latest rule wins
+        where: {
+          ...cleanWhere,
+          ...(hasAmount ? { minAmount: { lte: amount } } : {}),
+        },
+        orderBy: [
+          ...(hasAmount ? [{ minAmount: "desc" }] : []), // ✅ highest slab that fits
+          { id: "desc" }, // latest wins if same minAmount
+        ],
         include: {
           center: { select: { id: true, name: true } },
           city: { select: { id: true, name: true } },
@@ -280,14 +332,19 @@ export const resolveCollectionPrice = async (req, res) => {
       });
 
       if (found) {
-        return res.json({ success: true, matchType: cleanWhere, collectionPrice: found });
+        return res.json({
+          success: true,
+          matchType: cleanWhere,
+          ...(hasAmount ? { amountUsed: amount } : {}),
+          collectionPrice: found,
+        });
       }
     }
 
-    // no global default present
     return res.status(404).json({
       success: false,
-      error: "No collection price rule found. Add a global default (centerId=null, cityId=null, pincode=null).",
+      error:
+        "No collection price rule found. Add a global default (centerId=null, cityId=null, pincode=null, minAmount=0).",
     });
   } catch (error) {
     console.error("Error resolving collection price:", error);

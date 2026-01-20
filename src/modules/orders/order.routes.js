@@ -21,7 +21,9 @@ import {
   getOrdersExpiringSoon,
   getOrderResultsById,
   getOrdersByPatientIdTrack,
-  getOrdersByPatientIdCompleted
+  getOrdersByPatientIdCompleted,
+  fetchReportDue,
+  exportOrderReportsExcel
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
 import { authenticateUser } from "../../middlewares/auth.js";
@@ -41,10 +43,11 @@ router.post(
 router.get("/", getAllOrders);
 router.post("/create-admin",authenticateUser, createAdminOrder);
 router.get("/order-reports", getOrderReports);
+router.get("/order-reports/export", exportOrderReportsExcel);
 router.get("/expiring", getOrdersExpiringSoon);
 
 
-
+router.get("/due", fetchReportDue);
 router.get("/:id", getOrderById);
 router.get("/:id/tests",   getOrderResultsById);
 

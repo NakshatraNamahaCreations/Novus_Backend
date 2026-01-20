@@ -5,7 +5,8 @@ import {
   getAllESignatures,
   getESignatureById,
   updateESignature,
-  deleteESignature
+  deleteESignature,
+  getSignaturesByTest
 } from "./esignature.controller.js";
 
 const router = express.Router();
@@ -16,6 +17,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 // Routes
 router.post("/", upload.single("signatureImg"), createESignature);
 router.get("/", getAllESignatures);
+router.get("/by-test", getSignaturesByTest);
 router.get("/:id", getESignatureById);
 router.put("/:id", upload.single("signatureImg"), updateESignature);
 router.delete("/:id", deleteESignature);

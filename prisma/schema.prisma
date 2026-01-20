@@ -129,7 +129,7 @@ model CollectionPrice {
   pincode  String?
 
   price Float
-
+  minAmount      Float @default(299)
   isActive Boolean @default(true)
 
   createdById Int?
@@ -335,19 +335,19 @@ model Address {
 }
 
 model Category {
-  id            Int              @id @default(autoincrement())
-  imgUrl        String?
-  name          String
-  order         Int?
-  type          String?
-  bannerUrl     String?
-  createdById   Int? // ⭐ ADDED: Track who created the category
-  createdBy     User?            @relation(fields: [createdById], references: [id])
-  isPopular     Boolean          @default(false)
-  subCategories SubCategory[]
-  tests         Test[]
-  packages      HealthPackage[]
-  centers       CenterCategory[]
+  id                 Int                  @id @default(autoincrement())
+  imgUrl             String?
+  name               String
+  order              Int?
+  type               String?
+  bannerUrl          String?
+  createdById        Int? // ⭐ ADDED: Track who created the category
+  createdBy          User?                @relation(fields: [createdById], references: [id])
+  isPopular          Boolean              @default(false)
+  subCategories      SubCategory[]
+  tests              Test[]
+  packages           HealthPackage[]
+  centers            CenterCategory[]
   ESignatureCategory ESignatureCategory[]
 
   createdAt DateTime @default(now())
@@ -545,9 +545,10 @@ model Vendor {
   locationHistory VendorLocation[]
   reviews         VendorReview[]
   payments        Payment[]
-  devices VendorDevice[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  devices         VendorDevice[]
+   attendance VendorAttendance[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 }
 
 model VendorReview {
@@ -751,6 +752,8 @@ model Order {
   orderMembers  OrderMember[]
   payments      Payment[]
   couponUsages  CouponUsage[]
+   patientTestResults PatientTestResult[]
+
 }
 
 model Doctor {
@@ -793,24 +796,28 @@ model ESignature {
   signatureImg  String
   alignment     Alignment @default(LEFT)
 
+  patientTestResultsLeft   PatientTestResult[] @relation("PTR_LeftSig")
+  patientTestResultsCenter PatientTestResult[] @relation("PTR_CenterSig")
+  patientTestResultsRight  PatientTestResult[] @relation("PTR_RightSig")
+
   // ✅ categories via relation table
-  categories    ESignatureCategory[]
+  categories ESignatureCategory[]
 }
 
 model ESignatureCategory {
-  id          Int @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
   signatureId Int
   signature   ESignature @relation(fields: [signatureId], references: [id], onDelete: Cascade)
 
-  categoryId  Int
-  category    Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId Int
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   // ✅ default per category
-  isDefault   Boolean @default(false)
+  isDefault Boolean @default(false)
 
   @@unique([signatureId, categoryId])
-
+  
   @@index([categoryId])
   @@index([signatureId])
   @@index([isDefault])
@@ -827,17 +834,45 @@ model OrderMember {
   orderMemberPackages OrderMemberPackage[]
 }
 
+enum ReportDispatchStatus {
+  NOT_READY
+  READY
+  DISPATCHED
+  DELIVERED
+}
+
 model OrderMemberPackage {
-  id            Int  @id @default(autoincrement())
+  id Int @id @default(autoincrement())
+
   orderMemberId Int
-  packageId     Int?
-  testId        Int?
+  orderMember   OrderMember @relation(fields: [orderMemberId], references: [id], onDelete: Cascade)
 
-  orderMember OrderMember @relation(fields: [orderMemberId], references: [id], onDelete: Cascade)
+  packageId Int?
+  package   HealthPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
 
-  package HealthPackage? @relation(fields: [packageId], references: [id])
-  test    Test?          @relation(fields: [testId], references: [id])
+  testId Int?
+  test   Test? @relation(fields: [testId], references: [id], onDelete: SetNull)
 
+  // ✅ SLA snapshot (per patient + test/package)
+  reportWithin Int?
+  reportUnit   String?
+  reportDueAt  DateTime?
+
+  // ✅ dispatch tracking
+  dispatchStatus  ReportDispatchStatus @default(NOT_READY)
+  readyAt         DateTime?
+  dispatchedAt    DateTime?
+ 
+
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderMemberId])
+  @@index([packageId])
+  @@index([testId])
+  @@index([dispatchStatus])
+  @@index([reportDueAt])
   @@map("OrderMemberPackage")
 }
 
@@ -1280,12 +1315,24 @@ model PatientTestResult {
   createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
 
+    // ✅ Manual override signatures for THIS patient+test report (optional)
+  leftSignatureId   Int?
+  centerSignatureId Int?
+  rightSignatureId  Int?
+    leftSignature   ESignature? @relation("PTR_LeftSig", fields: [leftSignatureId], references: [id], onDelete: SetNull)
+  centerSignature ESignature? @relation("PTR_CenterSig", fields: [centerSignatureId], references: [id], onDelete: SetNull)
+  rightSignature  ESignature? @relation("PTR_RightSig", fields: [rightSignatureId], references: [id], onDelete: SetNull)
+  order   Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   patient          Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
   test             Test              @relation(fields: [testId], references: [id])
   parameterResults ParameterResult[]
+
+    @@index([orderId])
 }
 
 model ParameterResult {
@@ -1348,10 +1395,47 @@ model VendorDevice {
   id        Int      @id @default(autoincrement())
   vendorId  Int
   fcmToken  String   @unique
-  platform  String?  // android / ios / web
+  platform  String? // android / ios / web
   createdAt DateTime @default(now())
 
   vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
+  @@index([vendorId])
+}
+
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+}
+
+model VendorAttendance {
+  id Int @id @default(autoincrement())
+
+  vendorId Int
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  // ✅ date-only (one row per vendor per day)
+  day DateTime @db.Date
+
+  status AttendanceStatus @default(PRESENT)
+
+  // ✅ check-in only
+  checkInAt DateTime?
+  selfieUrl String?
+  selfieKey String? // ✅ store S3 key (needed to delete later)
+
+  lat Float?
+  lng Float?
+
+  // track deletion action (optional but helpful)
+  selfieDeletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([vendorId, day])
+  @@index([day])
   @@index([vendorId])
 }

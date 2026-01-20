@@ -108,6 +108,84 @@ export const createESignature = async (req, res) => {
   }
 };
 
+export const getSignaturesByTest = async (req, res) => {
+  try {
+    const testId = Number(req.query.testId);
+    if (!testId) {
+      return res.status(400).json({
+        success: false,
+        message: "testId is required",
+      });
+    }
+
+    // 1) find test + category
+    const test = await prisma.test.findUnique({
+      where: { id: testId },
+      select: { id: true, categoryId: true },
+    });
+
+    if (!test) {
+      return res.status(404).json({
+        success: false,
+        message: "Test not found",
+      });
+    }
+
+    const categoryId = test.categoryId;
+
+    // 2) get all signatures mapped to this category
+    const categoryRows = await prisma.eSignatureCategory.findMany({
+      where: { categoryId },
+      select: {
+        isDefault: true,
+        signature: {
+          select: {
+            id: true,
+            name: true,
+            designation: true,
+            qualification: true,
+            alignment: true,
+            signatureImg: true,
+          },
+        },
+      },
+      orderBy: [{ isDefault: "desc" }, { signatureId: "asc" }],
+    });
+
+    // flatten
+    const signatures = categoryRows.map((r) => ({
+      ...r.signature,
+      isDefault: r.isDefault,
+    }));
+
+    // 3) build defaults by alignment (LEFT/CENTER/RIGHT)
+    const defaults = { left: null, center: null, right: null };
+
+    for (const r of categoryRows) {
+      if (!r.isDefault) continue;
+      const a = String(r.signature.alignment || "").toUpperCase();
+
+      if (a === "LEFT" && !defaults.left) defaults.left = r.signature.id;
+      if (a === "CENTER" && !defaults.center) defaults.center = r.signature.id;
+      if (a === "RIGHT" && !defaults.right) defaults.right = r.signature.id;
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        categoryId,
+        defaults,
+        signatures,
+      },
+    });
+  } catch (err) {
+    console.error("getSignaturesByTest error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
 /* ----------------------------------------------------
    GET ALL E-SIGNATURES (NEW)
 ---------------------------------------------------- */

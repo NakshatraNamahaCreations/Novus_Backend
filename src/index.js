@@ -19,6 +19,8 @@ import spotlightRoutes from './modules/spotlight/spotlight.routes.js';
 import bannersRoutes from './modules/banners/banner.routes.js';  
 import vendorsRoutes from './modules/vendors/vendor.route.js'; 
 import vendorProfileRoutes from './modules/vendors/vendorProfile.routes.js';  
+import vvendorAttendanceRoutes from './modules/vendors/vendorAttendance.routes.js';  
+
 import usersRoutes from './modules/users/user.routes.js';  
 import centersRoutes from './modules/centers/center.routes.js'; 
 import addressRoutes from './modules/address/address.routes.js';  
@@ -105,6 +107,10 @@ app.use('/api/spotlights', spotlightRoutes);
 app.use('/api/banners', bannersRoutes);
 app.use('/api/vendors', vendorsRoutes);
 app.use('/api/vendor-profile', vendorProfileRoutes);
+
+app.use('/api/vendor-attendance', vvendorAttendanceRoutes);
+
+
 app.use('/api/users', usersRoutes);
 app.use('/api/centers', centersRoutes);
 app.use('/api/address', addressRoutes);

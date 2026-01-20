@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "CollectionPrice" ADD COLUMN     "min" DOUBLE PRECISION NOT NULL DEFAULT 299;
