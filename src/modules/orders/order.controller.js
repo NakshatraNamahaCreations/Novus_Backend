@@ -351,31 +351,39 @@ if (isNaN(orderDate.getTime())) {
     const testMap = new Map(tests.map((t) => [t.id, t]));
     const pkgMap = new Map(packages.map((p) => [p.id, p]));
 
-    for (const t of tests) {
-      const unit = normalizeUnit(t.reportUnit);
-      const dueAt = computeDueAt(orderDate, t.reportWithin, unit);
-      if (dueAt && dueAt <= now) {
-        return res.status(400).json({
-          success: false,
-          error: `Cannot create order: SLA already over for test "${t.name}"`,
-          testId: t.id,
-          reportDueAt: dueAt,
-        });
-      }
-    }
+    // for (const t of tests) {
+    //   const unit = normalizeUnit(t.reportUnit);
+    //   const dueAt = computeDueAt(orderDate, t.reportWithin, unit);
 
-    for (const p of packages) {
-      const unit = normalizeUnit(p.reportUnit);
-      const dueAt = computeDueAt(orderDate, p.reportWithin, unit);
-      if (dueAt && dueAt <= now) {
-        return res.status(400).json({
-          success: false,
-          error: `Cannot create order: SLA already over for package "${p.name}"`,
-          packageId: p.id,
-          reportDueAt: dueAt,
-        });
-      }
-    }
+    //   console.log("dueAt",dueAt)
+    //   console.log("now",now)
+    //   console.log("dueAt <= now",dueAt <= now)
+
+    //   if (dueAt && dueAt <= now) {
+    //     return res.status(400).json({
+    //       success: false,
+    //       error: `Cannot create order: SLA already over for test "${t.name}"`,
+    //       testId: t.id,
+    //       reportDueAt: dueAt,
+    //     });
+    //   }
+    // }
+
+    // for (const p of packages) {
+    //   const unit = normalizeUnit(p.reportUnit);
+    //   const dueAt = computeDueAt(orderDate, p.reportWithin, unit);
+
+    //         console.log("unit",unit)
+    //   console.log("dueAt",dueAt)
+    //   if (dueAt && dueAt <= now) {
+    //     return res.status(400).json({
+    //       success: false,
+    //       error: `Cannot create order: SLA already over for package "${p.name}"`,
+    //       packageId: p.id,
+    //       reportDueAt: dueAt,
+    //     });
+    //   }
+    // }
 
     /* 🔐 LOCK KEY */
     const lockKey = isHomeSample
@@ -745,30 +753,34 @@ export const createAdminOrder = async (req, res) => {
     const testMap = new Map(tests.map((t) => [t.id, t]));
     const pkgMap = new Map(packages.map((p) => [p.id, p]));
 
-    for (const t of tests) {
-      const unit = normalizeUnit(t.reportUnit);
-      const dueAt = computeDueAt(orderDate, t.reportWithin, unit);
-      if (dueAt && dueAt <= now) {
-        return res.status(400).json({
-          success: false,
-          message: `Cannot create order: SLA already over for test "${t.name}"`,
-          testId: t.id,
-          reportDueAt: dueAt,
-        });
-      }
-    }
-    for (const p of packages) {
-      const unit = normalizeUnit(p.reportUnit);
-      const dueAt = computeDueAt(orderDate, p.reportWithin, unit);
-      if (dueAt && dueAt <= now) {
-        return res.status(400).json({
-          success: false,
-          message: `Cannot create order: SLA already over for package "${p.name}"`,
-          packageId: p.id,
-          reportDueAt: dueAt,
-        });
-      }
-    }
+//     for (const t of tests) {
+//       const unit = normalizeUnit(t.reportUnit);
+//       const dueAt = computeDueAt(orderDate, t.reportWithin, unit);
+// console.log("unit",unit)
+//             console.log("dueAt",dueAt)
+//       console.log("now",now)
+//       console.log("dueAt <= now",dueAt <= now)
+//       if (dueAt && dueAt <= now) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `Cannot create order: SLA already over for test "${t.name}"`,
+//           testId: t.id,
+//           reportDueAt: dueAt,
+//         });
+//       }
+//     }
+//     for (const p of packages) {
+//       const unit = normalizeUnit(p.reportUnit);
+//       const dueAt = computeDueAt(orderDate, p.reportWithin, unit);
+//       if (dueAt && dueAt <= now) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `Cannot create order: SLA already over for package "${p.name}"`,
+//           packageId: p.id,
+//           reportDueAt: dueAt,
+//         });
+//       }
+//     }
 
     /* -------------------- build create data -------------------- */
     const dataToCreate = {

@@ -78,46 +78,53 @@ export const phonePeCallback = async (req, res) => {
   try {
     const { orderId, patientId, refOrderId } = req.query;
 
-    console.log(req.query)
+    console.log("rderId, patientId, refOrderId ",orderId, patientId, refOrderId )
 
-    if (!orderId || !patientId) {
+    if (!orderId || !patientId || !refOrderId) {
       return res.status(400).send("Invalid callback params");
     }
 
-    // ✅ VERIFY USING SDK
+    // ✅ VERIFY PAYMENT USING SDK
     const statusResp = await phonepeClient
       .getClient()
       .getOrderStatus(orderId);
 
-      console.log("statusResp",statusResp)
+    console.log("statusResp", statusResp);
+
     if (statusResp.state !== "COMPLETED") {
-     
       return res.redirect(`${process.env.FRONTEND_URL}/payment-failed`);
     }
-const phonePeMethod = statusResp.paymentDetails?.[0]?.paymentMode;
 
+    const amount = statusResp.amount / 100;
 
+    // ✅ DB TRANSACTION (important to avoid partial updates)
+    await prisma.$transaction(async (tx) => {
+      // 1️⃣ Create payment record
+      await tx.payment.create({
+        data: {
+          amount,
+          paymentMode: "ONLINE",
+          paymentId: refOrderId,
+          paymentMethod: "UPI",
+          paymentStatus: "COMPLETED", // or PAID if enum allows
+          order: {
+            connect: { id: Number(refOrderId) },
+          },
+          patient: {
+            connect: { id: Number(patientId) },
+          },
+        },
+      });
 
-await prisma.payment.create({
-  data: {
-    amount: statusResp.amount / 100,
-    paymentMode:"ONLINE",
-    paymentId: refOrderId,
-  
-    paymentMethod: "UPI",
- 
-    paymentStatus: statusResp.state,
-
-    order: {
-      connect: { id: Number(refOrderId) }
-    },
-    patient: {
-      connect: { id: Number(patientId) }
-    }
-  }
-});
-
-   
+      // 2️⃣ Update order payment status
+      await tx.order.update({
+        where: { id: Number(refOrderId) },
+        data: {
+          paymentStatus: "paid", // ✅ or "PAID" based on your enum
+        
+        },
+      });
+    });
 
     return res.redirect(`${process.env.FRONTEND_URL}/payment-success`);
   } catch (err) {
@@ -125,6 +132,7 @@ await prisma.payment.create({
     return res.status(500).send("Payment verification failed");
   }
 };
+
 
 // 🚀 Verify Payment Status
 export const verifyPhonePePayment = async (req, res) => {

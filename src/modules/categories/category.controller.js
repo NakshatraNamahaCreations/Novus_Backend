@@ -78,7 +78,8 @@ export const getCategoryById = async (req, res) => {
 export const updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, type, order, isPopular } = req.body;
+    const { name, type, order, isPopular, removeBanner, removeImage } =
+      req.body;
 
     const existingCategory = await prisma.category.findUnique({
       where: { id: Number(id) },
@@ -92,6 +93,22 @@ export const updateCategory = async (req, res) => {
 
     const imageFile = req.files?.image?.[0];
     const bannerFile = req.files?.banner?.[0];
+
+    const shouldRemoveImage = removeImage === "true" || removeImage === true;
+    const shouldRemoveBanner = removeBanner === "true" || removeBanner === true;
+
+    // ✅ remove banner (only if no new banner uploaded)
+    if (shouldRemoveBanner && !bannerFile) {
+      if (existingCategory.bannerUrl)
+        await deleteFromS3(existingCategory.bannerUrl);
+      bannerUrl = null;
+    }
+
+    // ✅ remove image (only if no new image uploaded)
+    if (shouldRemoveImage && !imageFile) {
+      if (existingCategory.imgUrl) await deleteFromS3(existingCategory.imgUrl);
+      imgUrl = null;
+    }
 
     // ✅ replace category image
     if (imageFile) {
@@ -129,27 +146,113 @@ export const updateCategory = async (req, res) => {
 };
 
 // ✅ DELETE
+// ✅ DELETE (safe + user-friendly)
 export const deleteCategory = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = Number(req.params.id);
+    console.log("id", id);
 
+    if (!Number.isFinite(id)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid category id" });
+    }
+
+    // 1) find category + usage counts
     const existingCategory = await prisma.category.findUnique({
-      where: { id: Number(id) },
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        imgUrl: true,
+        bannerUrl: true,
+        _count: {
+          select: {
+            subCategories: true,
+            tests: true,
+            packages: true,
+            centers: true,
+            ESignatureCategory: true,
+          },
+        },
+      },
     });
 
-    if (!existingCategory)
-      return res.status(404).json({ error: "Category not found" });
+    if (!existingCategory) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Category not found" });
+    }
 
-    if (existingCategory.imgUrl) await deleteFromS3(existingCategory.imgUrl);
-    if (existingCategory.bannerUrl)
-      await deleteFromS3(existingCategory.bannerUrl);
+    const usage = [
+      {
+        key: "subCategories",
+        label: "Sub Categories",
+        count: existingCategory._count.subCategories,
+      },
+      { key: "tests", label: "Tests", count: existingCategory._count.tests },
+      {
+        key: "packages",
+        label: "Packages",
+        count: existingCategory._count.packages,
+      },
+      {
+        key: "centers",
+        label: "Center Mappings",
+        count: existingCategory._count.centers,
+      },
+      {
+        key: "ESignatureCategory",
+        label: "E-Signature Mappings",
+        count: existingCategory._count.ESignatureCategory,
+      },
+    ].filter((x) => x.count > 0);
 
-    await prisma.category.delete({ where: { id: Number(id) } });
+    // 2) block delete if used anywhere
+    if (usage.length > 0) {
+      const details = usage.map((u) => `${u.label} (${u.count})`).join(", ");
+      return res.status(409).json({
+        success: false,
+        code: "CATEGORY_IN_USE",
+        message: `Cannot delete "${existingCategory.name}". It is already used in: ${details}.`,
+        usage,
+      });
+    }
 
-    res.json({ message: "Category deleted successfully" });
+    // 3) delete DB first (prevents deleting S3 when FK fails)
+    await prisma.category.delete({ where: { id } });
+    console.log("db deleted");
+
+    // 4) delete S3 images best-effort (don’t fail delete if S3 fails)
+    try {
+      if (existingCategory.imgUrl) await deleteFromS3(existingCategory.imgUrl);
+      if (existingCategory.bannerUrl)
+        await deleteFromS3(existingCategory.bannerUrl);
+    } catch (s3Err) {
+      console.error("S3 delete failed (ignored):", s3Err);
+    }
+
+    return res.json({
+      success: true,
+      message: "Category deleted successfully",
+    });
   } catch (error) {
     console.error("Error deleting category:", error);
-    res.status(500).json({ error: "Failed to delete category" });
+
+    // If something else still references it (fallback)
+    if (error?.code === "P2003") {
+      return res.status(409).json({
+        success: false,
+        code: "CATEGORY_IN_USE",
+        message:
+          "Cannot delete category because it is referenced in other records.",
+        meta: error.meta,
+      });
+    }
+
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to delete category" });
   }
 };
 
@@ -177,7 +280,7 @@ export const getBasedOnTestType = async (req, res) => {
   try {
     const { type, limit = 50 } = req.query;
     const where = {};
-    if (type) where.type = type; 
+    if (type) where.type = type;
 
     const categories = await prisma.category.findMany({
       where,

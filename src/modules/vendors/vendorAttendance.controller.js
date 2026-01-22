@@ -14,8 +14,14 @@ const IST = "Asia/Kolkata";
    ✅ Helpers
 ----------------------------- */
 
-// Date object at IST start-of-day (safe for Prisma DateTime/@db.Date)
-const istDayStart = (d = new Date()) => dayjs(d).tz(IST).startOf("day").toDate();
+// ✅ IMPORTANT FIX:
+// Your DB `day` column is Postgres `date` (no time).
+// To store the correct IST calendar date in a `date` column,
+// always store it as UTC-midnight of the IST date.
+const istDateForDbDateColumn = (d = new Date()) => {
+  const t = dayjs(d).tz(IST);
+  return new Date(Date.UTC(t.year(), t.month(), t.date())); // 00:00:00Z
+};
 
 // String (only for S3 key naming)
 const istDayKey = (d = new Date()) => dayjs(d).tz(IST).format("YYYY-MM-DD");
@@ -31,6 +37,23 @@ const toNumOrNull = (v) => {
   if (v === undefined || v === null || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+};
+
+// ✅ Month range (for DB `date` column) using IST calendar month boundaries
+// Stored as UTC-midnight dates, end is exclusive
+const istMonthRangeForDbDateColumn = (year, month) => {
+  const startTz = dayjs.tz(
+    `${year}-${String(month).padStart(2, "0")}-01`,
+    IST
+  );
+  const start = new Date(
+    Date.UTC(startTz.year(), startTz.month(), startTz.date())
+  );
+
+  const endTz = startTz.add(1, "month");
+  const end = new Date(Date.UTC(endTz.year(), endTz.month(), endTz.date()));
+
+  return { start, end };
 };
 
 /* ==========================================================
@@ -53,7 +76,9 @@ export const vendorCheckIn = async (req, res) => {
     }
 
     const now = new Date();
-    const day = istDayStart(now); // ✅ Date object (NOT string)
+
+    // ✅ FIX: correct day storage for Postgres `date`
+    const day = istDateForDbDateColumn(now);
 
     // ✅ block multiple check-in same day
     const existing = await prisma.vendorAttendance.findUnique({
@@ -131,21 +156,21 @@ export const vendorMonthlyAttendance = async (req, res) => {
     const year = Number(req.query.year);
     const month = Number(req.query.month); // 1..12
 
-    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    if (
+      !Number.isFinite(year) ||
+      !Number.isFinite(month) ||
+      month < 1 ||
+      month > 12
+    ) {
       return res.status(400).json({
         success: false,
         message: "Valid year and month (1..12) required",
       });
     }
 
-    const start = dayjs
-      .tz(`${year}-${String(month).padStart(2, "0")}-01`, IST)
-      .startOf("month")
-      .toDate();
+    // ✅ FIX: month boundaries that match how `day` is stored
+    const { start, end } = istMonthRangeForDbDateColumn(year, month);
 
-    const end = dayjs(start).add(1, "month").toDate();
-
-    // ✅ get all present days rows
     const presentRows = await prisma.vendorAttendance.findMany({
       where: {
         vendorId,
@@ -164,16 +189,24 @@ export const vendorMonthlyAttendance = async (req, res) => {
       orderBy: { day: "asc" },
     });
 
-    // ✅ count
     const presentDays = presentRows.length;
 
-    // ✅ format for UI
     const presentDaysList = presentRows.map((r) => ({
       id: r.id,
-      day: r.day, // Date
-      dayIST: dayjs(r.day).tz(IST).format("YYYY-MM-DD"),
+      day: r.day,
+
+      // ✅ show correct IST day for UI
+      // - prefer checkInAt (actual timestamp)
+      // - fallback to stored day (stored as UTC midnight already)
+      dayIST: r.checkInAt
+        ? dayjs(r.checkInAt).tz(IST).format("YYYY-MM-DD")
+        : dayjs(r.day).utc().format("YYYY-MM-DD"),
+
       checkInAt: r.checkInAt,
-      checkInAtIST: r.checkInAt ? dayjs(r.checkInAt).tz(IST).format("YYYY-MM-DD hh:mm A") : null,
+      checkInAtIST: r.checkInAt
+        ? dayjs(r.checkInAt).tz(IST).format("YYYY-MM-DD hh:mm A")
+        : null,
+
       status: r.status,
       selfieUrl: r.selfieUrl,
       lat: r.lat,
@@ -186,7 +219,7 @@ export const vendorMonthlyAttendance = async (req, res) => {
       year,
       month,
       presentDays,
-      presentDaysList, // ✅ full object list
+      presentDaysList,
     });
   } catch (err) {
     console.error("vendorMonthlyAttendance error:", err);
@@ -197,10 +230,8 @@ export const vendorMonthlyAttendance = async (req, res) => {
   }
 };
 
-
 /* ==========================================================
    ✅ GET /vendors/attendance/today
-   show today's attendance row (optional, useful for UI)
 ========================================================== */
 export const vendorTodayAttendance = async (req, res) => {
   try {
@@ -209,7 +240,8 @@ export const vendorTodayAttendance = async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    const day = istDayStart(new Date());
+    // ✅ FIX: day must be computed the same way as stored
+    const day = istDateForDbDateColumn(new Date());
 
     const row = await prisma.vendorAttendance.findUnique({
       where: { vendorId_day: { vendorId, day } },
@@ -222,25 +254,33 @@ export const vendorTodayAttendance = async (req, res) => {
   }
 };
 
+/* ==========================================================
+   ✅ GET /admin/vendors/:vendorId/attendance/monthly?year=2026&month=1
+========================================================== */
 export const adminVendorMonthlyAttendance = async (req, res) => {
   try {
     const vendorId = Number(req.params.vendorId || req.query.vendorId);
     const year = Number(req.query.year);
-    const month = Number(req.query.month); // 1..12
+    const month = Number(req.query.month);
 
     if (!vendorId) {
-      return res.status(400).json({ success: false, message: "vendorId required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "vendorId required" });
     }
-    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
-      return res.status(400).json({ success: false, message: "Valid year and month required" });
+    if (
+      !Number.isFinite(year) ||
+      !Number.isFinite(month) ||
+      month < 1 ||
+      month > 12
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Valid year and month required" });
     }
 
-    const start = dayjs
-      .tz(`${year}-${String(month).padStart(2, "0")}-01`, IST)
-      .startOf("month")
-      .toDate();
-
-    const end = dayjs(start).add(1, "month").toDate();
+    // ✅ FIX: month boundaries that match how `day` is stored
+    const { start, end } = istMonthRangeForDbDateColumn(year, month);
 
     const rows = await prisma.vendorAttendance.findMany({
       where: {
@@ -269,9 +309,16 @@ export const adminVendorMonthlyAttendance = async (req, res) => {
       presentDaysList: rows.map((r) => ({
         id: r.id,
         day: r.day,
-        dayIST: dayjs(r.day).tz(IST).format("YYYY-MM-DD"),
+
+        // ✅ FIX: admin API should also show correct IST date
+        dayIST: r.checkInAt
+          ? dayjs(r.checkInAt).tz(IST).format("YYYY-MM-DD")
+          : dayjs(r.day).utc().format("YYYY-MM-DD"),
+
         checkInAt: r.checkInAt,
-        checkInAtIST: r.checkInAt ? dayjs(r.checkInAt).tz(IST).format("YYYY-MM-DD hh:mm A") : null,
+        checkInAtIST: r.checkInAt
+          ? dayjs(r.checkInAt).tz(IST).format("YYYY-MM-DD hh:mm A")
+          : null,
         status: r.status,
         selfieUrl: r.selfieUrl,
         lat: r.lat,
@@ -283,4 +330,3 @@ export const adminVendorMonthlyAttendance = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
-

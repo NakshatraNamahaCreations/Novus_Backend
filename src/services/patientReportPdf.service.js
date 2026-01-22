@@ -1,3 +1,4 @@
+// generatePatient3Pdfs.js
 import puppeteer from "puppeteer";
 import { PDFDocument } from "pdf-lib";
 import { PrismaClient } from "@prisma/client";
@@ -11,28 +12,46 @@ const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
 
 /* -----------------------------
-   ✅ Helper: render HTML -> PDF
+✅ Helper: render HTML -> PDF
 ----------------------------- */
 async function renderPdfFromHtml(browser, html, pdfOptions = {}) {
   const page = await browser.newPage();
-  await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 1 });
-  await page.setContent(html, { waitUntil: "networkidle0" });
-
+  
+  // Set better viewport for A4
+  await page.setViewport({ 
+    width: 1240, 
+    height: 1754, 
+    deviceScaleFactor: 2 
+  });
+  
+  await page.setContent(html, { 
+    waitUntil: ["networkidle0", "domcontentloaded"] 
+  });
+  
+  // Wait for fonts to load
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  
   const pdf = await page.pdf({
     format: "A4",
     printBackground: true,
     preferCSSPageSize: true,
-    margin: { top: 0, right: 0, bottom: 0, left: 0 },
-    scale: 0.98,
-    ...pdfOptions,
+    margin: { top: "0.5cm", right: "0.5cm", bottom: "0.5cm", left: "0.5cm" },
+    scale: 1,
+    ...pdfOptions, // ✅ DO NOT pass pageRanges here for main content
   });
 
   await page.close();
   return pdf;
 }
 
+async function renderSinglePagePdfFromHtml(browser, html) {
+  return renderPdfFromHtml(browser, html, { pageRanges: "1" }); // ✅ only here
+}
+
 /* -----------------------------
-   ✅ Utils
+✅ Utils
 ----------------------------- */
 function calculateAge(dob) {
   if (!dob) return "N/A";
@@ -66,8 +85,34 @@ function formatShortDate(d) {
   }
 }
 
+function getFlagKind(flag) {
+  const f = safeTrim(flag).toLowerCase();
+  if (!f || f === "normal") return "normal";
+  if (f.includes("high")) return "high";
+  if (f.includes("low")) return "low";
+  if (f.includes("critical")) {
+    if (f.includes("high")) return "high";
+    if (f.includes("low")) return "low";
+    return "high";
+  }
+  return "normal";
+}
+
+function renderResultWithArrow(valueText, flag) {
+  const kind = getFlagKind(flag);
+  const arrowClass = kind === "high" ? "red" : 
+                    kind === "low" ? "green" : "";
+  
+  if (kind === "high") 
+    return `${escapeHtml(valueText)} <span class="arrow ${arrowClass}">↑</span>`;
+  if (kind === "low") 
+    return `${escapeHtml(valueText)} <span class="arrow ${arrowClass}">↓</span>`;
+  
+  return `${escapeHtml(valueText)}`;
+}
+
 function formatValueWithUnit(value, unit) {
-  const v = value == null ? "—" : String(value);
+  const v = value == null || String(value).trim() === "" ? "—" : String(value);
   const u = safeTrim(unit);
   if (!u || v === "—") return v;
   return `${v} ${u}`;
@@ -82,9 +127,6 @@ function formatRangeWithUnit(rangeText, unit) {
   return `${rt} ${u}`;
 }
 
-/**
- * ✅ Fix: Reference Range not coming
- */
 function getReferenceRangeText(pr) {
   const direct =
     pr.normalRangeText ??
@@ -110,16 +152,9 @@ function getReferenceRangeText(pr) {
   if (safeTrim(rr)) return safeTrim(rr);
 
   const lower =
-    pr.lowerLimit ??
-    pr.parameter?.ranges?.[0]?.lowerLimit ??
-    pr.parameter?.lowerLimit ??
-    null;
-
+    pr.lowerLimit ?? pr.parameter?.ranges?.[0]?.lowerLimit ?? pr.parameter?.lowerLimit ?? null;
   const upper =
-    pr.upperLimit ??
-    pr.parameter?.ranges?.[0]?.upperLimit ??
-    pr.parameter?.upperLimit ??
-    null;
+    pr.upperLimit ?? pr.parameter?.ranges?.[0]?.upperLimit ?? pr.parameter?.upperLimit ?? null;
 
   const hasLower = lower !== null && lower !== undefined && String(lower) !== "";
   const hasUpper = upper !== null && upper !== undefined && String(upper) !== "";
@@ -131,8 +166,91 @@ function getReferenceRangeText(pr) {
   return "";
 }
 
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function getRefDoctorDisplay(order) {
+  const d = order?.doctor;
+  if (!d) return "N/A";
+  if (typeof d === "string") return safeTrim(d) || "N/A";
+  return (
+    safeTrim(d.name || d.fullName || d.doctorName || d.displayName || d.title || "") || "N/A"
+  );
+}
+
 /* -------------------------------------------------------
-   ✅ Image optimization (BIGGEST pdf size reducer)
+✅ Radiology splitter
+-------------------------------------------------------- */
+function splitRadiologyHtmlIntoPages(reportHtml, maxChars = 3200, minChars = 1400) {
+  const html = safeTrim(reportHtml);
+  if (!html) return [""];
+
+  let normalized = html
+    .replace(/\r/g, "")
+    .replace(/<br\s*\/?>/gi, "<br/>\n")
+    .replace(/<\/p>/gi, "</p>\n")
+    .replace(/<\/div>/gi, "</div>\n")
+    .replace(/<\/li>/gi, "</li>\n")
+    .replace(/<\/tr>/gi, "</tr>\n")
+    .replace(/<strong>/gi, "\n<strong>")
+    .replace(/<b>/gi, "\n<b>");
+
+  const lines = normalized
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const pages = [];
+  let buf = "";
+
+  for (const line of lines) {
+    if (line.length > maxChars) {
+      if (buf) pages.push(buf);
+      pages.push(line);
+      buf = "";
+      continue;
+    }
+
+    if ((buf + "\n" + line).length > maxChars) {
+      if (buf) pages.push(buf);
+      buf = line;
+    } else {
+      buf = buf ? buf + "\n" + line : line;
+    }
+  }
+  if (buf) pages.push(buf);
+
+  const merged = [];
+  for (let i = 0; i < pages.length; i++) {
+    const cur = pages[i];
+    const next = pages[i + 1];
+
+    if (cur && cur.length < minChars && next) {
+      pages[i + 1] = cur + "\n" + next;
+    } else if (cur) {
+      merged.push(cur);
+    }
+  }
+
+  if (merged.length >= 2) {
+    const last = merged[merged.length - 1];
+    if (last.length < minChars) {
+      merged[merged.length - 2] = merged[merged.length - 2] + "\n" + last;
+      merged.pop();
+    }
+  }
+
+  return merged.length ? merged : [html];
+}
+
+/* -------------------------------------------------------
+✅ Image optimization
 -------------------------------------------------------- */
 const _imgCache = new Map();
 
@@ -153,6 +271,7 @@ async function optimizeImageToDataUrl(url, opts) {
     const _fetch = await getFetch();
     const res = await _fetch(u);
     if (!res.ok) throw new Error(`fetch failed ${res.status}`);
+
     const ab = await res.arrayBuffer();
     const inputBuf = Buffer.from(ab);
 
@@ -163,7 +282,6 @@ async function optimizeImageToDataUrl(url, opts) {
       sharpMod = null;
     }
 
-    // ✅ if sharp not installed, return original URL
     if (!sharpMod?.default) {
       _imgCache.set(key, u);
       return u;
@@ -184,7 +302,6 @@ async function optimizeImageToDataUrl(url, opts) {
 
     const out = await pipeline.jpeg({ quality, mozjpeg: true }).toBuffer();
     const dataUrl = `data:image/jpeg;base64,${out.toString("base64")}`;
-
     _imgCache.set(key, dataUrl);
     return dataUrl;
   } catch {
@@ -194,14 +311,13 @@ async function optimizeImageToDataUrl(url, opts) {
 }
 
 /* -------------------------------------------------------
-   ✅ PDF post-compress using Ghostscript
+✅ PDF post-compress using Ghostscript
 -------------------------------------------------------- */
 async function compressPdfBuffer(inputBuffer, preset = "/ebook") {
   try {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdf-"));
     const inPath = path.join(tmpDir, "in.pdf");
     const outPath = path.join(tmpDir, "out.pdf");
-
     await fs.writeFile(inPath, inputBuffer);
 
     await execFileAsync("gs", [
@@ -226,7 +342,7 @@ async function compressPdfBuffer(inputBuffer, preset = "/ebook") {
 }
 
 /* -------------------------------------------------------
-   Trend data: last 3 previous reports per test
+Trend map
 -------------------------------------------------------- */
 async function buildTrendMap({ results, patientId }) {
   const trendMap = new Map();
@@ -280,26 +396,40 @@ function hasAnyTrendsForTest(trendMap, testId, parameterResults) {
 
   for (const pr of parameterResults) {
     const arr = trendMap.get(`${testId}:${pr.parameterId}`) || [];
-    if (arr.some((item) => item.value && safeTrim(item.value) !== "" && safeTrim(item.value) !== "—")) {
+    if (arr.some((item) => safeTrim(item.value) && safeTrim(item.value) !== "—")) {
       return true;
     }
   }
   return false;
 }
 
-function getRefDoctorDisplay(order) {
-  const d = order?.doctor;
-  if (!d) return "N/A";
-  if (typeof d === "string") return safeTrim(d) || "N/A";
-  return safeTrim(d.name || d.fullName || d.doctorName || d.displayName || "") || "N/A";
+/* -------------------------------------------------------
+✅ Signatures
+-------------------------------------------------------- */
+function renderSigCell(sig, pos /* "left"|"center"|"right" */) {
+  const name = sig ? safeTrim(sig.name) : "";
+  const desig = sig ? safeTrim(sig.designation) || safeTrim(sig.qualification) : "";
+  const img = sig?.signatureImg ? `<img class="sig-img" src="${sig.signatureImg}" alt="signature" />` : "";
+
+  return `
+    <div class="sig-cell ${pos}">
+      <div class="sig-img-wrap">${img}</div>
+      <div class="sig-name">${escapeHtml(name || " ")}</div>
+      <div class="sig-desig">${escapeHtml(desig || " ")}</div>
+    </div>
+  `;
+}
+
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < (arr?.length || 0); i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
 /* -------------------------------------------------------
-   ✅ Default signatures by Category (fallback)
-   - if manual signature missing -> use category default by alignment
+✅ Default signatures by Category
 -------------------------------------------------------- */
 async function getDefaultSignaturesByCategory(categoryIds = []) {
-  console.log("categoryIds",categoryIds)
   const ids = [...new Set(categoryIds.map(Number))].filter(Boolean);
   if (!ids.length) return new Map();
 
@@ -313,15 +443,13 @@ async function getDefaultSignaturesByCategory(categoryIds = []) {
           designation: true,
           qualification: true,
           signatureImg: true,
-          alignment: true, // LEFT/CENTER/RIGHT
+          alignment: true,
         },
       },
     },
   });
 
-  console.log("rows",rows)
-
-  const map = new Map(); // categoryId -> { LEFT, CENTER, RIGHT }
+  const map = new Map();
   for (const row of rows) {
     const cid = row.categoryId;
     if (!map.has(cid)) map.set(cid, { LEFT: null, CENTER: null, RIGHT: null });
@@ -332,7 +460,6 @@ async function getDefaultSignaturesByCategory(categoryIds = []) {
     const bucket = map.get(cid);
     const a = String(sig.alignment || "").toUpperCase();
 
-    // first wins (so you can keep only one default per alignment)
     if (a === "LEFT" && !bucket.LEFT) bucket.LEFT = sig;
     else if (a === "CENTER" && !bucket.CENTER) bucket.CENTER = sig;
     else if (a === "RIGHT" && !bucket.RIGHT) bucket.RIGHT = sig;
@@ -342,48 +469,434 @@ async function getDefaultSignaturesByCategory(categoryIds = []) {
 }
 
 /* -------------------------------------------------------
-   ✅ Signature render helpers (proper alignment + fixed at bottom)
+✅ CSS
+✅ IMPROVED: Better fonts, spacing, and visual design
 -------------------------------------------------------- */
-function renderSigBlock(sig, pos /* "left"|"center"|"right" */) {
-  const posCls = pos === "center" ? "center" : pos === "right" ? "right" : "left";
-
-  const name = sig ? safeTrim(sig.name) : "";
-  const desig = sig ? safeTrim(sig.designation) || safeTrim(sig.qualification) : "";
-
-  const img = sig?.signatureImg
-    ? `<img class="sig-img" src="${sig.signatureImg}" />`
-    : `<span class="sig-line"></span>`;
-
+function buildCss({ headerH = 120, footerH = 70, sigH = 90, fontPx = 11.5 } = {}) {
   return `
-    <div class="sig ${posCls}">
-      <div class="sig-inner">
-        ${sig ? img : `<span class="sig-line"></span>`}
-        <div class="sig-name">${name || "&nbsp;"}</div>
-        <div class="sig-desig">${desig || "&nbsp;"}</div>
-      </div>
-    </div>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    @page { 
+      size: A4; 
+      margin: 0; 
+    }
+    
+    html, body { 
+      margin: 0; 
+      padding: 0; 
+      width: 100%; 
+      height: 100%; 
+    }
+    
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      font-size: ${fontPx}px;
+      color: #1a1a1a;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    :root {
+      --header-h: ${headerH}px;
+      --footer-h: ${footerH}px;
+      --sig-h: ${sigH}px;
+      --primary-color: #1a56db;
+      --secondary-color: #6b7280;
+      --border-color: #e5e7eb;
+      --light-bg: #f9fafb;
+      --danger-color: #dc2626;
+      --success-color: #059669;
+    }
+
+    .header, .footer {
+      position: fixed;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      background: white;
+    }
+    .header { 
+      top: 0; 
+      height: var(--header-h);
+      border-bottom: 1px solid var(--border-color);
+    }
+    .footer { 
+      bottom: 0; 
+      height: var(--footer-h);
+      border-top: 1px solid var(--border-color);
+    }
+
+    .header img, .footer img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      display: block;
+    }
+    .header.blank, .footer.blank { 
+      background: transparent;
+      border: none;
+    }
+
+    .page {
+      position: relative;
+      width: 210mm;
+      min-height: 297mm;
+      box-sizing: border-box;
+      padding-top: calc(var(--header-h) + 15px);
+      padding-left: 20px;
+      padding-right: 20px;
+      padding-bottom: calc(var(--footer-h) + var(--sig-h) + 15px);
+      page-break-after: always;
+      break-after: page;
+      background: white;
+    }
+
+    .title {
+      font-size: 20px;
+      font-weight: 700;
+      text-align: center;
+      margin: 0 0 10px 0;
+      color: var(--primary-color);
+      letter-spacing: -0.5px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--primary-color);
+    }
+
+    .patient-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+      padding: 12px 15px;
+      background: var(--light-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 11.5px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    .patient-strip .col {
+      min-width: 0;
+    }
+    
+    .patient-strip .row {
+      display: flex;
+      justify-content: space-between;
+      margin: 4px 0;
+      align-items: center;
+    }
+    
+    .patient-strip b {
+      font-weight: 600;
+      color: var(--secondary-color);
+      min-width: 80px;
+    }
+    
+    .patient-strip .value {
+      font-weight: 500;
+      color: #1a1a1a;
+      text-align: right;
+      flex: 1;
+    }
+
+    .test-name {
+      margin: 15px 0 12px;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--primary-color);
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    th {
+      background: var(--light-bg);
+      padding: 10px 8px;
+      font-weight: 600;
+      text-align: left;
+      color: var(--primary-color);
+      border-bottom: 2px solid var(--border-color);
+      font-size: 11.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    td {
+      padding: 9px 8px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 11.5px;
+      vertical-align: middle;
+    }
+    
+    tr:last-child td {
+      border-bottom: none;
+    }
+    
+    tr:hover td {
+      background: #f8fafc;
+    }
+
+    .parameter-name {
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 2px;
+    }
+    
+    .method {
+      color: var(--secondary-color);
+      font-size: 10.5px;
+      font-weight: 400;
+      margin-top: 2px;
+    }
+
+    .result-cell {
+      font-weight: 500;
+      position: relative;
+    }
+    
+    .range-cell {
+      color: var(--secondary-color);
+      font-size: 11px;
+    }
+
+    .arrow {
+      font-weight: 800;
+      margin-left: 6px;
+      font-size: 13px;
+      vertical-align: middle;
+      display: inline-block;
+      line-height: 1;
+    }
+    
+    .arrow.red {
+      color: var(--danger-color);
+    }
+    
+    .arrow.green {
+      color: var(--success-color);
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-left: 8px;
+    }
+    
+    .status-normal {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .status-high {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    
+    .status-low {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .sig-row {
+      position: absolute;
+      left: 20px;
+      right: 20px;
+      bottom: calc(var(--footer-h) + 10px);
+      height: var(--sig-h);
+      display: flex;
+      gap: 20px;
+      align-items: flex-end;
+      padding-top: 15px;
+      border-top: 1px solid var(--border-color);
+    }
+    
+    .sig-cell {
+      flex: 1;
+      min-width: 0;
+      font-size: 11px;
+    }
+    
+    .sig-cell.center { 
+      text-align: center; 
+    }
+    
+    .sig-cell.right { 
+      text-align: right; 
+    }
+
+    .sig-img {
+      max-height: 45px;
+      max-width: 140px;
+      object-fit: cover;
+      display: inline-block;
+      margin-bottom: 8px;
+      filter: brightness(0.9);
+    }
+    
+    .sig-name {
+      font-weight: 700;
+      color: var(--primary-color);
+      margin-top: 5px;
+      font-size: 11.5px;
+    }
+    
+    .sig-desig {
+      color: var(--secondary-color);
+      margin-top: 2px;
+      font-size: 10.5px;
+    }
+
+    .page-number {
+      position: fixed;
+      right: 20px;
+      bottom: 10px;
+      z-index: 11;
+      font-size: 10.5px;
+      color: var(--secondary-color);
+      font-weight: 400;
+    }
+    
+    .page-number:before {
+      content: "Page " counter(page) " / " counter(pages);
+    }
+
+    /* 70/30 Layout Improvements */
+    .two-col {
+      display: grid;
+      grid-template-columns: 70% 30%;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .col-trend {
+      padding: 15px;
+      background: var(--light-bg);
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+    }
+
+    .trend-title-right {
+      font-weight: 700;
+      margin: 0 0 12px;
+      color: var(--primary-color);
+      font-size: 13px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border-color);
+    }
+    
+    .trend-box table {
+      font-size: 11px;
+      background: white;
+    }
+    
+    .trend-box th {
+      background: #f1f5f9;
+      font-size: 10.5px;
+
+    }
+    
+    .trend-box td {
+      padding: 7px 6px;
+      font-size: 10.5px;
+    }
+
+    /* Radiology content styling */
+    .radiology-wrap {
+      margin-top: 15px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #1a1a1a;
+    }
+    
+    .radiology-wrap h1,
+    .radiology-wrap h2,
+    .radiology-wrap h3,
+    .radiology-wrap h4 {
+      color: var(--primary-color);
+      margin-top: 15px;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    
+    .radiology-wrap p {
+      margin: 8px 0;
+      text-align: justify;
+    }
+    
+    .radiology-wrap strong,
+    .radiology-wrap b {
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+    
+    .radiology-wrap ul,
+    .radiology-wrap ol {
+      margin: 8px 0 8px 20px;
+    }
+
+    /* Print optimizations */
+    @media print {
+      body {
+        font-size: 11px;
+      }
+      
+      .patient-strip {
+        box-shadow: none;
+        border: 1px solid #ccc;
+      }
+      
+      table {
+        border: 1px solid #ddd;
+        box-shadow: none;
+      }
+      
+      tr:hover td {
+        background: transparent;
+      }
+      
+      .two-col, 
+      .col-main, 
+      .col-trend { 
+        page-break-inside: avoid;
+      }
+    }
+  </style>
   `;
 }
 
-function chunkArray(arr, size) {
-  const out = [];
-  for (let i = 0; i < (arr?.length || 0); i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
 /* -----------------------------
-   ✅ Build content HTML
-   ✅ FIX: long test => chunk into multiple pages (no collapse)
+✅ Build content HTML
+✅ FIX: Trends now side-by-side (70/30) on FIRST chunk only
 ----------------------------- */
 function buildPatientContentHtml({
   order,
   patient,
   results,
-  withLetterhead,
-  mode = "standard",
+  mode = "standard", // "standard" | "full"
   trendMap = null,
   headerImg = null,
   footerImg = null,
+  reserveHeaderFooterSpace = true,
 }) {
   const reportDate = new Date().toLocaleDateString("en-IN", {
     day: "2-digit",
@@ -394,566 +907,357 @@ function buildPatientContentHtml({
   const isFull = mode === "full";
   const refDoctor = getRefDoctorDisplay(order);
 
-  // header/footer image fixed
-  const HEADER_H = 120; // px
-  const FOOTER_H = 75;  // px
-
-  // signature block reserved space
-  const SIG_H = 80;     // px (adjust if needed)
-
-  const showHeader = Boolean(withLetterhead && safeTrim(headerImg));
-  const showFooter = Boolean(withLetterhead && safeTrim(footerImg));
-
-  // ✅ rows per page (tune if needed)
-  // full mode has split layout so fewer rows fit
   const ROWS_PER_PAGE_FULL = 14;
-  const ROWS_PER_PAGE_STD  = 26;
+  const ROWS_PER_PAGE_STD = 24;
 
-  // ✅ Expand "results" into "pages"
-  // If a test has many parameterResults => make multiple pages for that test
   const pages = [];
 
   for (const r of results) {
-    const isRadiology = isHtmlPresent(r.reportHtml);
+    const testId = r.testId ?? r.test?.id;
+    const testName = safeTrim(r.test?.name) || "Test";
 
-    if (isRadiology) {
-      // radiology may also be long, but usually it flows ok in one page container;
-      // if you need, we can chunk radiology too (harder). For now keep as 1 page.
-      pages.push({ r, chunk: null, chunkIndex: 0, chunkCount: 1 });
+    if (isHtmlPresent(r.reportHtml)) {
+      const parts = splitRadiologyHtmlIntoPages(r.reportHtml, 1800);
+      parts.forEach((part, idx) => {
+        pages.push({
+          r,
+          isRadiology: true,
+          reportChunk: part,
+          chunkIndex: idx,
+          chunkCount: parts.length,
+          testName,
+          testId,
+        });
+      });
       continue;
     }
 
     const prs = r.parameterResults || [];
     const perPage = isFull ? ROWS_PER_PAGE_FULL : ROWS_PER_PAGE_STD;
-
     const chunks = chunkArray(prs, perPage);
+    const chunkCount = chunks.length || 1;
+
     if (!chunks.length) {
-      pages.push({ r, chunk: [], chunkIndex: 0, chunkCount: 1 });
+      pages.push({
+        r,
+        isRadiology: false,
+        chunk: [],
+        chunkIndex: 0,
+        chunkCount: 1,
+        testName,
+        testId,
+      });
       continue;
     }
 
     chunks.forEach((chunk, idx) => {
-      pages.push({ r, chunk, chunkIndex: idx, chunkCount: chunks.length });
+      pages.push({
+        r,
+        isRadiology: false,
+        chunk,
+        chunkIndex: idx,
+        chunkCount,
+        testName,
+        testId,
+      });
     });
   }
 
-  const totalPages = pages.length;
+  const css = buildCss({
+    headerH: reserveHeaderFooterSpace ? 120 : headerImg ? 120 : 0,
+    footerH: reserveHeaderFooterSpace ? 75 : footerImg ? 75 : 0,
+    sigH: 95,
+    fontPx: 11.5,
+  });
+
+  const headerClass = headerImg ? "header" : "header blank";
+  const footerClass = footerImg ? "footer" : "footer blank";
+
+  const patientStrip = () => `
+  <div class="patient-strip">
+    <div class="col">
+      <div class="row">
+        <b>Name:</b>
+        <span class="value">${escapeHtml(patient.fullName || "N/A")}</span>
+      </div>
+      <div class="row">
+        <b>Age/Gender:</b>
+        <span class="value">${escapeHtml(String(calculateAge(patient.dob)))} / ${escapeHtml(patient.gender || "N/A")}</span>
+      </div>
+    </div>
+    <div class="col">
+      <div class="row">
+        <b>Order ID:</b>
+        <span class="value">${escapeHtml(order.orderNumber || order.id)}</span>
+      </div>
+      <div class="row">
+        <b>Date:</b>
+        <span class="value">${escapeHtml(reportDate)}</span>
+      </div>
+    </div>
+    <div class="col">
+      <div class="row">
+        <b>Ref Dr:</b>
+        <span class="value">${escapeHtml(refDoctor)}</span>
+      </div>
+      <div class="row">
+        <b>Patient ID:</b>
+        <span class="value">${escapeHtml(String(patient.id))}</span>
+      </div>
+    </div>
+  </div>
+`;
 
   return `
+  <!doctype html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <meta name="page-number" content="counter(page) of counter(pages)">
+      ${css}
+    </head>
+    <body>
+      <div class="${headerClass}">
+        ${headerImg ? `<img src="${headerImg}" alt="header" />` : ``}
+      </div>
+
+      <div class="${footerClass}">
+        ${footerImg ? `<img src="${footerImg}" alt="footer" />` : ``}
+      </div>
+
+      <div class="page-number"></div>
+
+      ${pages
+        .map(({ r, isRadiology, reportChunk, chunk, chunkIndex, chunkCount, testName, testId }) => {
+          const testTitle =
+            chunkCount > 1
+              ? `${escapeHtml(testName)} (Part ${chunkIndex + 1}/${chunkCount})`
+              : `${escapeHtml(testName)}`;
+
+          const sigRow = `
+            <div class="sig-row">
+              ${renderSigCell(r.sigLeft, "left")}
+              ${renderSigCell(r.sigCenter, "center")}
+              ${renderSigCell(r.sigRight, "right")}
+            </div>
+          `;
+
+          if (isRadiology) {
+            return `
+              <div class="page">
+                <div class="title">Medical Diagnostic Report</div>
+                ${patientStrip()}
+                <div class="test-name">${testTitle}</div>
+                <div class="radiology-wrap">
+                  ${reportChunk || ""}
+                </div>
+                ${sigRow}
+              </div>
+            `;
+          }
+
+          const prsForThisPage = chunk || [];
+
+          const buildMainRows = (arr) =>
+            arr
+              .map((pr) => {
+                const valueRaw = pr.valueNumber ?? pr.valueText ?? "—";
+                const unit = pr.unit || pr.parameter?.unit || "";
+                const method = pr.method || pr.parameter?.method || "";
+                const flag = getFlagKind(pr.flag);
+                
+                const valueCell = formatValueWithUnit(valueRaw, unit);
+                const rangeText = getReferenceRangeText(pr);
+                const rangeCell = formatRangeWithUnit(rangeText, unit);
+                
+                // Determine status class
+                const statusClass = flag === "high" ? "status-high" : 
+                                  flag === "low" ? "status-low" : 
+                                  "status-normal";
+                
+                // Add status badge if not normal
+                const statusBadge = flag !== "normal" ? 
+                  `<span class="status-badge ${statusClass}">${flag}</span>` : "";
+                
+                return `
+                  <tr>
+                    <td style="width:42%">
+                      <div class="parameter-name">
+                        ${escapeHtml(pr.parameter?.name || "—")}
+                      
+                      </div>
+                      <div class="method">${escapeHtml(method || "-")}</div>
+                    </td>
+                    <td style="width:23%" class="result-cell">
+                      ${renderResultWithArrow(valueCell, pr.flag)}
+                    </td>
+                    <td style="width:35%" class="range-cell">
+                      ${escapeHtml(rangeCell || "—")}
+                    </td>
+                  </tr>
+                `;
+              })
+              .join("");
+
+          const mainTableHtml = `
+            <table>
+              <thead>
+                <tr>
+                  <th>Parameter / Method</th>
+                  <th>Result</th>
+                  <th>Bio Ref. Interval</th>
+                </tr>
+              </thead>
+              <tbody>${buildMainRows(prsForThisPage)}</tbody>
+            </table>
+          `;
+
+          // ✅ FULL mode: show trends only on first chunk and make it 70/30 beside main table
+          if (isFull) {
+            const hasTrends = trendMap
+              ? hasAnyTrendsForTest(trendMap, testId, r.parameterResults)
+              : false;
+
+            const trendsHtml =
+              hasTrends && chunkIndex === 0
+                ? (() => {
+                    let trendDates = ["Date 1", "Date 2", "Date 3"];
+                    const firstParamId = r.parameterResults?.[0]?.parameterId;
+                    if (firstParamId) {
+                      const arr = trendMap.get(`${testId}:${firstParamId}`) || [];
+                      trendDates = [
+                        formatShortDate(arr[0]?.date) || "Date 1",
+                        formatShortDate(arr[1]?.date) || "Date 2",
+                        formatShortDate(arr[2]?.date) || "Date 3",
+                      ];
+                    }
+
+                    const tRows = (r.parameterResults || [])
+                      .map((pr) => {
+                        const tArr = trendMap.get(`${testId}:${pr.parameterId}`) || [];
+                        const t1 = safeTrim(tArr[0]?.value) || "—";
+                        const t2 = safeTrim(tArr[1]?.value) || "—";
+               
+                        return `
+                          <tr>
+                            <td style="width:40%"><b>${escapeHtml(pr.parameter?.name || "—")}</b></td>
+                            <td style="width:20%">${escapeHtml(t1)}</td>
+                            <td style="width:20%">${escapeHtml(t2)}</td>
+                    
+                          </tr>
+                        `;
+                      })
+                      .join("");
+
+                    return `
+                      <div class="trend-box">
+                        <div class="trend-title-right">Trends (last three reports)</div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Parameter</th>
+                              <th>${escapeHtml(trendDates[0])}</th>
+                              <th>${escapeHtml(trendDates[1])}</th>
+                           
+                            </tr>
+                          </thead>
+                          <tbody>${tRows}</tbody>
+                        </table>
+                      </div>
+                    `;
+                  })()
+                : "";
+
+            // ✅ If trends exist (first chunk), wrap in 70/30 grid
+            const bodyHtml =
+              trendsHtml
+                ? `
+                  <div class="two-col">
+                    <div class="col-main">
+                      ${mainTableHtml}
+                    </div>
+                    <div class="col-trend">
+                      ${trendsHtml}
+                    </div>
+                  </div>
+                `
+                : mainTableHtml;
+
+            return `
+              <div class="page">
+                <div class="title">Medical Diagnostic Report</div>
+                ${patientStrip()}
+                <div class="test-name">${testTitle}</div>
+                ${bodyHtml}
+                ${sigRow}
+              </div>
+            `;
+          }
+
+          // ✅ STANDARD mode (plain + letterhead) — keep same 3 columns
+          return `
+            <div class="page">
+              <div class="title">Medical Diagnostic Report</div>
+              ${patientStrip()}
+              <div class="test-name">${testTitle}</div>
+              ${mainTableHtml}
+              ${sigRow}
+            </div>
+          `;
+        })
+        .join("")}
+    </body>
+  </html>
+  `;
+}
+
+function buildFullImagePageHtml(imgUrl) {
+  return `
+  <!doctype html>
   <html>
     <head>
       <meta charset="utf-8" />
       <style>
         @page { size: A4; margin: 0; }
+        html, body { margin:0; padding:0; width:210mm; height:297mm; overflow:hidden; }
+        body { 
+          -webkit-print-color-adjust: exact; 
+          print-color-adjust: exact; 
+          font-family: 'Inter', sans-serif;
+        }
 
-        html, body {
+        .one-page {
+          width: 210mm;
+          height: 297mm;
           margin: 0;
           padding: 0;
-          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          font-size: 9px;
-          color: #2c3e50;
-          line-height: 1.5;
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
-
-        :root{
-          --header-h: ${HEADER_H}px;
-          --footer-h: ${FOOTER_H}px;
-          --sig-h: ${SIG_H}px;
-
-          --pad-top: 15mm;
-          --pad-right: 15mm;
-          --pad-bottom: 12mm;
-          --pad-left: 15mm;
-        }
-
-        .global-header{
-          position: fixed;
-          top: 0; left: 0; right: 0;
-          width: 100%;
-          height: var(--header-h);
-          z-index: 9999;
-          background: #fff;
           overflow: hidden;
+          page-break-after: avoid;
+          break-after: avoid;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
-        .global-footer{
-          position: fixed;
-          bottom: 0; left: 0; right: 0;
-          width: 100%;
-          height: var(--footer-h);
-          z-index: 9999;
-          background: #fff;
-          overflow: hidden;
-        }
-        .global-header img,
-        .global-footer img{
-          width: 100%;
-          height: 100%;
+
+        .one-page img {
+          max-width: 100%;
+          max-height: 100%;
           display: block;
           object-fit: cover;
         }
-
-        .main-content{ position: relative; z-index: 1; }
-
-        /* ✅ one physical page */
-        .test-page{
-          position: relative;
-          height: 297mm; /* A4 height */
-          box-sizing: border-box;
-          page-break-after: always;
-
-          padding-top: calc(var(--header-h) + var(--pad-top));
-          padding-right: var(--pad-right);
-          padding-left: var(--pad-left);
-
-          /* ✅ reserve footer + signature at bottom */
-          padding-bottom: calc(var(--footer-h) + var(--sig-h) + var(--pad-bottom));
-        }
-        .test-page:last-child{ page-break-after: auto; }
-
-        .header {
-          text-align: center;
-          border-bottom: 2px solid #4a90e2;
-          margin-bottom: 12px;
-          padding-bottom: 8px;
-        }
-        .header h2 {
-          font-size: 11px;
-          font-weight: 400;
-          color: #5a6c7d;
-        }
-
-        .patient-info {
-          background: #f7f9fc;
-          padding: 10px 12px;
-          margin-bottom: 15px;
-          border-left: 3px solid #4a90e2;
-          border-radius: 3px;
-          font-size: 9px;
-          line-height: 1.6;
-        }
-        .info-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 4px 10px;
-        }
-        .patient-info b {
-          display: inline-block;
-          min-width: 70px;
-          font-weight: 600;
-        }
-
-        .test-title {
-          background: linear-gradient(135deg, #4a90e2 0%, #5da8f5 100%);
-          color: #fff;
-          padding: 9px 12px;
-          font-size: 10px;
-          font-weight: 600;
-          margin-bottom: 15px;
-          border-radius: 4px;
-        }
-
-        table {
-          width: 100%;
-          border-collapse: separate;
-          border-spacing: 0;
-          font-size: 8.5px;
-          border: 1px solid #e1e8ed;
-          border-radius: 5px;
-          overflow: hidden;
-          margin-bottom: 20px;
-        }
-        thead { background: #f0f4f8; }
-        th {
-          padding: 8px 9px;
-          text-align: left;
-          font-weight: 600;
-          color: #2c3e50;
-          text-transform: uppercase;
-          font-size: 7.5px;
-          letter-spacing: 0.5px;
-          border-bottom: 2px solid #d1dce5;
-          vertical-align: bottom;
-        }
-        thead tr.subhead th {
-          text-transform: none;
-          font-size: 7.5px;
-          border-bottom: 2px solid #d1dce5;
-          padding-top: 6px;
-          padding-bottom: 6px;
-        }
-        td {
-          padding: 8px 9px;
-          border-bottom: 1px solid #e9eff4;
-          color: #4a5568;
-          vertical-align: top;
-        }
-        tbody tr:last-child td { border-bottom: none; }
-        tbody tr:nth-child(even) { background-color: #fafbfc; }
-
-        .flag-high, .flag-low, .flag-critical {
-          color: #e74c3c;
-          font-weight: 600;
-          font-size: 7.5px;
-          background-color: #fee;
-          padding: 3px 7px;
-          border-radius: 3px;
-          display: inline-block;
-        }
-        .flag-normal {
-          color: #27ae60;
-          font-weight: 600;
-          font-size: 7.5px;
-          background-color: #eafaf1;
-          padding: 3px 7px;
-          border-radius: 3px;
-          display: inline-block;
-        }
-
-        .radiology-html {
-          font-size: 9px;
-          line-height: 1.7;
-          color: #2c3e50;
-          padding: 12px;
-          background: #fafbfc;
-          border: 1px solid #e1e8ed;
-          border-radius: 4px;
-          margin-bottom: 20px;
-        }
-
-        .split-container {
-          display: flex;
-          gap: 15px;
-          margin-bottom: 20px;
-        }
-        .split-left { flex: 0 0 62%; min-width: 0; }
-        .split-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-
-        .table-card {
-          border: 1px solid #e1e8ed;
-          border-radius: 5px;
-          overflow: hidden;
-          background: #fff;
-          height: 100%;
-        }
-        .table-card table { border: none; border-radius: 0; margin-bottom: 0; }
-
-        .trends-empty {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          padding: 30px 20px;
-          color: #9aa6b2;
-          text-align: center;
-          background: #fff;
-          border: 1px dashed #d1dce5;
-          border-radius: 5px;
-          height: 100%;
-        }
-
-        /* ✅ SIGNATURES fixed at bottom per page */
-        .signature-wrap{
-          position: absolute;
-          left: var(--pad-left);
-          right: var(--pad-right);
-          bottom: calc(var(--footer-h) + 22px);
-          height: var(--sig-h);
-          box-sizing: border-box;
-          border-top: 1px solid #e1e8ed;
-          padding-top: 10px;
-        }
-        .signature-row{
-          display: flex;
-          align-items: flex-end;
-          justify-content: space-between;
-          gap: 16px;
-        }
-        .sig{ width: 33.333%; }
-        .sig-inner{ display: flex; flex-direction: column; gap: 2px; }
-        .sig.left .sig-inner{ align-items: flex-start; text-align:left; }
-        .sig.center .sig-inner{ align-items: center; text-align:center; }
-        .sig.right .sig-inner{ align-items: flex-end; text-align:right; }
-
-        .sig-img{
-          height: 34px;
-          max-width: 150px;
-          width: auto;
-          object-fit: contain;
-          display: block;
-        }
-        .sig-line{
-          width: 150px;
-          height: 1px;
-          background: #cfd8e3;
-          display: inline-block;
-          margin-top: 18px;
-        }
-        .sig-name{ font-size: 9px; font-weight: 700; color: #2c3e50; line-height: 1.2; }
-        .sig-desig{ font-size: 8px; color: #6b7280; line-height: 1.2; }
-
-        .page-note{
-          position: absolute;
-          left: 0;
-          right: 0;
-          bottom: calc(var(--footer-h) + 6px);
-          text-align: center;
-          font-size: 7.5px;
-          color: #95a5a6;
-        }
       </style>
     </head>
-
     <body>
-      <div class="global-header">${showHeader ? `<img src="${headerImg}" />` : ``}</div>
-      <div class="global-footer">${showFooter ? `<img src="${footerImg}" />` : ``}</div>
-
-      <div class="main-content">
-        ${pages.map(({ r, chunk, chunkIndex, chunkCount }, pageIdx) => {
-          const isRadiology = isHtmlPresent(r.reportHtml);
-          const testId = r.testId ?? r.test?.id;
-
-          const hasTrends =
-            isFull && trendMap ? hasAnyTrendsForTest(trendMap, testId, r.parameterResults) : false;
-
-          // ✅ Show patient header only on first chunk page for that test
-          const showTopInfo = chunkIndex === 0;
-
-          // ✅ Parameter list for this page
-          const prsForThisPage = isRadiology ? [] : (chunk || []);
-
-          return `
-            <div class="test-page">
-              ${showTopInfo ? `
-                <div class="header"><h2>Medical Diagnostic Report</h2></div>
-
-                <div class="patient-info">
-                  <div class="info-grid">
-                    <div><b>Order ID:</b> ${order.orderNumber || order.id}</div>
-                    <div><b>Date:</b> ${reportDate}</div>
-                    <div><b>Name:</b> ${patient.fullName || "N/A"}</div>
-                    <div><b>Age:</b> ${calculateAge(patient.dob)} years</div>
-                    <div><b>Gender:</b> ${patient.gender || "N/A"}</div>
-                    <div><b>Ref. Dr:</b> ${refDoctor}</div>
-                  </div>
-                </div>
-
-                <div class="test-title">
-                  ${r.test?.name || "Test"}
-                  ${chunkCount > 1 ? ` <span style="opacity:.85; font-weight:500;">(Part ${chunkIndex + 1}/${chunkCount})</span>` : ``}
-                </div>
-              ` : `
-                <div class="test-title">
-                  ${r.test?.name || "Test"}
-                  <span style="opacity:.85; font-weight:500;">(Part ${chunkIndex + 1}/${chunkCount})</span>
-                </div>
-              `}
-
-              ${
-                isRadiology
-                  ? `<div class="radiology-html">${r.reportHtml}</div>`
-                  : isFull
-                    ? `
-                      <div class="split-container">
-                        <div class="split-left">
-                          <div class="table-card">
-                            <table>
-                              <thead>
-                                <tr>
-                                  <th style="width:46%">Test Name</th>
-                                  <th style="width:26%">Result, ${reportDate}</th>
-                                  <th style="width:28%">Bio Ref. Interval</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                ${prsForThisPage.map((pr) => {
-                                  const valueRaw = pr.valueNumber ?? pr.valueText ?? "—";
-                                  const unit = pr.unit || pr.parameter?.unit || "";
-                                  const method = pr.method || pr.parameter?.method || "";
-                                  const valueCell = formatValueWithUnit(valueRaw, unit);
-
-                                  const rangeText = getReferenceRangeText(pr);
-                                  const rangeCell = formatRangeWithUnit(rangeText, unit);
-
-                                  const flagLower = safeTrim(pr.flag).toLowerCase();
-                                  let flagClass = "flag-normal";
-                                  if (flagLower.includes("critical")) flagClass = "flag-critical";
-                                  else if (flagLower.includes("high")) flagClass = "flag-high";
-                                  else if (flagLower.includes("low")) flagClass = "flag-low";
-
-                                  return `
-                                    <tr>
-                                      <td>
-                                        <strong>${pr.parameter?.name || "—"}</strong>
-                                        <div style="margin-top:4px; font-size:7.5px; color:#6b7280;">
-                                          ${method || "-"}
-                                        </div>
-                                      </td>
-                                      <td>
-                                        ${valueCell}
-                                        <div style="margin-top:4px;">
-                                          <span class="${flagClass}">${pr.flag || "NORMAL"}</span>
-                                        </div>
-                                      </td>
-                                      <td>${rangeCell || "—"}</td>
-                                    </tr>
-                                  `;
-                                }).join("")}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        <div class="split-right">
-                          <div class="table-card">
-                            ${
-                              // ✅ show trends only on the FIRST page of that test
-                              showTopInfo
-                                ? (hasTrends
-                                    ? (() => {
-                                        let trendDates = ["Date 1", "Date 2", "Date 3"];
-                                        if (r.parameterResults?.length > 0) {
-                                          const firstParamId = r.parameterResults[0]?.parameterId;
-                                          const arr = trendMap.get(`${testId}:${firstParamId}`) || [];
-                                          trendDates = [
-                                            formatShortDate(arr[0]?.date) || "Date 1",
-                                            formatShortDate(arr[1]?.date) || "Date 2",
-                                            formatShortDate(arr[2]?.date) || "Date 3",
-                                          ];
-                                        }
-
-                                        return `
-                                          <div class="trends-table">
-                                            <table>
-                                              <thead>
-                                                <tr>
-                                                  <th colspan="3" style="text-align:center;">Trends (For last three tests)</th>
-                                                </tr>
-                                                <tr class="subhead">
-                                                  <th style="text-align:center;">${trendDates[0]}</th>
-                                                  <th style="text-align:center;">${trendDates[1]}</th>
-                                                  <th style="text-align:center;">${trendDates[2]}</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody>
-                                                ${(r.parameterResults || []).map((pr) => {
-                                                  const tArr = trendMap.get(`${testId}:${pr.parameterId}`) || [];
-                                                  const t1 = safeTrim(tArr[0]?.value) || "";
-                                                  const t2 = safeTrim(tArr[1]?.value) || "";
-                                                  const t3 = safeTrim(tArr[2]?.value) || "";
-                                                  return `
-                                                    <tr>
-                                                      <td style="text-align:center;">${t1}</td>
-                                                      <td style="text-align:center;">${t2}</td>
-                                                      <td style="text-align:center;">${t3}</td>
-                                                    </tr>
-                                                  `;
-                                                }).join("")}
-                                              </tbody>
-                                            </table>
-                                          </div>
-                                        `;
-                                      })()
-                                    : `
-                                      <div class="trends-empty">
-                                        <div style="font-size:26px; opacity:.5;">📄</div>
-                                        <div class="msg">
-                                          We don't have any of your previous lab results for this test in our records
-                                        </div>
-                                      </div>
-                                    `)
-                                : `<div style="height:100%; background:#fff;"></div>`
-                            }
-                          </div>
-                        </div>
-                      </div>
-                    `
-                    : `
-                      <div class="standard-table-container">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Parameter</th>
-                              <th>Value</th>
-                              <th>Unit</th>
-                              <th>Reference Range</th>
-                              <th>Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            ${prsForThisPage.map((pr) => {
-                              const value = pr.valueNumber ?? pr.valueText ?? "—";
-                              const unit = pr.unit || pr.parameter?.unit || "—";
-
-                              const flagLower = safeTrim(pr.flag).toLowerCase();
-                              let flagClass = "flag-normal";
-                              if (flagLower.includes("critical")) flagClass = "flag-critical";
-                              else if (flagLower.includes("high")) flagClass = "flag-high";
-                              else if (flagLower.includes("low")) flagClass = "flag-low";
-
-                              const rangeText = getReferenceRangeText(pr);
-                              const rangeCell = safeTrim(rangeText) ? rangeText : "—";
-
-                              return `
-                                <tr>
-                                  <td>${pr.parameter?.name || "—"}</td>
-                                  <td>${value}</td>
-                                  <td>${unit}</td>
-                                  <td>${rangeCell}</td>
-                                  <td><span class="${flagClass}">${pr.flag || "NORMAL"}</span></td>
-                                </tr>
-                              `;
-                            }).join("")}
-                          </tbody>
-                        </table>
-                      </div>
-                    `
-              }
-
-              <!-- ✅ SIGNATURES FIXED ABOVE FOOTER (same on every part page of this test) -->
-              <div class="signature-wrap">
-                <div class="signature-row">
-                  ${renderSigBlock(r.sigLeft, "left")}
-                  ${renderSigBlock(r.sigCenter, "center")}
-                  ${renderSigBlock(r.sigRight, "right")}
-                </div>
-              </div>
-
-              <div class="page-note">Page: ${pageIdx + 1} / ${totalPages}</div>
-            </div>
-          `;
-        }).join("")}
+      <div class="one-page">
+        ${imgUrl ? `<img src="${imgUrl}" alt="page" />` : ``}
       </div>
     </body>
   </html>
   `;
 }
 
-
-function buildFullImagePageHtml(imgUrl) {
-  return `
-  <html>
-    <head>
-      <style>
-        @page { size: A4; margin: 0; }
-        html, body { margin:0; padding:0; height:100%; }
-        img { width:100%; height:100%; object-fit:cover; display:block; }
-      </style>
-    </head>
-    <body>
-      ${imgUrl ? `<img src="${imgUrl}" />` : ""}
-    </body>
-  </html>
-  `;
-}
-
 /* =========================================================
-   ✅ Generate 3 PDFs for ONE patient
-   ✅ Manual signature -> else category default signature
-   ✅ Signatures fixed above footer
+✅ Generate 3 PDFs for ONE patient
 ========================================================= */
 export async function generatePatient3Pdfs({ orderId, patientId }) {
   const order = await prisma.order.findUnique({
@@ -964,11 +1268,19 @@ export async function generatePatient3Pdfs({ orderId, patientId }) {
 
   const patient = await prisma.patient.findUnique({
     where: { id: Number(patientId) },
-    select: { id: true, fullName: true, dob: true, gender: true, contactNo: true },
+    select: {
+      id: true,
+      fullName: true,
+      dob: true,
+      gender: true,
+      contactNo: true,
+    },
   });
   if (!patient) throw new Error("Patient not found");
 
-  const layout = await prisma.reportLayout.findFirst({ orderBy: { id: "desc" } });
+  const layout = await prisma.reportLayout.findFirst({
+    orderBy: { id: "desc" },
+  });
 
   const resultsRaw = await prisma.patientTestResult.findMany({
     where: { orderId: Number(orderId), patientId: Number(patientId) },
@@ -978,25 +1290,21 @@ export async function generatePatient3Pdfs({ orderId, patientId }) {
         include: { parameter: true },
         orderBy: { parameterId: "asc" },
       },
-
-      // ✅ manual override signatures
       leftSignature: true,
       centerSignature: true,
       rightSignature: true,
     },
     orderBy: { id: "asc" },
   });
+
   if (!resultsRaw.length) throw new Error("No results for this patient");
 
-  // ✅ build default signatures map by category
   const categoryIds = resultsRaw.map((r) => r.test?.categoryId).filter(Boolean);
   const defaultByCategory = await getDefaultSignaturesByCategory(categoryIds);
 
-  // ✅ attach final signatures per result (manual -> else default)
   const results = resultsRaw.map((r) => {
     const cid = r.test?.categoryId;
     const defs = cid ? defaultByCategory.get(cid) : null;
-
     return {
       ...r,
       sigLeft: r.leftSignature || defs?.LEFT || null,
@@ -1007,13 +1315,13 @@ export async function generatePatient3Pdfs({ orderId, patientId }) {
 
   const trendMap = await buildTrendMap({ results, patientId });
 
-  // ✅ compress header/footer (repeated every page)
   const optimizedHeader = await optimizeImageToDataUrl(layout?.headerImg, {
     width: 1400,
     height: 140,
     quality: 60,
     fit: "cover",
   });
+
   const optimizedFooter = await optimizeImageToDataUrl(layout?.footerImg, {
     width: 1400,
     height: 120,
@@ -1021,13 +1329,13 @@ export async function generatePatient3Pdfs({ orderId, patientId }) {
     fit: "cover",
   });
 
-  // ✅ cover/last compress
   const optimizedCover = await optimizeImageToDataUrl(layout?.frontPageLastImg, {
     width: 1240,
     height: 1754,
     quality: 60,
     fit: "cover",
   });
+
   const optimizedLast = await optimizeImageToDataUrl(layout?.lastPageImg, {
     width: 1240,
     height: 1754,
@@ -1037,7 +1345,7 @@ export async function generatePatient3Pdfs({ orderId, patientId }) {
 
   const browser = await puppeteer.launch({
     headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--font-render-hinting=none"],
   });
 
   try {
@@ -1046,48 +1354,46 @@ export async function generatePatient3Pdfs({ orderId, patientId }) {
       order,
       patient,
       results,
-      withLetterhead: false,
       mode: "standard",
       trendMap: null,
       headerImg: null,
       footerImg: null,
+      reserveHeaderFooterSpace: true,
     });
     const plainPdf = await renderPdfFromHtml(browser, plainHtml);
-
-
 
     // 2) LETTERHEAD
     const letterHtml = buildPatientContentHtml({
       order,
       patient,
       results,
-      withLetterhead: true,
       mode: "standard",
       trendMap: null,
       headerImg: optimizedHeader,
       footerImg: optimizedFooter,
+      reserveHeaderFooterSpace: true,
     });
     const letterPdf = await renderPdfFromHtml(browser, letterHtml);
 
-    // 3) FULL = cover + full content + last
+    // 3) FULL (cover + content(with trends) + last)
     const coverPdf = optimizedCover
-      ? await renderPdfFromHtml(browser, buildFullImagePageHtml(optimizedCover))
+      ? await renderSinglePagePdfFromHtml(browser, buildFullImagePageHtml(optimizedCover))
       : null;
 
     const fullContentHtml = buildPatientContentHtml({
       order,
       patient,
       results,
-      withLetterhead: true,
       mode: "full",
       trendMap,
       headerImg: optimizedHeader,
       footerImg: optimizedFooter,
+      reserveHeaderFooterSpace: true,
     });
     const fullContentPdf = await renderPdfFromHtml(browser, fullContentHtml);
 
     const lastPdf = optimizedLast
-      ? await renderPdfFromHtml(browser, buildFullImagePageHtml(optimizedLast))
+      ? await renderSinglePagePdfFromHtml(browser, buildFullImagePageHtml(optimizedLast))
       : null;
 
     const fullFinal = await PDFDocument.create();
@@ -1104,7 +1410,6 @@ export async function generatePatient3Pdfs({ orderId, patientId }) {
 
     const fullFinalBytes = await fullFinal.save({ useObjectStreams: true });
 
-    // ✅ Post-compress ALL PDFs (if gs installed)
     const plainCompressed = await compressPdfBuffer(Buffer.from(plainPdf), "/ebook");
     const letterCompressed = await compressPdfBuffer(Buffer.from(letterPdf), "/ebook");
     const fullCompressed = await compressPdfBuffer(Buffer.from(fullFinalBytes), "/ebook");
