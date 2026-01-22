@@ -94,6 +94,8 @@ model Banner {
 enum SpotlightShowIn {
   HOME_MIDDLE
   HOME_END
+  TEST_PAGE
+  CHECKUP_PAGE
 }
 
 model SpotlightBanner {

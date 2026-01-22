@@ -9,15 +9,16 @@ const toInt = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const validateTarget = ({ testId, packageId }) => {
+// ✅ OPTIONAL target validation:
+// - allow none
+// - allow test OR package
+// - block both together
+const validateTargetOptional = ({ testId, packageId }) => {
   const hasTest = !!testId;
   const hasPackage = !!packageId;
 
   if (hasTest && hasPackage) {
     return "Provide either testId OR packageId, not both.";
-  }
-  if (!hasTest && !hasPackage) {
-    return "Provide testId OR packageId.";
   }
   return null;
 };
@@ -28,14 +29,14 @@ export const addBanner = async (req, res) => {
     const testId = toInt(req.body.testId);
     const packageId = toInt(req.body.packageId);
 
-    const err = validateTarget({ testId, packageId });
+    const err = validateTargetOptional({ testId, packageId });
     if (err) return res.status(400).json({ error: err });
 
     if (!req.file) {
       return res.status(400).json({ error: "Image is required" });
     }
 
-    // ✅ verify target exists
+    // ✅ verify target exists only if provided
     if (testId) {
       const test = await prisma.test.findUnique({ where: { id: testId } });
       if (!test) return res.status(400).json({ error: "Invalid testId" });
@@ -119,23 +120,30 @@ export const updateBanner = async (req, res) => {
     const id = toInt(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });
 
-    const testId = req.body.testId !== undefined ? toInt(req.body.testId) : undefined;
-    const packageId = req.body.packageId !== undefined ? toInt(req.body.packageId) : undefined;
-
     const existing = await prisma.banner.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: "Banner not found" });
 
-    // if user is trying to change target, validate
-    if (testId !== undefined || packageId !== undefined) {
-      const nextTestId = testId === undefined ? existing.testId : testId;
-      const nextPackageId = packageId === undefined ? existing.packageId : packageId;
+    // NOTE:
+    // - if not provided -> undefined (no change)
+    // - if provided empty -> toInt("") -> null (clear)
+    const testId =
+      req.body.testId !== undefined ? toInt(req.body.testId) : undefined;
+    const packageId =
+      req.body.packageId !== undefined ? toInt(req.body.packageId) : undefined;
 
-      const err = validateTarget({
+    // ✅ validate only if caller attempts to change target fields
+    if (testId !== undefined || packageId !== undefined) {
+      const nextTestId = testId === undefined ? existing.testId : testId; // can be null
+      const nextPackageId =
+        packageId === undefined ? existing.packageId : packageId; // can be null
+
+      const err = validateTargetOptional({
         testId: nextTestId,
         packageId: nextPackageId,
       });
       if (err) return res.status(400).json({ error: err });
 
+      // ✅ verify exists only if set (non-null)
       if (nextTestId) {
         const test = await prisma.test.findUnique({ where: { id: nextTestId } });
         if (!test) return res.status(400).json({ error: "Invalid testId" });

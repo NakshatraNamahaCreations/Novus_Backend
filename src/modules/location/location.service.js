@@ -72,6 +72,8 @@ class LocationService {
         where: { orderId },
       });
 
+      console.log("tracking",tracking)
+
       if (!tracking || !tracking.isActive) return null;
 
       // ✅ 1. Save history (append-only)
@@ -97,7 +99,12 @@ class LocationService {
       let metrics = null;
       const now = Date.now();
 
+      console.log("step1",new Date(tracking.lastEtaUpdate))
+      console.log("now",now)
+
+
       if (now - new Date(tracking.lastEtaUpdate).getTime() > 30000) {
+              console.log("step2")
         metrics = await this.calculateMetrics(orderId);
        
         await prisma.orderTracking.update({
@@ -105,6 +112,13 @@ class LocationService {
           data: { lastEtaUpdate: new Date() },
         });
       }
+
+       metrics = await this.calculateMetrics(orderId);
+       
+        await prisma.orderTracking.update({
+          where: { orderId },
+          data: { lastEtaUpdate: new Date() },
+        });
 
       // 📡 Socket update to customer
       io?.to(`order_${orderId}`).emit("vendorLocationUpdate", {

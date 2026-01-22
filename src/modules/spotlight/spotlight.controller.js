@@ -38,12 +38,15 @@ const normalizeShowIn = (showIn) => {
   return [];
 };
 
-const validateTarget = ({ testId, packageId }) => {
+// ✅ OPTIONAL target validation:
+// - allow none
+// - allow test OR package
+// - block both together
+const validateTargetOptional = ({ testId, packageId }) => {
   const hasTest = !!testId;
   const hasPackage = !!packageId;
 
   if (hasTest && hasPackage) return "Provide either testId OR packageId, not both.";
-  if (!hasTest && !hasPackage) return "Provide testId OR packageId.";
   return null;
 };
 
@@ -59,22 +62,27 @@ export const addSpotlight = async (req, res) => {
     const packageId = toInt(req.body.packageId);
     const showIn = normalizeShowIn(req.body.showIn);
 
-    const err = validateTarget({ testId, packageId });
+    const err = validateTargetOptional({ testId, packageId });
     if (err) return res.status(400).json({ error: err });
 
     if (!req.file) return res.status(400).json({ error: "Image is required" });
 
     if (!showIn.length) {
-      return res.status(400).json({ error: "showIn is required (array of places)" });
+      return res
+        .status(400)
+        .json({ error: "showIn is required (array of places)" });
     }
 
-    // verify target exists
+    // ✅ verify target exists only if provided
     if (testId) {
       const test = await prisma.test.findUnique({ where: { id: testId } });
       if (!test) return res.status(400).json({ error: "Invalid testId" });
     }
+
     if (packageId) {
-      const pkg = await prisma.healthPackage.findUnique({ where: { id: packageId } });
+      const pkg = await prisma.healthPackage.findUnique({
+        where: { id: packageId },
+      });
       if (!pkg) return res.status(400).json({ error: "Invalid packageId" });
     }
 
@@ -86,7 +94,6 @@ export const addSpotlight = async (req, res) => {
         showIn,
         ...(testId ? { testId } : {}),
         ...(packageId ? { packageId } : {}),
-        // if you have auth middleware:
         // createdById: req.user?.id ?? null,
       },
       include: includeTarget,
@@ -109,9 +116,7 @@ export const getAllSpotlights = async (req, res) => {
     // optional filter: ?showIn=HOME_MIDDLE
     const showInFilter = req.query.showIn ? String(req.query.showIn) : null;
 
-    const where = showInFilter
-      ? { showIn: { has: showInFilter } }
-      : {};
+    const where = showInFilter ? { showIn: { has: showInFilter } } : {};
 
     const spotlights = await prisma.spotlightBanner.findMany({
       where,
@@ -137,7 +142,8 @@ export const getSpotlightById = async (req, res) => {
       include: includeTarget,
     });
 
-    if (!spotlight) return res.status(404).json({ error: "Spotlight not found" });
+    if (!spotlight)
+      return res.status(404).json({ error: "Spotlight not found" });
 
     res.json(spotlight);
   } catch (error) {
@@ -155,22 +161,31 @@ export const updateSpotlight = async (req, res) => {
     const existing = await prisma.spotlightBanner.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: "Spotlight not found" });
 
-    const testId = req.body.testId !== undefined ? toInt(req.body.testId) : undefined;
+    // NOTE:
+    // - if field is not provided -> undefined (no change)
+    // - if provided empty -> toInt("") -> null (clear)
+    const testId =
+      req.body.testId !== undefined ? toInt(req.body.testId) : undefined;
+
     const packageId =
       req.body.packageId !== undefined ? toInt(req.body.packageId) : undefined;
 
-    const showIn = req.body.showIn !== undefined
-      ? normalizeShowIn(req.body.showIn)
-      : undefined;
+    const showIn =
+      req.body.showIn !== undefined ? normalizeShowIn(req.body.showIn) : undefined;
 
-    // validate target only if changing
+    // ✅ Validate targets only if caller is changing either field
     if (testId !== undefined || packageId !== undefined) {
-      const nextTestId = testId === undefined ? existing.testId : testId;
-      const nextPackageId = packageId === undefined ? existing.packageId : packageId;
+      const nextTestId = testId === undefined ? existing.testId : testId; // may become null
+      const nextPackageId =
+        packageId === undefined ? existing.packageId : packageId; // may become null
 
-      const err = validateTarget({ testId: nextTestId, packageId: nextPackageId });
+      const err = validateTargetOptional({
+        testId: nextTestId,
+        packageId: nextPackageId,
+      });
       if (err) return res.status(400).json({ error: err });
 
+      // ✅ verify exists only if set (non-null)
       if (nextTestId) {
         const test = await prisma.test.findUnique({ where: { id: nextTestId } });
         if (!test) return res.status(400).json({ error: "Invalid testId" });
@@ -203,7 +218,6 @@ export const updateSpotlight = async (req, res) => {
         ...(showIn !== undefined ? { showIn } : {}),
         ...(testId !== undefined ? { testId } : {}),
         ...(packageId !== undefined ? { packageId } : {}),
-        // updatedById: req.user?.id ?? null, // if you add this field later
       },
       include: includeTarget,
     });
