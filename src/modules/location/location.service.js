@@ -66,72 +66,42 @@ class LocationService {
   // -----------------------------
   // UPDATE VENDOR LOCATION
   // -----------------------------
-  async updateVendorLocation(vendorId, latitude, longitude, orderId, io) {
-    try {
-      const tracking = await prisma.orderTracking.findUnique({
-        where: { orderId },
-      });
+async updateVendorLocation(vendorId, latitude, longitude, orderId) {
+  try {
+    const tracking = await prisma.orderTracking.findUnique({
+      where: { orderId },
+    });
 
-      console.log("tracking",tracking)
+    if (!tracking || !tracking.isActive) return null;
 
-      if (!tracking || !tracking.isActive) return null;
+    await prisma.vendorLocation.create({
+      data: { vendorId, orderId, latitude, longitude },
+    });
 
-      // ✅ 1. Save history (append-only)
-      await prisma.vendorLocation.create({
-        data: {
-          vendorId,
-          orderId,
-          latitude,
-          longitude,
-        },
-      });
+    await prisma.orderTracking.update({
+      where: { orderId },
+      data: { vendorLatitude: latitude, vendorLongitude: longitude },
+    });
 
-      // ✅ 2. Update ONLY latest location
+    // Throttle ETA calc (30s)
+    let metrics = null;
+    const now = Date.now();
+    const last = tracking.lastEtaUpdate ? new Date(tracking.lastEtaUpdate).getTime() : 0;
+
+    if (now - last > 30000) {
+      metrics = await this.calculateMetrics(orderId);
       await prisma.orderTracking.update({
         where: { orderId },
-        data: {
-          vendorLatitude: latitude,
-          vendorLongitude: longitude,
-        },
+        data: { lastEtaUpdate: new Date() },
       });
-
-      // ⏱ Throttle ETA (30 sec)
-      let metrics = null;
-      const now = Date.now();
-
-      console.log("step1",new Date(tracking.lastEtaUpdate))
-      console.log("now",now)
-
-
-      if (now - new Date(tracking.lastEtaUpdate).getTime() > 30000) {
-              console.log("step2")
-        metrics = await this.calculateMetrics(orderId);
-       
-        await prisma.orderTracking.update({
-          where: { orderId },
-          data: { lastEtaUpdate: new Date() },
-        });
-      }
-
-       metrics = await this.calculateMetrics(orderId);
-       
-        await prisma.orderTracking.update({
-          where: { orderId },
-          data: { lastEtaUpdate: new Date() },
-        });
-
-      // 📡 Socket update to customer
-      io?.to(`order_${orderId}`).emit("vendorLocationUpdate", {
-        orderId,
-        vendorLocation: { latitude, longitude },
-        metrics,
-      });
-
-      return metrics;
-    } catch (err) {
-      throw new Error("Location update failed: " + err.message);
     }
+
+    return metrics; // can be null if throttled
+  } catch (err) {
+    throw new Error("Location update failed: " + err.message);
   }
+}
+
 
   // -----------------------------
   // CALCULATE PROGRESS + ETA

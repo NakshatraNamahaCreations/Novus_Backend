@@ -1,61 +1,3 @@
-// import locationService from "./location.service.js";
-
-// export default function locationSocket(io, socket) {
-//   console.log("Location socket active for:", socket.id);
-
-//   socket.on("joinOrderRoom", (orderId) => {
-//     console.log("joinOrderRoom", orderId);
-//     socket.join(`order_${orderId}`);
-//   });
-
-//   socket.on("startLocationSharing", async (data) => {
-//     const { orderId, vendorId, userLatitude, userLongitude } = data;
-
-//     try {
-//       await locationService.startOrderTracking(
-//         orderId,
-//         vendorId,
-//         userLatitude,
-//         userLongitude
-//       );
-
-//       socket.join(`order_${orderId}`);
-//       io.to(`order_${orderId}`).emit("trackingStarted", {
-//         orderId,
-//         vendorId,
-//       });
-//     } catch (error) {
-//       socket.emit("error", { message: error.message });
-//     }
-//   });
-
-//   socket.on("vendorLocationUpdate", async (data) => {
-//     const { vendorId, latitude, longitude, orderId } = data;
-
-//     try {
-//       const metrics = await locationService.updateVendorLocation(
-//         vendorId,
-//         latitude,
-//         longitude,
-//         orderId
-//       );
-
-//       if (orderId && metrics) {
-//         io.to(`order_${orderId}`).emit("locationUpdate", {
-//           orderId,
-//           vendorId,
-//           vendorLocation: { latitude, longitude },
-//           metrics,
-//         });
-//       }
-//     } catch (error) {
-//       socket.emit("error", { message: error.message });
-//     }
-//   });
-// }
-
-
-// modules/location/location.socket.js
 
 
 import locationService from "./location.service.js";
@@ -67,22 +9,10 @@ export default function locationSocket(io, socket) {
   /* -----------------------------
      JOIN ROOM (order specific)
   ------------------------------ */
-  socket.on("joinOrderRoom", ({ orderId, vendorId, role }) => {
-    if (!orderId) return;
-    console.log("joinOrderRoom", orderId, vendorId, role);
-
-    // ✅ join order room
-    socket.join(`order_${orderId}`);
-
-    // ✅ (optional) join vendor room
-    if (vendorId) socket.join(`vendor_${vendorId}`);
-
-    // ✅ (optional) send current cached status if you store it
-    // Example: HGET order:<id> status
-    // redis.hGet(`order:${orderId}`, "status").then((status) => {
-    //   if (status) socket.emit("orderStatusUpdate", { orderId, status, isReplay: true });
-    // }).catch(() => {});
-  });
+socket.on("joinOrderRoom", ({ orderId }) => {
+  socket.join(`order_${orderId}`);
+  socket.emit("joined", { room: `order_${orderId}` });
+});
 
   /* -----------------------------
      START TRACKING
@@ -124,29 +54,31 @@ export default function locationSocket(io, socket) {
   /* -----------------------------
      LOCATION UPDATE
   ------------------------------ */
-  socket.on("vendorLocationUpdate", async (data) => {
-    const { vendorId, latitude, longitude, orderId } = data;
+socket.on("vendorLocationUpdate", async (data) => {
+  const { vendorId, latitude, longitude, orderId } = data;
 
-    try {
-      const metrics = await locationService.updateVendorLocation(
-        vendorId,
-        latitude,
-        longitude,
-        orderId
-      );
+  try {
+    if (!orderId) return;
 
-      if (orderId && metrics) {
-        io.to(`order_${orderId}`).emit("locationUpdate", {
-          orderId,
-          vendorId,
-          vendorLocation: { latitude, longitude },
-          metrics,
-        });
-      }
-    } catch (error) {
-      socket.emit("error", { message: error.message });
-    }
-  });
+    const metrics = await locationService.updateVendorLocation(
+      Number(vendorId),
+      Number(latitude),
+      Number(longitude),
+      Number(orderId)
+    );
+
+    io.to(`order_${orderId}`).emit("vendorLocationUpdate", {
+      orderId: Number(orderId),
+      vendorId: Number(vendorId),
+      vendorLocation: { latitude: Number(latitude), longitude: Number(longitude) },
+      metrics, // may be null if throttled
+      updatedAt: Date.now(),
+    });
+  } catch (error) {
+    socket.emit("error", { message: error.message });
+  }
+});
+
 
   /* -----------------------------
      ✅ NEW: ORDER STATUS UPDATE

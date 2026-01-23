@@ -41,6 +41,8 @@ export const createEnquiry = async (req, res) => {
 
     // ✅ patientId from token
     const patientId = req.user?.id;
+    const number=req.body?.number;
+    const name=req.body?.name;
     if (!patientId) {
       return res
         .status(401)
@@ -69,8 +71,8 @@ export const createEnquiry = async (req, res) => {
     // ✅ use patient data for enquiry
     const enquiry = await prisma.enquiry.create({
       data: {
-        name: patient.fullName || "NA",
-        number: patient.contactNo,
+        name: name ? name : patient.fullName ,
+        number: number ? number : patient.contactNo,
         status: cleanStatus,
         patientId: patient.id,
       },

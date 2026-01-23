@@ -1408,6 +1408,7 @@ export const getOrdersByPatientId = async (req, res) => {
             },
           },
         },
+        center:true
       },
       orderBy: { createdAt: "desc" },
     });
