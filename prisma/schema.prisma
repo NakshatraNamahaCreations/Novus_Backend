@@ -223,7 +223,7 @@ model User {
   createdCenters          Center[]
   createdDoctors          Doctor[]
   createdSlots            Slot[]
-
+  updatedEnquiries      Enquiry[] @relation("EnquiryUpdatedBy")
   createdNotifications  Notification[]
   createdTestParameters TestParameter[]
   collectionPrices      CollectionPrice[]
@@ -286,7 +286,7 @@ model Patient {
   createdBy   User? @relation(fields: [createdById], references: [id])
 
   addresses Address[]
-
+   enquiries Enquiry[]
   orders         Order[]
   couponUsages   CouponUsage[]
   prescriptions  Prescription[]
@@ -1440,4 +1440,29 @@ model VendorAttendance {
   @@unique([vendorId, day])
   @@index([day])
   @@index([vendorId])
+}
+
+
+model Enquiry {
+  id       Int    @id @default(autoincrement())
+  name     String?
+  number   String
+
+  status   String @default("NEW")
+
+  // ✅ who created enquiry (patient from app token)
+  patientId Int?
+  patient   Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+
+  // ✅ who last updated in admin panel
+  updatedById Int?
+  updatedBy   User? @relation("EnquiryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([number])
+  @@index([status])
+  @@index([updatedById])
 }

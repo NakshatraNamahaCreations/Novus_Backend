@@ -54,6 +54,8 @@ import pincodeRoutes from "./modules/pincode/pincode.routes.js";
 import locationRoutes from "./modules/location/location.route.js";
 import sourcesRoutes from "./modules/sources/sources.routes.js";
 import collectionPriceRoutes from "./modules/collectionPrice/collectionPrice.routes.js";
+import enquiryRoutes from "./modules/enquiry/enquiry.route.js";
+
 
 
 
@@ -93,7 +95,8 @@ app.use(
 );
 
 
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "1024mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1024mb" }));
 
 
 /* -------------------------
@@ -135,6 +138,8 @@ app.use("/api/pg", pgRoutes);
 app.use("/api/pincodes", pincodeRoutes);
 app.use("/api/location",locationRoutes)
 app.use("/api/source",sourcesRoutes)
+app.use("/api/enquiry",enquiryRoutes)
+
 app.use("/api/collection-prices", collectionPriceRoutes);
 
 
