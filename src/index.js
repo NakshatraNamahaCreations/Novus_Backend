@@ -77,7 +77,8 @@ const app = express();
    MIDDLEWARES
 ---------------------------- */
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({ limit: "1024mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1024mb" }));
 app.use(helmet());
 
 app.use(
@@ -86,6 +87,7 @@ app.use(
       "http://localhost:4028",
       "https://novushealth.in",
       "https://api.novushealth.in",
+      "https://newapi.novushealth.in",
       "https://admin.novushealth.in",
     ],
     credentials: true,
@@ -95,8 +97,7 @@ app.use(
 );
 
 
-app.use(express.json({ limit: "1024mb" }));
-app.use(express.urlencoded({ extended: true, limit: "1024mb" }));
+
 
 
 /* -------------------------

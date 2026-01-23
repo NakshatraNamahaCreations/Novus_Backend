@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
 import { sendOtpSms } from "../../utils/sendOtpSms.js";
 import { whatsappQueue } from "../../queues/whatsapp.queue.js";
+import { signPatientToken } from "../../utils/jwt.js";
 
 const prisma = new PrismaClient();
 
@@ -171,25 +172,17 @@ export const verifyOtp = async (req, res) => {
       where: { contactNo },
     });
 
-    if (!patient) {
-      return res.status(400).json({ error: "Patient not found" });
-    }
-
-    if (patient.otp !== otp) {
-      return res.status(400).json({ error: "Invalid OTP" });
-    }
-
-    if (dayjs().isAfter(patient.otpExpiry)) {
-      return res.status(400).json({ error: "OTP expired" });
-    }
+    if (!patient) return res.status(400).json({ error: "Patient not found" });
+    if (patient.otp !== otp) return res.status(400).json({ error: "Invalid OTP" });
+    if (dayjs().isAfter(patient.otpExpiry)) return res.status(400).json({ error: "OTP expired" });
 
     // ✅ Clear OTP
-    await prisma.patient.update({
+    const updatedPatient = await prisma.patient.update({
       where: { id: patient.id },
       data: { otp: null, otpExpiry: null },
     });
 
-    // ✅ SAVE / UPDATE DEVICE (IMPORTANT)
+    // ✅ SAVE / UPDATE DEVICE
     if (fcmToken) {
       await prisma.patientDevice.upsert({
         where: { fcmToken },
@@ -205,12 +198,24 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // after patient create + sendOtpSms
+    // ✅ Generate JWT token
+    const token = signPatientToken(updatedPatient);
+
+    // ✅ (OPTIONAL) set cookie (best for web)
+    // Make sure you use cookie-parser in app + HTTPS in production
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production", // true on HTTPS
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    // ✅ Queue welcome message (optional - you already do it)
     await whatsappQueue.add(
-      "whatsapp.welcomeNewPatient", // 👈 keep it consistent with worker routing
+      "whatsapp.welcomeNewPatient",
       {
         contactNo,
-        patientName: patient?.fullName || "Customer",
+        patientName: updatedPatient?.fullName || "Customer",
       },
       {
         attempts: 3,
@@ -220,15 +225,18 @@ export const verifyOtp = async (req, res) => {
       }
     );
 
+    // ✅ Send token to patient
     return res.json({
       message: "Login successful",
-      patient: patient,
+      token,               // for mobile apps / bearer token usage
+      patient: updatedPatient,
     });
   } catch (error) {
     console.error("Error verifying OTP:", error);
     return res.status(500).json({ error: "Failed to verify OTP" });
   }
 };
+
 
 // RESEND OTP
 export const resendOtp = async (req, res) => {
