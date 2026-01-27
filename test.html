@@ -3,108 +3,74 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Vendor Socket Test</title>
+    <title>User Socket Test (vendorLocationUpdateForUser)</title>
     <style>
       body { font-family: system-ui, Arial; margin: 16px; }
       .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
-      input { padding: 8px 10px; min-width: 240px; }
+      input { padding: 8px 10px; min-width: 260px; }
       button { padding: 8px 12px; cursor: pointer; }
-      label { display:flex; gap:8px; align-items:center; }
       .log { white-space: pre-wrap; background: #0b1020; color: #d6e1ff; padding: 12px; border-radius: 10px; min-height: 220px; }
       .pill { display:inline-block; padding:2px 10px; border-radius: 999px; background:#eee; margin-left:8px; font-weight: 600; }
       .ok { background:#d1fae5; }
       .bad { background:#fee2e2; }
-      .muted { color:#666; font-size: 12px; }
       table { border-collapse: collapse; width: 100%; margin-top: 10px; }
       th, td { border: 1px solid #ddd; padding: 8px; font-size: 13px; }
       th { background: #f6f7f9; text-align: left; }
-      .small { font-size: 12px; color:#444; }
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
       .card { border:1px solid #eee; border-radius: 12px; padding: 12px; margin: 10px 0; }
+      .muted { color:#666; font-size: 12px; }
     </style>
   </head>
 
   <body>
-    <h2>Vendor Login / orderForPincode Socket Test</h2>
+    <h2>User App Socket Test — vendorLocationUpdateForUser</h2>
 
     <div class="card">
       <div class="row">
-        <input id="serverUrl" placeholder="Server URL e.g. http://192.168.1.91:5112" />
+        <input id="serverUrl" placeholder="Server URL e.g. http://192.168.1.97:5112" />
         <input id="path" placeholder="Socket path e.g. /socket.io" />
         <input id="namespace" placeholder="Namespace e.g. /orders (leave blank if none)" />
       </div>
 
       <div class="row">
-        <input id="dateKey" placeholder="dateKey e.g. 2026-01-18" />
-        <button id="vendorOnlineForDateBtn" disabled>Emit vendorOnlineForDate</button>
-      </div>
-
-      <div class="row">
-        <input id="vendorId" placeholder="vendorId e.g. 1" />
-        <input id="pincode" placeholder="pincode e.g. 560060" />
-      </div>
-
-      <div class="row">
-        <label class="small">
-          <input type="checkbox" id="forcePolling" />
-          Force polling only (debug)
-        </label>
-
-        <label class="small">
-          <input type="checkbox" id="autoVendorOnline" checked />
-          Auto emit vendorOnline after connect
-        </label>
-
-        <label class="small">
-          <input type="checkbox" id="logAllEvents" checked />
-          Log ALL events (onAny)
-        </label>
-
-        <span id="status" class="pill bad">DISCONNECTED</span>
-        <span id="transport" class="pill" style="background:#eef2ff;">transport: -</span>
+        <input id="orderId" placeholder="orderId to track e.g. 287" />
+        <button id="joinRoomBtn" disabled>Join Order Room</button>
       </div>
 
       <div class="row">
         <button id="connectBtn">Connect</button>
         <button id="disconnectBtn" disabled>Disconnect</button>
-        <button id="vendorOnlineBtn" disabled>Emit vendorOnline</button>
-        <button id="vendorOnlineForDateBtn2" disabled style="display:none;"></button>
-        <button id="pingBtn" disabled>Ping</button>
         <button id="clearBtn">Clear Logs</button>
+
+        <span id="status" class="pill bad">DISCONNECTED</span>
+        <span id="transport" class="pill" style="background:#eef2ff;">transport: -</span>
       </div>
 
       <div class="muted">
-        Open DevTools Console too. This page logs incoming <b>orderForPincode</b> events and all socket events.
+        Latest payload is stored in <span class="mono">window.__lastVendorLocationUpdateForUser</span>
       </div>
     </div>
 
     <h3>Logs</h3>
     <div id="log" class="log mono"></div>
 
-    <h3>Received Orders (orderForPincode)</h3>
-    <div class="small muted">
-      Latest raw payload is stored in <span class="mono">window.__lastOrderForPincode</span>
-    </div>
-
-    <table id="ordersTable">
+    <h3>vendorLocationUpdateForUser</h3>
+    <table id="vendorLocTable">
       <thead>
         <tr>
           <th>Time</th>
           <th>Order ID</th>
-          <th>Pincode</th>
-          <th>Status</th>
-          <th>Test Type</th>
-          <th>Date</th>
-          <th>Slot</th>
+          <th>Vendor ID</th>
           <th>Lat</th>
           <th>Lng</th>
-          <th>Replay</th>
+          <th>Distance Remaining</th>
+          <th>ETA (min)</th>
+          <th>UpdatedAt</th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
 
-    <!-- Socket.IO client -->
     <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
     <script>
       let socket = null;
@@ -113,7 +79,7 @@
       const logBox = el("log");
       const statusPill = el("status");
       const transportPill = el("transport");
-      const tbody = el("ordersTable").querySelector("tbody");
+      const tbody = el("vendorLocTable").querySelector("tbody");
 
       function log(...args) {
         const msg = args
@@ -127,21 +93,15 @@
       function setStatus(connected) {
         statusPill.textContent = connected ? "CONNECTED" : "DISCONNECTED";
         statusPill.className = "pill " + (connected ? "ok" : "bad");
-
         el("disconnectBtn").disabled = !connected;
-        el("vendorOnlineBtn").disabled = !connected;
-        el("vendorOnlineForDateBtn").disabled = !connected;
-        el("pingBtn").disabled = !connected;
+        el("joinRoomBtn").disabled = !connected;
         el("connectBtn").disabled = connected;
       }
 
       function buildSocketUrl() {
         const base = el("serverUrl").value.trim();
         const ns = el("namespace").value.trim();
-
         if (!base) throw new Error("Server URL is required");
-
-        // If namespace is provided like "/orders", connect to base + ns
         return ns ? base.replace(/\/$/, "") + ns : base;
       }
 
@@ -154,20 +114,32 @@
         }
       }
 
-      function addOrderRow(payload) {
+      function addRow(payload) {
         const tr = document.createElement("tr");
+
+        const lat = payload?.vendorLocation?.latitude ?? "";
+        const lng = payload?.vendorLocation?.longitude ?? "";
+
+        const distanceRemaining =
+          payload?.metrics?.distanceRemaining ??
+          payload?.metrics?.distance ??
+          payload?.metrics?.distanceKm ??
+          null;
+
+        const eta =
+          payload?.metrics?.eta ??
+          payload?.metrics?.etaMinutes ??
+          null;
 
         const cells = [
           new Date().toLocaleTimeString(),
           payload?.orderId ?? "",
-          payload?.pincode ?? "",
-          payload?.status ?? "",
-          payload?.testType ?? "",
-          payload?.date ?? "",
-          payload?.slot ?? payload?.slotId ?? "",
-          payload?.latitude ?? "",
-          payload?.longitude ?? "",
-          payload?.isReplay ? "yes" : "no"
+          payload?.vendorId ?? "",
+          lat,
+          lng,
+          distanceRemaining ?? "",
+          eta ?? "",
+          payload?.updatedAt ?? ""
         ];
 
         for (const v of cells) {
@@ -175,18 +147,15 @@
           td.textContent = String(v);
           tr.appendChild(td);
         }
-
         tbody.prepend(tr);
       }
 
       function connect() {
         const url = buildSocketUrl();
         const path = el("path").value.trim() || "/socket.io";
-        const forcePolling = el("forcePolling").checked;
 
-        log("Connecting to:", url, "path:", path, "forcePolling:", forcePolling);
+        log("Connecting to:", url, "path:", path);
 
-        // cleanup previous
         if (socket) {
           try { socket.disconnect(); } catch {}
           socket = null;
@@ -194,28 +163,21 @@
 
         socket = io(url, {
           path,
-          transports: forcePolling ? ["polling"] : ["websocket", "polling"],
+          transports: ["websocket", "polling"],
           reconnection: true,
           reconnectionAttempts: 10,
           timeout: 20000
         });
 
-        // --- connection lifecycle ---
         socket.on("connect", () => {
           log("✅ connect:", socket.id);
           setStatus(true);
           updateTransport();
 
-          // update transport on upgrade too
           socket.io.engine.on("upgrade", () => {
             updateTransport();
             log("🔁 upgraded transport:", socket.io.engine.transport.name);
           });
-
-          // auto vendorOnline
-          if (el("autoVendorOnline").checked) {
-            emitVendorOnline();
-          }
         });
 
         socket.on("disconnect", (reason) => {
@@ -225,42 +187,39 @@
         });
 
         socket.on("connect_error", (err) => {
-          log("🚨 connect_error:", {
-            message: err.message,
-            name: err.name,
-            description: err.description
-          });
+          log("🚨 connect_error:", err.message);
           setStatus(false);
           updateTransport();
         });
 
-        socket.on("error", (err) => {
-          log("🚨 socket error:", err);
+        // ✅ listen to your event name
+        socket.on("vendorLocationUpdateForUser", (payload) => {
+          log("🛰️ vendorLocationUpdateForUser RECEIVED:", payload);
+          window.__lastVendorLocationUpdateForUser = payload;
+          addRow(payload);
         });
 
-        // helpful engine logs
-        socket.io.on("reconnect_attempt", (n) => log("↩️ reconnect_attempt:", n));
-        socket.io.on("reconnect_failed", () => log("⛔ reconnect_failed"));
-        socket.io.on("reconnect", (n) => log("✅ reconnected after attempts:", n));
-
-        // --- your events ---
-        socket.on("pong", (msg) => log("🏓 pong:", msg));
-
-        socket.on("orderForPincode", (payload) => {
-          log("📦 orderForPincode RECEIVED:", payload);
-          window.__lastOrderForPincode = payload;
-          addOrderRow(payload);
+        // optional: you can log status updates too
+        socket.on("orderStatusUpdate", (payload) => {
+          log("🧾 orderStatusUpdate RECEIVED:", payload);
         });
 
-        socket.on("orderNearby", (payload) => {
-          log("📍 orderNearby RECEIVED:", payload);
-        });
-
-        // log everything (very useful)
         socket.onAny((event, ...args) => {
-          if (!el("logAllEvents").checked) return;
-          if (event === "orderForPincode" || event === "pong" || event === "orderNearby") return;
-          log("📡 event:", event, args);
+          // helpful debug: comment this if too noisy
+          // log("📡 event:", event, args);
+        });
+      }
+
+      function joinRoom() {
+        const orderId = el("orderId").value.trim();
+        if (!socket || !socket.connected) return log("❌ Not connected yet.");
+        if (!orderId) return log("⚠️ orderId required.");
+
+        log("➡️ emit joinOrderRoom:", { orderId });
+        socket.emit("joinOrderRoom", { orderId });
+
+        socket.once("joined", (data) => {
+          log("✅ joined:", data);
         });
       }
 
@@ -274,74 +233,23 @@
         updateTransport();
       }
 
-      function emitVendorOnline() {
-        const vendorId = el("vendorId").value.trim();
-        const pincode = el("pincode").value.trim();
-
-        if (!socket || !socket.connected) {
-          log("❌ Not connected yet. Connect first.");
-          return;
-        }
-        if (!vendorId || !pincode) {
-          log("⚠️ vendorId and pincode required.");
-          return;
-        }
-
-        const payload = { vendorId, pincode };
-        log("➡️ emit vendorOnline:", payload);
-        socket.emit("vendorOnline", payload);
-      }
-
-      function emitVendorOnlineForDate() {
-        const vendorId = el("vendorId").value.trim();
-        const pincode = el("pincode").value.trim();
-        const dateKey = el("dateKey").value.trim();
-
-        if (!socket || !socket.connected) {
-          log("❌ Not connected yet. Connect first.");
-          return;
-        }
-        if (!vendorId || !pincode || !dateKey) {
-          log("⚠️ vendorId, pincode, dateKey required");
-          return;
-        }
-
-        const payload = { vendorId, pincode, dateKey };
-        log("➡️ emit vendorOnlineForDate:", payload);
-        socket.emit("vendorOnlineForDate", payload);
-      }
-
-      function ping() {
-        if (!socket || !socket.connected) {
-          log("❌ Not connected yet.");
-          return;
-        }
-        const msg = "hello-" + Math.random().toString(16).slice(2);
-        log("➡️ emit ping:", msg);
-        socket.emit("ping", msg);
-      }
-
       // buttons
       el("connectBtn").addEventListener("click", () => {
         try { connect(); } catch (e) { log("🚨", e.message); }
       });
+      el("joinRoomBtn").addEventListener("click", joinRoom);
       el("disconnectBtn").addEventListener("click", disconnect);
-      el("vendorOnlineBtn").addEventListener("click", emitVendorOnline);
-      el("vendorOnlineForDateBtn").addEventListener("click", emitVendorOnlineForDate);
-      el("pingBtn").addEventListener("click", ping);
       el("clearBtn").addEventListener("click", () => {
         logBox.textContent = "";
         tbody.innerHTML = "";
-        window.__lastOrderForPincode = undefined;
+        window.__lastVendorLocationUpdateForUser = undefined;
       });
 
       // defaults
-      el("serverUrl").value = "http://192.168.1.91:5112";
+      el("serverUrl").value = "http://192.168.1.97:5112";
       el("path").value = "/socket.io";
       el("namespace").value = "";
-      el("vendorId").value = "2";
-      el("pincode").value = "560060";
-      el("dateKey").value = "";
+      el("orderId").value = "287";
 
       setStatus(false);
       updateTransport();

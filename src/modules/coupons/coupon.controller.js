@@ -226,7 +226,7 @@ export const getActiveCouponsForPatient = async (req, res) => {
       where: {
         isActive: true,
         OR: [
-          { isPatientCoupon: true, patientId: Number(patientId) },
+          { isPatientCoupon: true,  },
           {
             isPatientCoupon: false,
             AND: [

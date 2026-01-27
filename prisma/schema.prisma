@@ -1160,6 +1160,8 @@ model OrderTracking {
   startTime       DateTime  @default(now())
   endTime         DateTime?
   lastEtaUpdate   DateTime  @default(now())
+    // ✅ ADD THIS (NEW)
+  lastMetrics     Json?
   createdById     Int? // ⭐ ADDED: Track who created the tracking
   createdBy       User?     @relation(fields: [createdById], references: [id])
 

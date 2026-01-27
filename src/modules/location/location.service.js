@@ -70,6 +70,12 @@ async updateVendorLocation(vendorId, latitude, longitude, orderId) {
   try {
     const tracking = await prisma.orderTracking.findUnique({
       where: { orderId },
+      select: {
+        orderId: true,
+        isActive: true,
+        lastEtaUpdate: true,
+        lastMetrics: true, // ✅
+      },
     });
 
     if (!tracking || !tracking.isActive) return null;
@@ -83,20 +89,36 @@ async updateVendorLocation(vendorId, latitude, longitude, orderId) {
       data: { vendorLatitude: latitude, vendorLongitude: longitude },
     });
 
-    // Throttle ETA calc (30s)
-    let metrics = null;
     const now = Date.now();
     const last = tracking.lastEtaUpdate ? new Date(tracking.lastEtaUpdate).getTime() : 0;
 
-    if (now - last > 30000) {
-      metrics = await this.calculateMetrics(orderId);
-      await prisma.orderTracking.update({
-        where: { orderId },
-        data: { lastEtaUpdate: new Date() },
-      });
+    // ✅ THROTTLED: return last saved metrics (not null)
+    if (now - last <= 30000) {
+      return tracking.lastMetrics || {
+        throttled: true,
+        distanceRemaining: null,
+        eta: null,
+        calculatedAt: null,
+      };
     }
 
-    return metrics; // can be null if throttled
+    // ✅ CALCULATE fresh
+    const fresh = await this.calculateMetrics(orderId);
+
+    // keep old if google fails
+    const metricsToSave = fresh
+      ? { ...fresh, calculatedAt: new Date().toISOString() }
+      : (tracking.lastMetrics || null);
+
+    await prisma.orderTracking.update({
+      where: { orderId },
+      data: {
+        lastEtaUpdate: new Date(),
+        lastMetrics: metricsToSave, // ✅ store for next throttled calls
+      },
+    });
+
+    return metricsToSave;
   } catch (err) {
     throw new Error("Location update failed: " + err.message);
   }

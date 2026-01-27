@@ -1,18 +1,18 @@
 import { Worker } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
-import { generateAndUploadInvoice } from '../services/generateInvoice.service.js'; // Import the generate/upload function
-import { queueRedis } from '../config/redisQueue.js'; // Redis connection for BullMQ
+import { generateAndUploadInvoice } from '../services/generateInvoice.service.js'; 
+import { queueRedis } from '../config/redisQueue.js'; 
 
 const prisma = new PrismaClient();
 
 new Worker(
-  'invoice', // Queue name
+  'invoice', 
   async (job) => {
     const { paymentId } = job.data;
     console.log('📄 Processing invoice for paymentId:', paymentId);
 
     try {
-      // Fetch payment details from the database
+     
       const payment = await prisma.payment.findUnique({
         where: { paymentId },
         select: {
@@ -58,13 +58,15 @@ new Worker(
   },
   {
     connection: queueRedis,
-    concurrency: 5, // Adjust concurrency based on expected load
-    attempts: 3, // Retry up to 3 times
+    concurrency: 5, 
+    attempts: 3,
     backoff: {
       type: 'exponential',
-      delay: 5000, // Retry after 5 seconds
+      delay: 5000, 
     },
   }
 );
+
+
 
 console.log('🚀 Invoice worker started');

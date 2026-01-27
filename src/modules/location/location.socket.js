@@ -1,7 +1,4 @@
-
-
 import locationService from "./location.service.js";
-
 
 export default function locationSocket(io, socket) {
   console.log("Location socket active for:", socket.id);
@@ -9,10 +6,10 @@ export default function locationSocket(io, socket) {
   /* -----------------------------
      JOIN ROOM (order specific)
   ------------------------------ */
-socket.on("joinOrderRoom", ({ orderId }) => {
-  socket.join(`order_${orderId}`);
-  socket.emit("joined", { room: `order_${orderId}` });
-});
+  socket.on("joinOrderRoom", ({ orderId }) => {
+    socket.join(`order_${orderId}`);
+    socket.emit("joined", { room: `order_${orderId}` });
+  });
 
   /* -----------------------------
      START TRACKING
@@ -25,7 +22,7 @@ socket.on("joinOrderRoom", ({ orderId }) => {
         orderId,
         vendorId,
         userLatitude,
-        userLongitude
+        userLongitude,
       );
 
       socket.join(`order_${orderId}`);
@@ -45,7 +42,6 @@ socket.on("joinOrderRoom", ({ orderId }) => {
 
       // optional cache
       // await redis.hSet(`order:${orderId}`, { status: "tracking_started" });
-
     } catch (error) {
       socket.emit("error", { message: error.message });
     }
@@ -54,31 +50,34 @@ socket.on("joinOrderRoom", ({ orderId }) => {
   /* -----------------------------
      LOCATION UPDATE
   ------------------------------ */
-socket.on("vendorLocationUpdate", async (data) => {
-  const { vendorId, latitude, longitude, orderId } = data;
+  socket.on("vendorLocationUpdate", async (data) => {
+    const { vendorId, latitude, longitude, orderId } = data;
 
-  try {
-    if (!orderId) return;
+    try {
+      if (!orderId) return;
 
-    const metrics = await locationService.updateVendorLocation(
-      Number(vendorId),
-      Number(latitude),
-      Number(longitude),
-      Number(orderId)
-    );
+      const metrics = await locationService.updateVendorLocation(
+        Number(vendorId),
+        Number(latitude),
+        Number(longitude),
+        Number(orderId),
+      );
 
-    io.to(`order_${orderId}`).emit("vendorLocationUpdate", {
-      orderId: Number(orderId),
-      vendorId: Number(vendorId),
-      vendorLocation: { latitude: Number(latitude), longitude: Number(longitude) },
-      metrics, // may be null if throttled
-      updatedAt: Date.now(),
-    });
-  } catch (error) {
-    socket.emit("error", { message: error.message });
-  }
-});
-
+      io.to(`order_${orderId}`).emit("vendorLocationUpdateForUser", {
+        orderId: Number(orderId),
+        vendorId: Number(vendorId),
+        vendorLocation: {
+          latitude: Number(latitude),
+          longitude: Number(longitude),
+        },
+        metrics, // may be null if throttled
+        updatedAt: Date.now(),
+      });
+      
+    } catch (error) {
+      socket.emit("error", { message: error.message });
+    }
+  });
 
   /* -----------------------------
      ✅ NEW: ORDER STATUS UPDATE
@@ -117,7 +116,13 @@ socket.on("vendorLocationUpdate", async (data) => {
    Example usage in acceptOrderByVendor:
    emitOrderStatus(io, orderId, "accepted", vendorId)
 ---------------------------------------------------------- */
-export function emitOrderStatus(io, orderId, status, vendorId = null, note = "") {
+export function emitOrderStatus(
+  io,
+  orderId,
+  status,
+  vendorId = null,
+  note = "",
+) {
   io.to(`order_${orderId}`).emit("orderStatusUpdate", {
     orderId,
     status,
