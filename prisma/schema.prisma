@@ -351,6 +351,9 @@ model Category {
   packages           HealthPackage[]
   centers            CenterCategory[]
   ESignatureCategory ESignatureCategory[]
+  // ✅ NEW
+  centerSlots CenterSlot[]
+
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -397,6 +400,8 @@ model HealthPackage {
   showIn        ShowIn? @default(TEST)
   spotlight     Boolean @default(false)
   features      String?
+  preparations   String?
+  sampleRequired String?
   createdById   Int? // ⭐ ADDED: Track who created the package
   createdBy     User?   @relation(fields: [createdById], references: [id])
 
@@ -643,6 +648,10 @@ model CenterSlot {
   id       Int @id @default(autoincrement())
   centerId Int
 
+  // ✅ NEW: category-wise slot
+  categoryId Int?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
   name      String?
   startTime String
   endTime   String
@@ -652,7 +661,14 @@ model CenterSlot {
   center   Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
   orders   Order[]
   bookings CenterSlotBooking[]
+
+  @@index([centerId])
+  @@index([categoryId])
+
+  // ✅ optional but recommended: avoid duplicates
+  @@unique([centerId, categoryId, name])
 }
+
 
 model CenterCategory {
   id         Int @id @default(autoincrement())

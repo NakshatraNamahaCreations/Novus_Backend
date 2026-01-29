@@ -12,6 +12,7 @@ import {
   updateCenterSlot,
   deleteCenterSlot,
   getAllCentersforadmin,
+  getCenterCategories
 } from "./center.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -22,9 +23,9 @@ router.get("/nearby", getNearbyCenters);
 // CREATE
 router.post("/", authenticateUser, createCenter);
 router.post("/:id/categories", assignCategoriesToCenter);
+router.get("/:id/categories", getCenterCategories);
 router.post("/:id/slots", createCenterSlot);
 router.get("/:id/slots", getCenterSlots);
-
 router.put("/slot/:slotId", updateCenterSlot);
 router.delete("/slot/:slotId", deleteCenterSlot);
 

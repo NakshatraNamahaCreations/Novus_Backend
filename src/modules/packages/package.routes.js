@@ -16,7 +16,8 @@ import {
   simpleBulkUpload,
   validateBulkUpload,
   getHomeMostBooked,
-  getSpotlightTests
+  getSpotlightTests,
+  getAllTestsnames
 } from "./package.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -29,6 +30,8 @@ router.get("/search", searchTestsGrouped);
 router.get("/most-booked-tests", getHomeMostBooked);
 
 router.get("/", getAllTests);
+
+router.get("/names", getAllTestsnames);
 router.get("/spotlight", getSpotlightTests);
 
 router.get("/:id", getTestById);

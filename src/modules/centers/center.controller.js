@@ -2,7 +2,6 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-
 const toBool = (v, fallback = false) => {
   if (v === true || v === false) return v;
   if (typeof v === "string") return v.toLowerCase() === "true";
@@ -42,7 +41,8 @@ export const createCenter = async (req, res) => {
     // ✅ Email unique check
     if (email) {
       const exists = await prisma.center.findUnique({ where: { email } });
-      if (exists) return res.status(400).json({ error: "Email already registered" });
+      if (exists)
+        return res.status(400).json({ error: "Email already registered" });
     }
 
     // ✅ Validate cityId
@@ -68,7 +68,9 @@ export const createCenter = async (req, res) => {
       const validSet = new Set(validTests.map((t) => t.id));
       const invalidIds = testIdNums.filter((t) => !validSet.has(t));
       if (invalidIds.length) {
-        return res.status(400).json({ error: `Invalid testIds: ${invalidIds.join(", ")}` });
+        return res
+          .status(400)
+          .json({ error: `Invalid testIds: ${invalidIds.join(", ")}` });
       }
     }
 
@@ -81,8 +83,12 @@ export const createCenter = async (req, res) => {
         alternativeEmail: alternativeEmail || null,
         mobile: mobile || null,
         isSelf: toBool(isSelf, false), // ✅ FIXED
-        lat: lat !== undefined && lat !== null && lat !== "" ? Number(lat) : null,
-        long: long !== undefined && long !== null && long !== "" ? Number(long) : null,
+        lat:
+          lat !== undefined && lat !== null && lat !== "" ? Number(lat) : null,
+        long:
+          long !== undefined && long !== null && long !== ""
+            ? Number(long)
+            : null,
 
         ...(req.user?.id
           ? { createdBy: { connect: { id: Number(req.user.id) } } }
@@ -104,14 +110,14 @@ export const createCenter = async (req, res) => {
       },
     });
 
-    return res.status(201).json({ message: "Center created successfully", center });
+    return res
+      .status(201)
+      .json({ message: "Center created successfully", center });
   } catch (error) {
     console.error("Error creating center:", error);
     return res.status(500).json({ error: "Failed to create center" });
   }
 };
-
-
 
 /* ✅ GET ALL Centers with Pagination + Search */
 export const getAllCenters = async (req, res) => {
@@ -127,7 +133,9 @@ export const getAllCenters = async (req, res) => {
             { email: { contains: search, mode: "insensitive" } },
             { mobile: { contains: search, mode: "insensitive" } },
             { address: { contains: search, mode: "insensitive" } },
-            { city: { is: { name: { contains: search, mode: "insensitive" } } } },
+            {
+              city: { is: { name: { contains: search, mode: "insensitive" } } },
+            },
           ],
         }
       : {};
@@ -159,7 +167,6 @@ export const getAllCenters = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch centers" });
   }
 };
-
 
 /* ✅ GET ALL Centers with Pagination + Search */
 export const getAllCentersforadmin = async (req, res) => {
@@ -229,7 +236,6 @@ export const getAllCentersforadmin = async (req, res) => {
         // ✅ city
         city: true,
         centerSlots: true,
-   
       },
       orderBy: { name: "asc" },
       skip,
@@ -278,7 +284,9 @@ export const updateCenter = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const existing = await prisma.center.findUnique({ where: { id: Number(id) } });
+    const existing = await prisma.center.findUnique({
+      where: { id: Number(id) },
+    });
     if (!existing) return res.status(404).json({ error: "Center not found" });
 
     const {
@@ -298,7 +306,8 @@ export const updateCenter = async (req, res) => {
     // Email unique check
     if (email && email !== existing.email) {
       const exists = await prisma.center.findUnique({ where: { email } });
-      if (exists) return res.status(400).json({ error: "Email already in use" });
+      if (exists)
+        return res.status(400).json({ error: "Email already in use" });
     }
 
     // Validate cityId if provided
@@ -306,7 +315,9 @@ export const updateCenter = async (req, res) => {
     if (cityId === "" || cityId === null) {
       cityData = { cityId: null };
     } else if (cityId !== undefined) {
-      const city = await prisma.city.findUnique({ where: { id: Number(cityId) } });
+      const city = await prisma.city.findUnique({
+        where: { id: Number(cityId) },
+      });
       if (!city) return res.status(400).json({ error: "Invalid cityId" });
       cityData = { cityId: Number(cityId) };
     }
@@ -328,26 +339,39 @@ export const updateCenter = async (req, res) => {
       }
     }
 
-await prisma.center.update({
-  where: { id: Number(id) },
-  data: {
-    ...(name !== undefined ? { name: String(name).trim() } : {}),
-    ...(contactName !== undefined ? { contactName: contactName ? String(contactName).trim() : null } : {}),
-    ...(address !== undefined ? { address: address ? String(address).trim() : null } : {}),
-    ...(email !== undefined ? { email: email || null } : {}),
-    ...(alternativeEmail !== undefined ? { alternativeEmail: alternativeEmail || null } : {}),
-    ...(mobile !== undefined ? { mobile: mobile || null } : {}),
-    ...(isSelf !== undefined ? { isSelf: toBool(isSelf, existing.isSelf) } : {}), // ✅ FIXED
-    ...(lat !== undefined ? { lat: lat === "" || lat === null ? null : Number(lat) } : {}),
-    ...(long !== undefined ? { long: long === "" || long === null ? null : Number(long) } : {}),
-    ...cityData,
-  },
-});
-
+    await prisma.center.update({
+      where: { id: Number(id) },
+      data: {
+        ...(name !== undefined ? { name: String(name).trim() } : {}),
+        ...(contactName !== undefined
+          ? { contactName: contactName ? String(contactName).trim() : null }
+          : {}),
+        ...(address !== undefined
+          ? { address: address ? String(address).trim() : null }
+          : {}),
+        ...(email !== undefined ? { email: email || null } : {}),
+        ...(alternativeEmail !== undefined
+          ? { alternativeEmail: alternativeEmail || null }
+          : {}),
+        ...(mobile !== undefined ? { mobile: mobile || null } : {}),
+        ...(isSelf !== undefined
+          ? { isSelf: toBool(isSelf, existing.isSelf) }
+          : {}), // ✅ FIXED
+        ...(lat !== undefined
+          ? { lat: lat === "" || lat === null ? null : Number(lat) }
+          : {}),
+        ...(long !== undefined
+          ? { long: long === "" || long === null ? null : Number(long) }
+          : {}),
+        ...cityData,
+      },
+    });
 
     // Update tests mapping (replace all)
     if (Array.isArray(testIds)) {
-      await prisma.centerPackage.deleteMany({ where: { centerId: Number(id) } });
+      await prisma.centerPackage.deleteMany({
+        where: { centerId: Number(id) },
+      });
 
       if (testIds.length > 0) {
         await prisma.centerPackage.createMany({
@@ -367,7 +391,10 @@ await prisma.center.update({
       },
     });
 
-    return res.json({ message: "Center updated successfully", center: updated });
+    return res.json({
+      message: "Center updated successfully",
+      center: updated,
+    });
   } catch (error) {
     console.error("Error updating center:", error);
     return res.status(500).json({ error: "Failed to update center" });
@@ -379,7 +406,9 @@ export const deleteCenter = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const existing = await prisma.center.findUnique({ where: { id: Number(id) } });
+    const existing = await prisma.center.findUnique({
+      where: { id: Number(id) },
+    });
     if (!existing) return res.status(404).json({ error: "Center not found" });
 
     // remove related mappings first (safe)
@@ -432,7 +461,9 @@ export const getNearbyCenters = async (req, res) => {
       });
     }
     if (isNaN(distanceKm) || distanceKm <= 0) {
-      return res.status(400).json({ error: "Radius must be a positive number" });
+      return res
+        .status(400)
+        .json({ error: "Radius must be a positive number" });
     }
 
     let categoryIdList = [];
@@ -448,10 +479,26 @@ export const getNearbyCenters = async (req, res) => {
     if (date) {
       const parsed = new Date(date);
       if (Number.isNaN(parsed.getTime())) {
-        return res.status(400).json({ error: "Date must be in YYYY-MM-DD format" });
+        return res
+          .status(400)
+          .json({ error: "Date must be in YYYY-MM-DD format" });
       }
-      bookingDateStart = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0);
-      bookingDateEnd = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate() + 1, 0, 0, 0);
+      bookingDateStart = new Date(
+        parsed.getFullYear(),
+        parsed.getMonth(),
+        parsed.getDate(),
+        0,
+        0,
+        0,
+      );
+      bookingDateEnd = new Date(
+        parsed.getFullYear(),
+        parsed.getMonth(),
+        parsed.getDate() + 1,
+        0,
+        0,
+        0,
+      );
     }
 
     const includeFull = String(includeFullSlots).toLowerCase() === "true";
@@ -483,7 +530,10 @@ export const getNearbyCenters = async (req, res) => {
       const { password, ...rest } = row;
       return {
         ...rest,
-        distance: typeof rest.distance === "string" ? parseFloat(rest.distance) : rest.distance,
+        distance:
+          typeof rest.distance === "string"
+            ? parseFloat(rest.distance)
+            : rest.distance,
       };
     });
 
@@ -526,10 +576,15 @@ export const getNearbyCenters = async (req, res) => {
 
     let filteredCenters = sanitized;
     if (categoryIdList.length > 0) {
-      const matched = centerCategories.filter((cc) => categoryIdList.includes(cc.categoryId));
+      const matched = centerCategories.filter((cc) =>
+        categoryIdList.includes(cc.categoryId),
+      );
       const allowedCenterIds = new Set(matched.map((m) => m.centerId));
-      filteredCenters = sanitized.filter((center) => allowedCenterIds.has(center.id));
-      if (filteredCenters.length === 0) return res.json({ count: 0, centers: [] });
+      filteredCenters = sanitized.filter((center) =>
+        allowedCenterIds.has(center.id),
+      );
+      if (filteredCenters.length === 0)
+        return res.json({ count: 0, centers: [] });
     }
 
     const now = new Date();
@@ -547,7 +602,9 @@ export const getNearbyCenters = async (req, res) => {
         .filter((cc) => cc.centerId === center.id && cc.category)
         .map((cc) => ({ id: cc.category.id, name: cc.category.name }));
 
-      const allSlots = centerSlots.filter((s) => s.centerId === center.id && (s.isActive ?? true));
+      const allSlots = centerSlots.filter(
+        (s) => s.centerId === center.id && (s.isActive ?? true),
+      );
 
       let slotsWithAvailability = allSlots.map((slot) => {
         const booked = bookingMap[slot.id] || 0;
@@ -571,13 +628,18 @@ export const getNearbyCenters = async (req, res) => {
       }
 
       if (!includeFull) {
-        slotsWithAvailability = slotsWithAvailability.filter((s) => s.availableCount > 0);
+        slotsWithAvailability = slotsWithAvailability.filter(
+          (s) => s.availableCount > 0,
+        );
       }
 
       return { ...center, categories: cats, slots: slotsWithAvailability };
     });
 
-    return res.json({ count: responseCenters.length, centers: responseCenters });
+    return res.json({
+      count: responseCenters.length,
+      centers: responseCenters,
+    });
   } catch (error) {
     console.error("Error fetching nearby centers:", error);
     return res.status(500).json({ error: "Failed to fetch nearby centers" });
@@ -590,7 +652,9 @@ export const assignCategoriesToCenter = async (req, res) => {
     const { id } = req.params;
     const { categoryIds = [] } = req.body;
 
-    const center = await prisma.center.findUnique({ where: { id: Number(id) } });
+    const center = await prisma.center.findUnique({
+      where: { id: Number(id) },
+    });
     if (!center) return res.status(404).json({ error: "Center not found" });
 
     const validCategories = await prisma.category.findMany({
@@ -602,7 +666,9 @@ export const assignCategoriesToCenter = async (req, res) => {
     const invalidIds = categoryIds.filter((cid) => !validIds.has(Number(cid)));
 
     if (invalidIds.length > 0) {
-      return res.status(400).json({ error: `Invalid category IDs: ${invalidIds.join(", ")}` });
+      return res
+        .status(400)
+        .json({ error: `Invalid category IDs: ${invalidIds.join(", ")}` });
     }
 
     await prisma.centerCategory.deleteMany({ where: { centerId: Number(id) } });
@@ -621,7 +687,10 @@ export const assignCategoriesToCenter = async (req, res) => {
       include: { categories: { include: { category: true } } },
     });
 
-    return res.json({ message: "Categories assigned successfully", center: updated });
+    return res.json({
+      message: "Categories assigned successfully",
+      center: updated,
+    });
   } catch (error) {
     console.error("Error assigning categories:", error);
     return res.status(500).json({ error: "Failed to assign categories" });
@@ -631,15 +700,31 @@ export const assignCategoriesToCenter = async (req, res) => {
 /* ✅ Create Slot */
 export const createCenterSlot = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { name, startTime, endTime, capacity = 0 } = req.body;
+    const { id } = req.params; // centerId
+    const { categoryId, name, startTime, endTime, capacity = 0 } = req.body;
 
-    const center = await prisma.center.findUnique({ where: { id: Number(id) } });
+    const centerId = Number(id);
+    const catId =
+      categoryId !== undefined && categoryId !== null
+        ? Number(categoryId)
+        : null;
+
+    const center = await prisma.center.findUnique({ where: { id: centerId } });
     if (!center) return res.status(404).json({ error: "Center not found" });
+
+    // ✅ if categoryId is provided, validate category exists
+    if (catId !== null) {
+      const category = await prisma.category.findUnique({
+        where: { id: catId },
+      });
+      if (!category)
+        return res.status(404).json({ error: "Category not found" });
+    }
 
     const slot = await prisma.centerSlot.create({
       data: {
-        centerId: Number(id),
+        centerId,
+        categoryId: catId, // ✅ NEW
         name,
         startTime,
         endTime,
@@ -656,11 +741,35 @@ export const createCenterSlot = async (req, res) => {
 
 export const getCenterSlots = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // centerId
+    const { categoryId, includeGlobal = "true" } = req.query;
+
+    const centerId = Number(id);
+    const catId =
+      categoryId !== undefined && categoryId !== null && categoryId !== ""
+        ? Number(categoryId)
+        : null;
+
+    // ✅ build where condition
+    let where = { centerId };
+
+    // If categoryId given, filter by category
+    if (catId !== null) {
+      const useGlobal = String(includeGlobal) === "true";
+
+      where = useGlobal
+        ? { centerId, OR: [{ categoryId: catId }, { categoryId: null }] }
+        : { centerId, categoryId: catId };
+    }
 
     const slots = await prisma.centerSlot.findMany({
-      where: { centerId: Number(id) },
+      where,
       orderBy: { startTime: "asc" },
+      include: {
+        category: {
+          select: { id: true, name: true },
+        }, // ✅ optional: return category details
+      },
     });
 
     return res.json({ slots });
@@ -673,14 +782,32 @@ export const getCenterSlots = async (req, res) => {
 export const updateCenterSlot = async (req, res) => {
   try {
     const { slotId } = req.params;
-    const { name, startTime, endTime, capacity, isActive } = req.body;
+    const { categoryId, name, startTime, endTime, capacity, isActive } =
+      req.body;
 
-    const slot = await prisma.centerSlot.findUnique({ where: { id: Number(slotId) } });
+    const id = Number(slotId);
+
+    const slot = await prisma.centerSlot.findUnique({ where: { id } });
     if (!slot) return res.status(404).json({ error: "Slot not found" });
 
+    const catId =
+      categoryId !== undefined && categoryId !== null
+        ? Number(categoryId)
+        : undefined;
+
+    // ✅ validate category if provided
+    if (catId !== undefined) {
+      const category = await prisma.category.findUnique({
+        where: { id: catId },
+      });
+      if (!category)
+        return res.status(404).json({ error: "Category not found" });
+    }
+
     const updated = await prisma.centerSlot.update({
-      where: { id: Number(slotId) },
+      where: { id },
       data: {
+        ...(catId !== undefined ? { categoryId: catId } : {}),
         ...(name !== undefined ? { name } : {}),
         ...(startTime !== undefined ? { startTime } : {}),
         ...(endTime !== undefined ? { endTime } : {}),
@@ -699,12 +826,28 @@ export const updateCenterSlot = async (req, res) => {
 export const deleteCenterSlot = async (req, res) => {
   try {
     const { slotId } = req.params;
-
     await prisma.centerSlot.delete({ where: { id: Number(slotId) } });
-
     return res.json({ message: "Slot deleted successfully" });
   } catch (error) {
     console.error("Error deleting slot:", error);
     return res.status(500).json({ error: "Failed to delete slot" });
+  }
+};
+
+export const getCenterCategories = async (req, res) => {
+  try {
+    const centerId = Number(req.params.id);
+
+    const rows = await prisma.centerCategory.findMany({
+      where: { centerId },
+      include: { category: true },
+      orderBy: { id: "asc" },
+    });
+
+    const categories = rows.map((r) => r.category);
+    return res.json({ categories });
+  } catch (e) {
+    console.error("getCenterCategories error:", e);
+    return res.status(500).json({ error: "Failed to fetch center categories" });
   }
 };

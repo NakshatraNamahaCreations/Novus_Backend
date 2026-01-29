@@ -66,7 +66,9 @@ export const addHealthPackage = async (req, res) => {
       categoryId,
       alsoKnowAs,
       spotlight,
-      features
+      features,
+      preparations,
+      sampleRequired
     } = req.body;
 
     if (!name || !actualPrice) {
@@ -108,7 +110,9 @@ export const addHealthPackage = async (req, res) => {
         categoryId: categoryId ? Number(categoryId) : null,
         alsoKnowAs,
            spotlight: finalSpotlight,
-           features
+           features,
+           preparations,
+           sampleRequired
       }
     });
 
@@ -158,7 +162,9 @@ export const updateHealthPackage = async (req, res) => {
       spotlight,
       categoryId,
       alsoKnowAs,
-      features
+      features,
+      preparations,
+      sampleRequired
     } = req.body;
 
     console.log("features",features)
@@ -224,7 +230,9 @@ if (spotlight !== undefined) {
         categoryId: categoryId ? Number(categoryId) : existing.categoryId,
         alsoKnowAs:alsoKnowAs ?? existing.alsoKnowAs,
         spotlight: finalSpotlight,
-        features:features
+        features:features,
+        preparations :preparations,
+        sampleRequired :sampleRequired
 
       }
     });
@@ -376,6 +384,10 @@ const whereCondition = searchText
         categoryId:pkg.categoryId,
         category: pkg.category,
         alsoKnowAs:pkg.alsoKnowAs,
+        preparations:pkg.preparations,
+        sampleRequired:pkg.sampleRequired,
+        spotlight: pkg.spotlight,
+         features:pkg.features,
         testType:"PATHOLOGY",
         tests,
         testCount: tests.length,
