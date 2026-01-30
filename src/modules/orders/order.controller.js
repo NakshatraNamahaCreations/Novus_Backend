@@ -286,16 +286,13 @@ export const createOrder = async (req, res) => {
       members,
       paymentStatus,
       merchantOrderId,
-
       isHomeSample = false,
-
-      // home sample
       slotId,
-
-      // center sample
       centerId,
       centerSlotId,
     } = req.body;
+
+    console.log("patientId",patientId)
 
     if (!members?.length) {
       return res.status(400).json({ error: "Members required" });
@@ -317,10 +314,7 @@ if (isNaN(orderDate.getTime())) {
       if (!centerSlotId) return res.status(400).json({ error: "centerSlotId is required for center booking" });
     }
 
-    /* ===========================
-       ✅ SLA PRECHECK (BLOCK ORDER)
-       If SLA already over for any selected test/package -> do not create order
-    ============================ */
+  
     const now = new Date();
 
     const testIds = [];
@@ -351,40 +345,7 @@ if (isNaN(orderDate.getTime())) {
     const testMap = new Map(tests.map((t) => [t.id, t]));
     const pkgMap = new Map(packages.map((p) => [p.id, p]));
 
-    // for (const t of tests) {
-    //   const unit = normalizeUnit(t.reportUnit);
-    //   const dueAt = computeDueAt(orderDate, t.reportWithin, unit);
-
-    //   console.log("dueAt",dueAt)
-    //   console.log("now",now)
-    //   console.log("dueAt <= now",dueAt <= now)
-
-    //   if (dueAt && dueAt <= now) {
-    //     return res.status(400).json({
-    //       success: false,
-    //       error: `Cannot create order: SLA already over for test "${t.name}"`,
-    //       testId: t.id,
-    //       reportDueAt: dueAt,
-    //     });
-    //   }
-    // }
-
-    // for (const p of packages) {
-    //   const unit = normalizeUnit(p.reportUnit);
-    //   const dueAt = computeDueAt(orderDate, p.reportWithin, unit);
-
-    //         console.log("unit",unit)
-    //   console.log("dueAt",dueAt)
-    //   if (dueAt && dueAt <= now) {
-    //     return res.status(400).json({
-    //       success: false,
-    //       error: `Cannot create order: SLA already over for package "${p.name}"`,
-    //       packageId: p.id,
-    //       reportDueAt: dueAt,
-    //     });
-    //   }
-    // }
-
+   
     /* 🔐 LOCK KEY */
     const lockKey = isHomeSample
       ? `lock:slot:${slotId}:${dayjs(orderDate).format("YYYY-MM-DD")}`
@@ -1663,13 +1624,23 @@ export const getAllOrders = async (req, res) => {
       status = "",
       paymentStatus = "",
       date = "all",
+      specificDate = "", // ✅ NEW
     } = req.query;
 
     page = Number(page);
     limit = Number(limit);
     const skip = (page - 1) * limit;
 
+    const user = req.user;
+
+    console.log("user",user)
+
+    // ✅ INIT WHERE FIRST
     let where = {};
+
+    if (user?.role === "admin") {
+  where.createdById = user.id; // only orders created by this admin
+}
 
     /* ----------------------------------
        SEARCH FILTER
@@ -1679,16 +1650,8 @@ export const getAllOrders = async (req, res) => {
         { orderNumber: { contains: search, mode: "insensitive" } },
         { trackingId: { contains: search, mode: "insensitive" } },
         { source: { contains: search, mode: "insensitive" } },
-        {
-          patient: {
-            fullName: { contains: search, mode: "insensitive" },
-          },
-        },
-        {
-          patient: {
-            contactNo: { contains: search, mode: "insensitive" },
-          },
-        },
+        { patient: { fullName: { contains: search, mode: "insensitive" } } },
+        { patient: { contactNo: { contains: search, mode: "insensitive" } } },
       ];
     }
 
@@ -1700,26 +1663,38 @@ export const getAllOrders = async (req, res) => {
     }
 
     /* ----------------------------------
-       PAYMENT STATUS FILTER (FIXED)
+       PAYMENT STATUS FILTER
     ---------------------------------- */
     if (paymentStatus === "pending") {
-      // ✅ DUE PAYMENTS
       where.paymentStatus = {
         in: ["pending", "AUTHORIZED", "FAILED"],
       };
     }
 
     if (paymentStatus === "paid") {
-      // ✅ COMPLETED PAYMENTS
       where.paymentStatus = {
         in: ["CAPTURED", "COMPLETED", "paid"],
       };
     }
 
     /* ----------------------------------
-       DATE FILTER
+       DATE FILTERS
     ---------------------------------- */
-    if (date && date !== "all") {
+
+    // ✅ 1) SPECIFIC DATE FILTER (exact day)
+    if (specificDate) {
+      const [y, m, d] = specificDate.split("-").map(Number);
+
+      const startDate = new Date(y, m - 1, d, 0, 0, 0, 0);
+      const endDate = new Date(y, m - 1, d, 23, 59, 59, 999);
+
+      // ✅ choose ONE
+      where.date = { gte: startDate, lte: endDate };
+      // OR: where.date = { gte: startDate, lte: endDate };
+    }
+
+    // ✅ 2) PRESET FILTERS ONLY IF specificDate NOT given
+    if (!specificDate && date && date !== "all") {
       const now = new Date();
       let startDate;
       let endDate = new Date();
@@ -1727,6 +1702,9 @@ export const getAllOrders = async (req, res) => {
       if (date === "today") {
         startDate = new Date();
         startDate.setHours(0, 0, 0, 0);
+
+        endDate = new Date();
+        endDate.setHours(23, 59, 59, 999);
       }
 
       if (date === "yesterday") {
@@ -1743,13 +1721,17 @@ export const getAllOrders = async (req, res) => {
         startDate = new Date();
         startDate.setDate(startDate.getDate() - startDate.getDay());
         startDate.setHours(0, 0, 0, 0);
+
+        endDate = new Date();
+        endDate.setHours(23, 59, 59, 999);
       }
 
       if (date === "this_month") {
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
       }
 
-      where.createdAt = {
+      where.date = {
         gte: startDate,
         lte: endDate,
       };
@@ -1763,7 +1745,6 @@ export const getAllOrders = async (req, res) => {
       skip,
       take: limit,
       orderBy: { createdAt: "desc" },
-
       select: {
         id: true,
         orderNumber: true,
@@ -1783,54 +1764,23 @@ export const getAllOrders = async (req, res) => {
         source: true,
 
         patient: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            contactNo: true,
-          },
+          select: { id: true, fullName: true, email: true, contactNo: true },
         },
-
         vendor: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
+          select: { id: true, name: true, email: true },
         },
-
         slot: {
-          select: {
-            id: true,
-            name: true,
-            startTime: true,
-            endTime: true,
-          },
+          select: { id: true, name: true, startTime: true, endTime: true },
         },
-
         address: {
-          select: {
-            id: true,
-            address: true,
-            pincode: true,
-            city: true,
-          },
+          select: { id: true, address: true, pincode: true, city: true },
         },
         center: {
-          select: {
-            id: true,
-            name: true,
-            contactName: true,
-            address: true,
-            mobile: true,
-          },
+          select: { id: true, name: true, contactName: true, address: true, mobile: true },
         },
       },
     });
 
-    /* ----------------------------------
-       META
-    ---------------------------------- */
     const total = await prisma.order.count({ where });
     const totalPages = Math.ceil(total / limit);
 
@@ -1852,6 +1802,7 @@ export const getAllOrders = async (req, res) => {
     });
   }
 };
+
 
 export const getOrderById = async (req, res) => {
   try {

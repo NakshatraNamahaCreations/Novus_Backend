@@ -40,7 +40,7 @@ router.post(
   ]),
   createOrder
 );
-router.get("/", getAllOrders);
+router.get("/",authenticateUser, getAllOrders);
 router.post("/create-admin",authenticateUser, createAdminOrder);
 router.get("/order-reports", getOrderReports);
 router.get("/order-reports/export", exportOrderReportsExcel);

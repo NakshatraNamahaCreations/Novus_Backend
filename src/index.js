@@ -11,6 +11,7 @@ import { Server as SocketIOServer } from 'socket.io';
 
 
 // Routes
+import { razorpayWebhook } from "./modules/payments/razorpay.controller.js";
 import categoryRoutes from './modules/categories/category.routes.js';  
 import subcategoryRoutes from './modules/subcategories/subcategory.routes.js';  
 import patientRoutes from './modules/patients/patient.routes.js';  
@@ -50,6 +51,8 @@ import diagnosticCenterRoutes from "./modules/diagnosticCenter/diagnosticCenter.
 import esignatureRoutes from "./modules/esignature/esignature.route.js";
 import reportlayoutsRoutes from "./modules/reportLayout/reportLayout.routes.js"
 import pgRoutes from "./modules/payments/pg.routes.js"
+import razorpayRoutes from "./modules/payments/razorpay.routes.js"
+
 import pincodeRoutes from "./modules/pincode/pincode.routes.js";
 import locationRoutes from "./modules/location/location.route.js";
 import sourcesRoutes from "./modules/sources/sources.routes.js";
@@ -72,7 +75,12 @@ const PORT = process.env.PORT || 3000;
 
 const app = express();
 
-
+// 1) Razorpay webhook (RAW) — must be before express.json()
+app.post(
+  "/api/pg/razorpay/webhook",
+  express.raw({ type: "application/json" }),
+  razorpayWebhook
+);
 /* -------------------------
    MIDDLEWARES
 ---------------------------- */
@@ -136,6 +144,7 @@ app.use("/api/diagnostic-centers", diagnosticCenterRoutes);
 app.use("/api/esignatures", esignatureRoutes);
 app.use("/api/report-layouts", reportlayoutsRoutes);
 app.use("/api/pg", pgRoutes);
+app.use("/api/pg", razorpayRoutes);
 app.use("/api/pincodes", pincodeRoutes);
 app.use("/api/location",locationRoutes)
 app.use("/api/source",sourcesRoutes)

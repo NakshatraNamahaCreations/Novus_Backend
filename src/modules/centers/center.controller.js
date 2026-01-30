@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-
+import dayjs from "dayjs";
 const prisma = new PrismaClient();
 
 const toBool = (v, fallback = false) => {
@@ -442,14 +442,7 @@ function getSlotDate(slotTimeString) {
 
 export const getNearbyCenters = async (req, res) => {
   try {
-    const {
-      lat,
-      long,
-      radius = 1000,
-      categoryIds,
-      date,
-      includeFullSlots = "false",
-    } = req.query;
+    const { lat, long, radius = 1000, categoryIds } = req.query;
 
     const userLat = parseFloat(lat);
     const userLong = parseFloat(long);
@@ -461,11 +454,10 @@ export const getNearbyCenters = async (req, res) => {
       });
     }
     if (isNaN(distanceKm) || distanceKm <= 0) {
-      return res
-        .status(400)
-        .json({ error: "Radius must be a positive number" });
+      return res.status(400).json({ error: "Radius must be a positive number" });
     }
 
+    // ✅ parse categoryIds (comma-separated)
     let categoryIdList = [];
     if (categoryIds && typeof categoryIds === "string") {
       categoryIdList = categoryIds
@@ -474,35 +466,7 @@ export const getNearbyCenters = async (req, res) => {
         .filter((n) => Number.isFinite(n) && n > 0);
     }
 
-    let bookingDateStart = null;
-    let bookingDateEnd = null;
-    if (date) {
-      const parsed = new Date(date);
-      if (Number.isNaN(parsed.getTime())) {
-        return res
-          .status(400)
-          .json({ error: "Date must be in YYYY-MM-DD format" });
-      }
-      bookingDateStart = new Date(
-        parsed.getFullYear(),
-        parsed.getMonth(),
-        parsed.getDate(),
-        0,
-        0,
-        0,
-      );
-      bookingDateEnd = new Date(
-        parsed.getFullYear(),
-        parsed.getMonth(),
-        parsed.getDate() + 1,
-        0,
-        0,
-        0,
-      );
-    }
-
-    const includeFull = String(includeFullSlots).toLowerCase() === "true";
-
+    // ✅ raw query for nearby centers
     const nearbyCenters = await prisma.$queryRaw`
       SELECT 
         c.*,
@@ -526,114 +490,44 @@ export const getNearbyCenters = async (req, res) => {
       return res.json({ count: 0, centers: [] });
     }
 
+    // ✅ sanitize (remove password + normalize distance)
     const sanitized = nearbyCenters.map((row) => {
       const { password, ...rest } = row;
       return {
         ...rest,
-        distance:
-          typeof rest.distance === "string"
-            ? parseFloat(rest.distance)
-            : rest.distance,
+        distance: typeof rest.distance === "string" ? parseFloat(rest.distance) : rest.distance,
       };
     });
 
     const centerIds = sanitized.map((c) => c.id).filter(Boolean);
     if (centerIds.length === 0) return res.json({ count: 0, centers: [] });
 
+    // ✅ categories for centers
     const centerCategories = await prisma.centerCategory.findMany({
       where: { centerId: { in: centerIds } },
       include: { category: true },
     });
 
-    const centerSlots = await prisma.centerSlot.findMany({
-      where: { centerId: { in: centerIds } },
-      select: {
-        id: true,
-        centerId: true,
-        name: true,
-        startTime: true,
-        endTime: true,
-        capacity: true,
-        isActive: true,
-      },
-    });
+    // ✅ optional filter by requested categories
+    let filteredCenters = sanitized;
 
-    let bookingMap = {};
-    if (bookingDateStart && bookingDateEnd && centerSlots.length > 0) {
-      const slotIds = centerSlots.map((s) => s.id);
-      const slotBookings = await prisma.centerSlotBooking.findMany({
-        where: {
-          slotId: { in: slotIds },
-          date: { gte: bookingDateStart, lt: bookingDateEnd },
-        },
-        select: { slotId: true, count: true },
-      });
+    if (categoryIdList.length > 0) {
+      const matched = centerCategories.filter((cc) => categoryIdList.includes(cc.categoryId));
+      const allowedCenterIds = new Set(matched.map((m) => m.centerId));
+      filteredCenters = sanitized.filter((center) => allowedCenterIds.has(center.id));
 
-      for (const b of slotBookings) {
-        bookingMap[b.slotId] = (bookingMap[b.slotId] || 0) + (b.count || 0);
+      if (filteredCenters.length === 0) {
+        return res.json({ count: 0, centers: [] });
       }
     }
 
-    let filteredCenters = sanitized;
-    if (categoryIdList.length > 0) {
-      const matched = centerCategories.filter((cc) =>
-        categoryIdList.includes(cc.categoryId),
-      );
-      const allowedCenterIds = new Set(matched.map((m) => m.centerId));
-      filteredCenters = sanitized.filter((center) =>
-        allowedCenterIds.has(center.id),
-      );
-      if (filteredCenters.length === 0)
-        return res.json({ count: 0, centers: [] });
-    }
-
-    const now = new Date();
-    const threeHoursLater = new Date(now.getTime() + 3 * 60 * 60 * 1000);
-    const today = new Date();
-
-    const isToday =
-      bookingDateStart &&
-      bookingDateStart.getFullYear() === today.getFullYear() &&
-      bookingDateStart.getMonth() === today.getMonth() &&
-      bookingDateStart.getDate() === today.getDate();
-
+    // ✅ attach categories to each center
     const responseCenters = filteredCenters.map((center) => {
       const cats = centerCategories
         .filter((cc) => cc.centerId === center.id && cc.category)
         .map((cc) => ({ id: cc.category.id, name: cc.category.name }));
 
-      const allSlots = centerSlots.filter(
-        (s) => s.centerId === center.id && (s.isActive ?? true),
-      );
-
-      let slotsWithAvailability = allSlots.map((slot) => {
-        const booked = bookingMap[slot.id] || 0;
-        const available = (Number(slot.capacity) || 0) - booked;
-        return {
-          id: slot.id,
-          name: slot.name,
-          startTime: slot.startTime,
-          endTime: slot.endTime,
-          capacity: slot.capacity,
-          bookedCount: booked,
-          availableCount: available,
-        };
-      });
-
-      if (isToday) {
-        slotsWithAvailability = slotsWithAvailability.filter((slot) => {
-          const slotStart = getSlotDate(slot.startTime);
-          return slotStart >= threeHoursLater;
-        });
-      }
-
-      if (!includeFull) {
-        slotsWithAvailability = slotsWithAvailability.filter(
-          (s) => s.availableCount > 0,
-        );
-      }
-
-      return { ...center, categories: cats, slots: slotsWithAvailability };
+      return { ...center, categories: cats };
     });
 
     return res.json({
@@ -645,6 +539,8 @@ export const getNearbyCenters = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch nearby centers" });
   }
 };
+
+
 
 /* ✅ Assign Categories */
 export const assignCategoriesToCenter = async (req, res) => {
@@ -742,43 +638,92 @@ export const createCenterSlot = async (req, res) => {
 export const getCenterSlots = async (req, res) => {
   try {
     const { id } = req.params; // centerId
-    const { categoryId, includeGlobal = "true" } = req.query;
+    const { categoryId, includeGlobal = "true", date } = req.query;
 
     const centerId = Number(id);
+    if (!centerId) return res.status(400).json({ error: "Invalid centerId" });
+
     const catId =
       categoryId !== undefined && categoryId !== null && categoryId !== ""
         ? Number(categoryId)
         : null;
 
-    // ✅ build where condition
+    // ✅ date handling (default today)
+    const target = date ? dayjs(date) : dayjs();
+    if (!target.isValid()) {
+      return res.status(400).json({ error: "Invalid date. Use YYYY-MM-DD" });
+    }
+
+    const startOfDay = target.startOf("day").toDate();
+    const endOfDay = target.endOf("day").toDate();
+
+    // ✅ build where condition for slots
     let where = { centerId };
 
-    // If categoryId given, filter by category
     if (catId !== null) {
       const useGlobal = String(includeGlobal) === "true";
-
       where = useGlobal
         ? { centerId, OR: [{ categoryId: catId }, { categoryId: null }] }
         : { centerId, categoryId: catId };
     }
 
+    // 1) fetch slots
     const slots = await prisma.centerSlot.findMany({
       where,
       orderBy: { startTime: "asc" },
+      // NOTE: only keep this include if your relation field is exactly "category"
       include: {
-        category: {
-          select: { id: true, name: true },
-        }, // ✅ optional: return category details
+        category: { select: { id: true, name: true } },
       },
     });
 
-    return res.json({ slots });
+    // 2) bookings grouped by slot for that date
+    // If you have quantity: use _sum.quantity
+    // If you don't: use _count._all
+    const grouped = await prisma.centerSlotBooking.groupBy({
+      by: ["centerSlotId"],
+      where: {
+        centerId,
+        slotDate: { gte: startOfDay, lte: endOfDay },
+        // optionally filter cancelled etc:
+        // status: "CONFIRMED",
+      },
+      _count: { _all: true },
+      _sum: { quantity: true }, // safe even if you later add quantity
+    });
+
+    const bookedMap = new Map(
+      grouped.map((g) => [
+        g.centerSlotId,
+        // prefer quantity sum if present, else fallback to count
+        Number(g._sum?.quantity ?? 0) || g._count._all,
+      ])
+    );
+
+    // 3) attach availability
+    const data = slots.map((slot) => {
+      const capacity = Number(slot.capacity || 0);
+      const booked = bookedMap.get(slot.id) || 0;
+      const remaining = Math.max(capacity - booked, 0);
+
+      return {
+        ...slot,
+        date: target.format("YYYY-MM-DD"),
+        booked,
+        remaining,
+        isFull: capacity > 0 ? booked >= capacity : false,
+      };
+    });
+
+    return res.json({
+      date: target.format("YYYY-MM-DD"),
+      slots: data,
+    });
   } catch (error) {
     console.error("Error fetching center slots:", error);
     return res.status(500).json({ error: "Failed to fetch slots" });
   }
 };
-
 export const updateCenterSlot = async (req, res) => {
   try {
     const { slotId } = req.params;

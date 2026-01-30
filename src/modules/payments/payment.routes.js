@@ -15,6 +15,7 @@ import {
 } from '../orders/order.controller.js';
 import { getPaymentsByOrderId } from './payment.controller.js';
 import { getPaymentsByPatientId } from './payment.controller.js';
+import { authenticateUser } from '../../middlewares/auth.js';
 
 
 const router = express.Router();
@@ -49,7 +50,7 @@ const orderPaymentValidation = [
 // ================= PAYMENT ROUTES =================
 router.route('/')
   .post( paymentValidation, createPayment) // Create new payment
-  .get(  getAllPayments); // Get all payments (admin only)
+  .get(authenticateUser, getAllPayments); // Get all payments (admin only)
 
 router.route('/statistics')
   .get(  getPaymentStatistics); // Get payment statistics (admin only)

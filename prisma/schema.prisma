@@ -348,6 +348,8 @@ model Category {
   isPopular          Boolean              @default(false)
   subCategories      SubCategory[]
   tests              Test[]
+    // ✅ NEW: tests that also belong to this category (secondary)
+  otherCategoryTests TestOtherCategory[]
   packages           HealthPackage[]
   centers            CenterCategory[]
   ESignatureCategory ESignatureCategory[]
@@ -401,6 +403,9 @@ model HealthPackage {
   spotlight     Boolean @default(false)
   features      String?
   preparations   String?
+
+  // ✅ NEW
+  sortOrder Int? @default(0)
   sampleRequired String?
   createdById   Int? // ⭐ ADDED: Track who created the package
   createdBy     User?   @relation(fields: [createdById], references: [id])
@@ -415,6 +420,9 @@ model HealthPackage {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+   @@index([categoryId])
+  @@index([categoryId, sortOrder])
+ 
 
   @@map("Checkup")
 }
@@ -445,6 +453,12 @@ model Test {
   reportUnit    String  @default("hours")
   status        String  @default("active")
 
+    // ✅ NEW
+  sortOrder Int? @default(0)
+    // ✅ NEW: Other Categories (many-to-many)
+  otherCategories TestOtherCategory[]
+
+
   createdById Int? // ⭐ ADDED: Track who created the test
   createdBy   User? @relation(fields: [createdById], references: [id])
 
@@ -464,7 +478,26 @@ model Test {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+    @@index([categoryId])
+  @@index([categoryId, sortOrder])
+
+
   @@map("Package")
+}
+
+
+model TestOtherCategory {
+  testId     Int
+  categoryId Int
+
+  test     Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([testId, categoryId])
+  @@index([categoryId])
+  @@map("TestOtherCategory")
 }
 
 model CheckupPackage {
@@ -684,15 +717,17 @@ model CenterCategory {
 }
 
 model CenterSlotBooking {
-  id     Int      @id @default(autoincrement())
-  slotId Int
-  date   DateTime
-  count  Int      @default(0)
+  id           Int      @id @default(autoincrement())
+  centerId     Int
+  centerSlotId Int
+  slotDate     DateTime // the day the slot is booked for (store date or datetime)
+  quantity     Int      @default(1) // optional; if you don’t have this, we’ll just count rows
 
-  slot CenterSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  centerSlot   CenterSlot @relation(fields: [centerSlotId], references: [id])
 
-  @@unique([slotId, date]) // one record per slot per date
+  createdAt    DateTime @default(now())
 }
+
 
 model CenterPackage {
   id       Int @id @default(autoincrement())

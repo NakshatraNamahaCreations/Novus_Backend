@@ -5,20 +5,33 @@ import { Readable } from "stream";
 
 const prisma = new PrismaClient();
 
-// Helper: calculate price before rounding
-const calculateOfferPrice = (actual, discount, offerPrice) => {
-  if (offerPrice) return parseFloat(offerPrice);
-  if (discount && discount > 0) return actual - (actual * discount) / 100;
-  return actual;
+const parseIdsArray = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map((x) => Number(x)).filter(Boolean);
+
+  if (typeof value === "string") {
+    // "1,2,3"
+    if (value.includes(",")) {
+      return value
+        .split(",")
+        .map((x) => Number(x.trim()))
+        .filter(Boolean);
+    }
+
+    // "[1,2,3]"
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map(Number).filter(Boolean);
+    } catch {}
+
+    // "1"
+    const n = Number(value);
+    return Number.isFinite(n) ? [n] : [];
+  }
+
+  return [];
 };
 
-// NEW: Round to nearest 50
-const roundLabPrice = (price) => {
-  const amt = parseFloat(price);
-  if (isNaN(amt) || amt <= 0) return 0;
-
-  return Math.round(amt / 50) * 50;
-};
 
 export const addTest = async (req, res) => {
   try {
@@ -43,6 +56,9 @@ export const addTest = async (req, res) => {
       alsoKnowAs,
       spotlight,
       features,
+      sortOrder,
+            // ✅ NEW (multi-category)
+      otherCategoryIds, 
     } = req.body;
 
     // Upload image (optional)
@@ -55,15 +71,7 @@ export const addTest = async (req, res) => {
     const actual = parseFloat(actualPrice);
     const finalDiscount = discount ? parseFloat(discount) : 0;
 
-    // Step 1: calculate discounted or input offer price
-    const calculatedOffer = calculateOfferPrice(
-      actual,
-      finalDiscount,
-      offerPrice,
-    );
 
-    // Step 2: round to nearest 50
-    const finalOfferPrice = roundLabPrice(calculatedOffer);
 
     // Parse cityWisePrice (optional)
     let parsedCityWisePrice = null;
@@ -101,6 +109,9 @@ export const addTest = async (req, res) => {
         finalSpotlight = spotlight === "true";
       }
     }
+      // ✅ Parse otherCategoryIds
+    const otherIds = parseIdsArray(otherCategoryIds)
+      .filter((id) => id !== Number(categoryId)); // avoid duplicate with primary
 
     // Create Test
     const test = await prisma.test.create({
@@ -127,6 +138,18 @@ export const addTest = async (req, res) => {
         alsoKnowAs,
         spotlight: finalSpotlight,
         features,
+        sortOrder: sortOrder !== undefined ? Number(sortOrder) : 0, 
+         // ✅ connect other categories
+        otherCategories: otherIds.length
+          ? {
+              create: otherIds.map((cid) => ({
+                categoryId: Number(cid),
+              })),
+            }
+          : undefined,
+      },
+      include: {
+        otherCategories: { select: { categoryId: true } },
       },
     });
 
@@ -171,22 +194,21 @@ export const getAllTests = async (req, res) => {
       include: {
         category: { select: { id: true, name: true, type: true } },
         subCategory: true,
-
-        // ✅ bring parameter names
+        otherCategories:true,
         parameters: {
           select: { id: true, name: true },
-          // orderBy: { order: "asc" }, // enable only if you have `order` field
+        
         },
-
-        // ✅ count
         _count: { select: { parameters: true } },
       },
       skip: (page - 1) * limit,
       take: limit,
-      orderBy: { createdAt: "desc" },
+      orderBy: [
+        { createdAt: "desc" }, 
+      ],
     });
 
-    // ✅ Optional: clean output (names + count at top level)
+ 
     const data = tests.map((t) => ({
       ...t,
       parameterCount: t._count?.parameters ?? 0,
@@ -216,9 +238,10 @@ export const getAllTestsnames = async (req, res) => {
         offerPrice: true,
         actualPrice: true,
       },
-      orderBy: {
-        createdAt: "desc",
-      },
+      orderBy: [
+        { sortOrder: "asc" }, // ✅ MAIN
+        { createdAt: "desc" }, // ✅ tie-breaker
+      ],
     });
 
     return res.json({
@@ -460,9 +483,11 @@ export const updateTest = async (req, res) => {
       showIn,
       alsoKnowAs,
       features,
+      sortOrder,
+        // ✅ NEW
+      otherCategoryIds,
     } = req.body;
 
-    console.log("spotlight", spotlight);
     const existing = await prisma.test.findUnique({
       where: { id: Number(id) },
     });
@@ -483,15 +508,7 @@ export const updateTest = async (req, res) => {
     const actual = actualPrice ? parseFloat(actualPrice) : existing.actualPrice;
     const finalDiscount = discount ? parseFloat(discount) : existing.discount;
 
-    // Step 1: calculate discount/applied price
-    const calculatedOffer = calculateOfferPrice(
-      actual,
-      finalDiscount,
-      offerPrice,
-    );
 
-    // Step 2: round to nearest 50
-    const finalOfferPrice = roundLabPrice(calculatedOffer);
 
     // --- CITY WISE PRICE ---
     let parsedCityWisePrice = existing.cityWisePrice;
@@ -535,6 +552,10 @@ export const updateTest = async (req, res) => {
       }
     }
 
+    // ✅ Parse otherCategoryIds (replace all)
+    const otherIds = parseIdsArray(otherCategoryIds)
+      .filter((cid) => cid !== Number(finalCategoryId));
+
     // --- UPDATE TEST ---
     const updated = await prisma.test.update({
       where: { id: Number(id) },
@@ -559,7 +580,21 @@ export const updateTest = async (req, res) => {
 
         categoryId: finalCategoryId,
         subCategoryId: finalSubCategoryId,
+        sortOrder:
+          sortOrder !== undefined
+            ? Number(sortOrder)
+            : (existing.sortOrder ?? 0), // ✅ NEW
+
+             // ✅ Replace other categories
+        otherCategories: {
+          deleteMany: {}, // remove old
+          create: otherIds.map((cid) => ({ categoryId: Number(cid) })),
+        },
       },
+      include: {
+        otherCategories: { select: { categoryId: true } },
+      },
+     
     });
 
     res.json(updated);
@@ -599,48 +634,33 @@ export const getTestsByCategory = async (req, res) => {
     const { categoryId } = req.params;
     const catId = Number(categoryId);
 
-    if (!catId) {
-      return res.status(400).json({ error: "Valid Category ID is required" });
-    }
+    if (!catId) return res.status(400).json({ error: "Valid Category ID is required" });
 
-    // ✅ Fetch category ONCE
     const category = await prisma.category.findUnique({
       where: { id: catId },
       select: { id: true, name: true, type: true, bannerUrl: true },
     });
+    if (!category) return res.status(404).json({ error: "Category not found" });
 
-    if (!category) {
-      return res.status(404).json({ error: "Category not found" });
-    }
-
-    // ✅ Fetch tests (no category include to avoid repeating)
     const rawTests = await prisma.test.findMany({
-      where: { categoryId: catId },
+      where: {
+        OR: [{ categoryId: catId }, { otherCategories: { some: { categoryId: catId } } }],
+      },
       include: {
         subCategory: true,
+        otherCategories: {
+          select: { categoryId: true, category: { select: { id: true, name: true } } },
+        },
         _count: { select: { parameters: true } },
       },
-      orderBy: { id: "desc" },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
-
-    // ✅ Format response
-    const tests = rawTests.map((t) => ({
-      id: t.id,
-      name: t.name,
-      price: t.price,
-      offerPrice: t.offerPrice,
-      type: t.type,
-      categoryId: t.categoryId,
-      subCategory: t.subCategory,
-      parametersCount: t._count.parameters,
-      // include any other fields you need from your test model
-    }));
 
     return res.json({
       success: true,
-      category, // ✅ once
+      category,
       tests: rawTests,
-      total: tests.length,
+      total: rawTests.length,
     });
   } catch (error) {
     console.error("Error fetching tests by category:", error);

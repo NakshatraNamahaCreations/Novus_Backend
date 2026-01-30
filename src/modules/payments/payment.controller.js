@@ -137,8 +137,8 @@ export const createPayment = async (req, res) => {
           totalPaid >= order.finalAmount
             ? "paid"
             : totalPaid > 0
-            ? "partially_paid"
-            : "pending";
+              ? "partially_paid"
+              : "pending";
 
         await prisma.order.update({
           where: { id: orderId },
@@ -195,6 +195,7 @@ export const createPayment = async (req, res) => {
  * @route   GET /api/payments
  * @access  Private (Admin)
  */
+
 export const getAllPayments = async (req, res) => {
   try {
     const {
@@ -212,8 +213,15 @@ export const getAllPayments = async (req, res) => {
       search,
     } = req.query;
 
+    const user = req.user;
+  
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const where = {};
+
+    // ✅ ROLE BASED FILTER
+    if (user?.role === "admin") {
+      where.createdById = user.id;
+    }
 
     // Apply filters
     if (orderId) where.orderId = parseInt(orderId);
@@ -489,11 +497,11 @@ export const getPaymentsByOrderId = async (req, res) => {
     // Calculate totals
     const totalPaid = payments.reduce(
       (sum, payment) => sum + payment.amount,
-      0
+      0,
     );
     const totalRefunded = payments.reduce(
       (sum, payment) => sum + (payment.refundAmount || 0),
-      0
+      0,
     );
 
     res.json({
@@ -691,8 +699,8 @@ export const updatePaymentStatus = async (req, res) => {
           totalPaid >= order.finalAmount
             ? "paid"
             : totalPaid > 0
-            ? "partially_paid"
-            : "pending";
+              ? "partially_paid"
+              : "pending";
 
         await prisma.order.update({
           where: { id: payment.orderId },
@@ -937,7 +945,7 @@ export const getPaymentStatistics = async (req, res) => {
           count: vp._count,
           totalAmount: vp._sum.amount,
         };
-      })
+      }),
     );
 
     res.json({

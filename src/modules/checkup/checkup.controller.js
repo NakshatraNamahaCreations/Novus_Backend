@@ -68,7 +68,8 @@ export const addHealthPackage = async (req, res) => {
       spotlight,
       features,
       preparations,
-      sampleRequired
+      sampleRequired,
+      sortOrder,
     } = req.body;
 
     if (!name || !actualPrice) {
@@ -97,11 +98,11 @@ export const addHealthPackage = async (req, res) => {
     const healthPackage = await prisma.healthPackage.create({
       data: {
         name,
-            createdById: req.user.id,
+            // createdById: req.user.id,
         description,
         imgUrl,
         actualPrice: actual,
-        offerPrice: finalOfferPrice,
+        offerPrice: Number(offerPrice),
         discount: disc,
         showIn,
         reportWithin: Number(reportWithin),
@@ -112,7 +113,8 @@ export const addHealthPackage = async (req, res) => {
            spotlight: finalSpotlight,
            features,
            preparations,
-           sampleRequired
+           sampleRequired,
+           sortOrder: sortOrder !== undefined ? Number(sortOrder) : 0, // ✅ NEW
       }
     });
 
@@ -164,10 +166,11 @@ export const updateHealthPackage = async (req, res) => {
       alsoKnowAs,
       features,
       preparations,
-      sampleRequired
+      sampleRequired,
+       sortOrder,
     } = req.body;
 
-    console.log("features",features)
+   
 
     // Fetch existing package
     const existing = await prisma.healthPackage.findUnique({
@@ -182,6 +185,8 @@ export const updateHealthPackage = async (req, res) => {
        IMAGE REPLACEMENT
     -------------------------------------------- */
     let imgUrl = existing.imgUrl;
+
+    console.log("req.file",req.file)
 
     if (req.file) {
       if (imgUrl) await deleteFromS3(imgUrl); // delete old image
@@ -220,7 +225,7 @@ if (spotlight !== undefined) {
         imgUrl,
         actualPrice: actual,
         discount: disc,
-        offerPrice: finalOfferPrice,
+        offerPrice: Number(offerPrice),
         showIn: showIn ?? existing.showIn,
         reportWithin: reportWithin
           ? Number(reportWithin)
@@ -232,7 +237,9 @@ if (spotlight !== undefined) {
         spotlight: finalSpotlight,
         features:features,
         preparations :preparations,
-        sampleRequired :sampleRequired
+        sampleRequired :sampleRequired,
+          sortOrder:
+          sortOrder !== undefined ? Number(sortOrder) : existing.sortOrder ?? 0, // ✅ NEW
 
       }
     });
@@ -724,7 +731,21 @@ export const getHealthPackageById = async (req, res) => {
       category: rawData.category,
       tests,
       testCount: tests.length,
-      parameterCount: totalParameters
+      parameterCount: totalParameters,
+    
+        reportWithin: rawData.reportWithin,
+        reportUnit: rawData.reportUnit,
+        discount: rawData.discount,
+        categoryId:rawData.categoryId,
+        
+        alsoKnowAs:rawData.alsoKnowAs,
+        preparations:rawData.preparations,
+        sampleRequired:rawData.sampleRequired,
+        spotlight: rawData.spotlight,
+         features:rawData.features,
+      
+      
+      
     };
 
     return res.json({
