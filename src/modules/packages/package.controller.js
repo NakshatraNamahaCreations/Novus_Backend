@@ -403,6 +403,84 @@ export const searchTestsGrouped = async (req, res) => {
   }
 };
 
+export const searchTestsAndCheckups = async (req, res) => {
+  try {
+    const search = String(req.query.search || "").trim();
+
+    if (!search || search.length < 2) {
+      return res.json({ success: true, data: { tests: [], checkups: [] } });
+    }
+
+    const [tests, checkups] = await Promise.all([
+      prisma.test.findMany({
+        where: {
+          status: "active",
+          OR: [
+            { name: { contains: search, mode: "insensitive" } },
+            { alsoKnowAs: { contains: search, mode: "insensitive" } },
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          actualPrice: true,
+          offerPrice: true,
+          discount: true,
+          category: { select: { name: true } },
+        },
+        take: 25,
+        orderBy: { createdAt: "desc" },
+      }),
+
+      prisma.healthPackage.findMany({
+        where: {
+          status: "active",
+          OR: [
+            { name: { contains: search, mode: "insensitive" } },
+            { alsoKnowAs: { contains: search, mode: "insensitive" } },
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          actualPrice: true,
+          offerPrice: true,
+          discount: true,
+          category: { select: { name: true } },
+        },
+        take: 25,
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+
+    // ✅ unify “finalPrice” concept
+    const normalizedTests = tests.map((t) => ({
+      ...t,
+      finalPrice: Number(t.offerPrice ?? t.actualPrice ?? 0),
+      categoryName: t.category?.name || "Tests",
+      type: "test",
+    }));
+
+    const normalizedCheckups = checkups.map((p) => ({
+      ...p,
+      finalPrice: Number(p.offerPrice ?? p.actualPrice ?? 0),
+      categoryName: p.category?.name || "Checkups",
+      type: "package",
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        tests: normalizedTests,
+        checkups: normalizedCheckups,
+      },
+    });
+  } catch (err) {
+    console.error("SEARCH TESTS+CHECKUPS ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 export const getTestById = async (req, res) => {
   try {
     const { id } = req.params;

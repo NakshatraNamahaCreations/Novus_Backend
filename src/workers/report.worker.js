@@ -4,6 +4,7 @@ import { PrismaClient, ReportDispatchStatus } from "@prisma/client";
 import { generatePatient3Pdfs } from "../services/patientReportPdf.service.js";
 import { uploadBufferToS3 } from "../config/s3.js";
 import { whatsappQueue } from "../queues/whatsapp.queue.js";
+import { generatePatient3PdfsNew } from "../services/pdf-generator/main.js";
 
 const prisma = new PrismaClient();
 
@@ -73,7 +74,7 @@ new Worker(
         });
 
         // 2) generate 3 pdf buffers for one patient
-        const { plainBuffer, letterheadBuffer, fullBuffer } = await generatePatient3Pdfs({
+        const { plainBuffer, letterheadBuffer, fullBuffer } = await generatePatient3PdfsNew({
           orderId,
           patientId,
         });

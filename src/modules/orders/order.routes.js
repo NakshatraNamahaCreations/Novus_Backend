@@ -23,7 +23,8 @@ import {
   getOrdersByPatientIdTrack,
   getOrdersByPatientIdCompleted,
   fetchReportDue,
-  exportOrderReportsExcel
+  exportOrderReportsExcel,
+  rescheduleOrder
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
 import { authenticateUser } from "../../middlewares/auth.js";
@@ -46,6 +47,7 @@ router.get("/order-reports", getOrderReports);
 router.get("/order-reports/export", exportOrderReportsExcel);
 router.get("/expiring", getOrdersExpiringSoon);
 
+router.put("/:orderId/reschedule", authenticateUser, rescheduleOrder);
 
 router.get("/due", fetchReportDue);
 router.get("/:id", getOrderById);

@@ -12,7 +12,9 @@ import {
   updateCenterSlot,
   deleteCenterSlot,
   getAllCentersforadmin,
-  getCenterCategories
+  getCenterCategories,
+  getCenterCategoryCommissions,
+  upsertCenterCategoryCommissions
 } from "./center.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -32,6 +34,8 @@ router.delete("/slot/:slotId", deleteCenterSlot);
 // READ ALL
 router.get("/", getAllCenters);
 router.get("/admin", getAllCentersforadmin);
+router.get("/:centerId/commissions", getCenterCategoryCommissions);
+router.put("/:centerId/commissions", upsertCenterCategoryCommissions);
 
 // READ ONE
 router.get("/:id", getCenterById);

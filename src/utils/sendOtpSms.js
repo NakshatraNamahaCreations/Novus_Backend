@@ -8,13 +8,16 @@ const SMS_CONFIG = {
 
 
 
+
+
 export const sendOtpSms = async (mobile, otp) => {
+
 
   try {
     const message = `Your OTP to access your Novus Health Labs account is ${otp}. Please do not share this OTP with anyone. This OTP is valid for 10 minutes.-NOVLAB`;
     
 
-    const url = "https://bulksmsplans.com/api/verify";
+    const url = "https://bulksmsplans.com/api/send_sms";
 
     const response = await axios.get(url, {
       params: {

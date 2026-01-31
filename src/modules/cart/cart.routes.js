@@ -8,8 +8,10 @@ import {
   deleteCartCompletely,
   deleteAllItemsByPatient,
   updateMemberSelection,
-  getAllCarts
+  getAllCarts,
+  updateCartAdminRemark
 } from "./cart.controller.js";
+import { authenticateUser } from "../../middlewares/auth.js";
 
 const router = Router();
 
@@ -18,6 +20,8 @@ router.post("/add", addToCart);
 router.get("/", getAllCarts);
 router.put("/member/select", updateMemberSelection);
 
+// ✅ NEW ADMIN REMARK
+router.patch("/admin/:cartId/remark", authenticateUser, updateCartAdminRemark);
 
 
 // 🛒 Get cart

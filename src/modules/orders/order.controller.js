@@ -292,7 +292,7 @@ export const createOrder = async (req, res) => {
       centerSlotId,
     } = req.body;
 
-    console.log("patientId",patientId)
+  
 
     if (!members?.length) {
       return res.status(400).json({ error: "Members required" });
@@ -3313,5 +3313,162 @@ export const fetchReportDue = async (req, res) => {
   } catch (err) {
     console.error("fetchReportDue error:", err);
     return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+
+export const rescheduleOrder = async (req, res) => {
+  try {
+    const orderId = Number(req.params.orderId);
+    const { date, slotId, centerSlotId } = req.body;
+
+    if (!Number.isFinite(orderId) || orderId <= 0) {
+      return res.status(400).json({ success: false, message: "Valid orderId required" });
+    }
+
+    if (!date) {
+      return res.status(400).json({ success: false, message: "date is required (YYYY-MM-DD)" });
+    }
+
+    const newDate = new Date(date);
+    if (isNaN(newDate.getTime())) {
+      return res.status(400).json({ success: false, message: "Invalid date" });
+    }
+
+    // ✅ Fetch existing order
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        centerId: true,
+        isHomeSample: true,
+        slotId: true,
+        centerSlotId: true,
+        date: true,
+        status: true,
+      },
+    });
+
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    // Optional: block reschedule for cancelled/completed
+    if (["cancelled", "completed"].includes(String(order.status).toLowerCase())) {
+      return res.status(400).json({ success: false, message: "Order cannot be rescheduled" });
+    }
+
+    // ✅ Decide mode based on payload
+    const wantsHomeSlot = slotId !== undefined && slotId !== null && slotId !== "";
+    const wantsCenterSlot = centerSlotId !== undefined && centerSlotId !== null && centerSlotId !== "";
+
+    if (wantsHomeSlot && wantsCenterSlot) {
+      return res.status(400).json({ success: false, message: "Send either slotId or centerSlotId" });
+    }
+
+    if (!wantsHomeSlot && !wantsCenterSlot) {
+      return res.status(400).json({ success: false, message: "Send slotId (home) or centerSlotId (center)" });
+    }
+
+    // ✅ If centerSlotId, check capacity for that date
+    if (wantsCenterSlot) {
+      const csId = Number(centerSlotId);
+      if (!Number.isFinite(csId) || csId <= 0) {
+        return res.status(400).json({ success: false, message: "Valid centerSlotId required" });
+      }
+
+      const slot = await prisma.centerSlot.findUnique({
+        where: { id: csId },
+        select: { id: true, centerId: true, capacity: true, isActive: true },
+      });
+
+      if (!slot || slot.isActive === false) {
+        return res.status(400).json({ success: false, message: "Center slot not available" });
+      }
+
+      // Normalize date to day range
+      const dayStart = new Date(newDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(newDate);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      const bookedCount = await prisma.centerSlotBooking.aggregate({
+        where: {
+          centerSlotId: csId,
+          slotDate: { gte: dayStart, lte: dayEnd },
+        },
+        _sum: { quantity: true },
+      });
+
+      const used = Number(bookedCount?._sum?.quantity || 0);
+
+      if (slot.capacity > 0 && used >= slot.capacity) {
+        return res.status(400).json({
+          success: false,
+          message: "Selected slot is full for this date",
+        });
+      }
+
+      // ✅ Update order + book slot (optional)
+      const updated = await prisma.$transaction(async (tx) => {
+        // 1) Update order
+        const ord = await tx.order.update({
+          where: { id: orderId },
+          data: {
+            date: newDate,
+            centerSlotId: csId,
+            slotId: null,
+            isHomeSample: false,
+            rescheduledAt: new Date(),
+            rescheduledById: req.user?.id || null,
+          },
+          include: {
+            centerSlot: true,
+            rescheduledBy: { select: { id: true, name: true, email: true } },
+          },
+        });
+
+        // 2) Add booking row
+        await tx.centerSlotBooking.create({
+          data: {
+            centerId: slot.centerId,
+            centerSlotId: csId,
+            slotDate: newDate,
+            quantity: 1,
+          },
+        });
+
+        return ord;
+      });
+
+      return res.json({ success: true, message: "Order rescheduled", data: updated });
+    }
+
+    // ✅ Home slot flow (simple)
+    if (wantsHomeSlot) {
+      const sId = Number(slotId);
+      if (!Number.isFinite(sId) || sId <= 0) {
+        return res.status(400).json({ success: false, message: "Valid slotId required" });
+      }
+
+      const updated = await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          date: newDate,
+          slotId: sId,
+          centerSlotId: null,
+          isHomeSample: true,
+          rescheduledAt: new Date(),
+          rescheduledById: req.user?.id || null,
+        },
+        include: {
+          slot: true,
+          rescheduledBy: { select: { id: true, name: true, email: true } },
+        },
+      });
+
+      return res.json({ success: true, message: "Order rescheduled", data: updated });
+    }
+  } catch (err) {
+    console.error("RESCHEDULE ORDER ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };

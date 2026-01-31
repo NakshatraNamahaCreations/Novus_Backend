@@ -35,6 +35,8 @@ export const addToCart = async (req, res) => {
       healthPackageId
     } = req.body;
 
+
+
     if (!patientId || !memberId || !offerPrice) {
       return res.status(400).json({ error: "Missing required fields" });
     }
@@ -69,6 +71,8 @@ export const addToCart = async (req, res) => {
       const t = await prisma.test.findUnique({
         where: { id: Number(testId) }
       });
+
+    
       if (!t) return res.status(400).json({ error: `Invalid testId ${testId}` });
     }
 
@@ -78,6 +82,7 @@ export const addToCart = async (req, res) => {
         where: { id: Number(healthPackageId) }
       });
       if (!hp)
+        
         return res.status(400).json({ error: `Invalid healthPackageId ${healthPackageId}` });
     }
 
@@ -108,6 +113,7 @@ export const addToCart = async (req, res) => {
     });
 
     if (existingItem) {
+  
       return res.status(400).json({
         error: "This item is already added for this member"
       });
@@ -252,7 +258,15 @@ export const getAllCarts = async (req, res) => {
             test: true,
             package: true
           }
-        }
+        },
+        remarkUpdatedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
       }
     });
 
@@ -499,3 +513,51 @@ export const updateMemberSelection = async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 };
+
+
+/* -------------------------------------------------------
+   🟣 9. Admin Update Cart Remark
+--------------------------------------------------------*/
+export const updateCartAdminRemark = async (req, res) => {
+  try {
+    const cartId = Number(req.params.cartId);
+    const { adminRemark } = req.body;
+
+    if (!Number.isFinite(cartId) || cartId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Valid cartId required" });
+    }
+
+    if (adminRemark === undefined) {
+      return res
+        .status(400)
+        .json({ success: false, message: "adminRemark is required" });
+    }
+
+    // ✅ store update result
+    const updated = await prisma.cart.update({
+      where: { id: cartId },
+      data: {
+        adminRemark: String(adminRemark).trim() || null,
+        remarkUpdatedAt: new Date(),
+        remarkUpdatedById: req.user?.id || null,
+      },
+      include: {
+        remarkUpdatedBy: { select: { id: true, name: true, email: true } },
+        patient: { select: { id: true, fullName: true, contactNo: true } },
+        cartItems: { include: { test: true, package: true } },
+      },
+    });
+
+    return res.json({
+      success: true,
+      message: "Admin remark updated",
+      data: updated,
+    });
+  } catch (err) {
+    console.error("UPDATE CART ADMIN REMARK ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+

@@ -796,3 +796,98 @@ export const getCenterCategories = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch center categories" });
   }
 };
+
+export const getCenterCategoryCommissions = async (req, res) => {
+  try {
+    const centerId = Number(req.params.centerId);
+    if (!Number.isFinite(centerId) || centerId <= 0) {
+      return res.status(400).json({ success: false, message: "Valid centerId required" });
+    }
+
+    const rows = await prisma.centerCategoryCommission.findMany({
+      where: { centerId },
+      include: { category: { select: { id: true, name: true } } },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error("GET COMMISSIONS ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+/**
+ * PUT /api/centers/:centerId/commissions
+ * body: { commissions: [{ categoryId, type, value, isActive }] }
+ */
+export const upsertCenterCategoryCommissions = async (req, res) => {
+  try {
+    const centerId = Number(req.params.centerId);
+    const commissions = Array.isArray(req.body?.commissions) ? req.body.commissions : [];
+
+    if (!Number.isFinite(centerId) || centerId <= 0) {
+      return res.status(400).json({ success: false, message: "Valid centerId required" });
+    }
+
+    // basic validation
+    for (const c of commissions) {
+      const categoryId = Number(c.categoryId);
+      const type = String(c.type || "PERCENT").toUpperCase();
+      const value = Number(c.value || 0);
+
+      if (!Number.isFinite(categoryId) || categoryId <= 0) {
+        return res.status(400).json({ success: false, message: "categoryId invalid" });
+      }
+      if (!["PERCENT", "AMOUNT"].includes(type)) {
+        return res.status(400).json({ success: false, message: "type must be PERCENT or AMOUNT" });
+      }
+      if (!Number.isFinite(value) || value < 0) {
+        return res.status(400).json({ success: false, message: "value must be >= 0" });
+      }
+      if (type === "PERCENT" && value > 100) {
+        return res.status(400).json({ success: false, message: "percent cannot be > 100" });
+      }
+    }
+
+    const userId = req.user?.id ? Number(req.user.id) : null;
+
+    // Upsert all in a transaction
+    await prisma.$transaction(
+      commissions.map((c) => {
+        const categoryId = Number(c.categoryId);
+        const type = String(c.type || "PERCENT").toUpperCase();
+        const value = Number(c.value || 0);
+        const isActive = c.isActive !== false;
+
+        return prisma.centerCategoryCommission.upsert({
+          where: { centerId_categoryId: { centerId, categoryId } },
+          create: {
+            centerId,
+            categoryId,
+            type,
+            value,
+            isActive,
+            createdById: userId,
+          },
+          update: {
+            type,
+            value,
+            isActive,
+          },
+        });
+      })
+    );
+
+    const fresh = await prisma.centerCategoryCommission.findMany({
+      where: { centerId },
+      include: { category: { select: { id: true, name: true } } },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    return res.json({ success: true, message: "Commissions saved", data: fresh });
+  } catch (err) {
+    console.error("UPSERT COMMISSIONS ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};

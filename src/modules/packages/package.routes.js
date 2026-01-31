@@ -17,7 +17,8 @@ import {
   validateBulkUpload,
   getHomeMostBooked,
   getSpotlightTests,
-  getAllTestsnames
+  getAllTestsnames,
+  searchTestsAndCheckups
 } from "./package.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -27,6 +28,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 // CRUD
 router.post("/", upload.single("image"),authenticateUser, addTest);
 router.get("/search", searchTestsGrouped);
+router.get("/search/all", searchTestsAndCheckups);
 router.get("/most-booked-tests", getHomeMostBooked);
 
 router.get("/", getAllTests);

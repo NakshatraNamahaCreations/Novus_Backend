@@ -160,7 +160,7 @@ app.use("/api/parameters", parameterRoutes);
 app.use("/api/ranges", rangeRoutes);
 app.use("/api/options", optionRoutes);
 app.use("/api/results", resultRoutes);
-app.use("/api/config/vendor-earnings", configRoutes);
+app.use("/api/vendor-earning-config", configRoutes);
 
 
 // async function clearAllOrders() {
