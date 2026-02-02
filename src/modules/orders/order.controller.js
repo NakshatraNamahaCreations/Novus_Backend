@@ -1586,7 +1586,7 @@ export const getAllOrders = async (req, res) => {
       status = "",
       paymentStatus = "",
       date = "all",
-      specificDate = "", // ✅ NEW
+      specificDate = "", 
     } = req.query;
 
     page = Number(page);
@@ -1597,12 +1597,26 @@ export const getAllOrders = async (req, res) => {
 
     console.log("user",user)
 
-    // ✅ INIT WHERE FIRST
     let where = {};
 
-    if (user?.role === "admin") {
-  where.createdById = user.id; // only orders created by this admin
+//     if (user?.role === "admin") {
+//   where.createdById = user.id; // only orders created by this admin
+// }
+
+if (user?.role === "admin") {
+  const centerIds = Array.isArray(user?.centerIds) ? user.centerIds : [];
+
+  if (centerIds.length > 0) {
+    where.centerId = { in: centerIds }; // ✅ filter orders by center
+  } 
+  else{
+     return res.status(200).json({
+      success: false,
+      message: "No orders for this users",
+    });
+  }
 }
+
 
     /* ----------------------------------
        SEARCH FILTER

@@ -219,9 +219,23 @@ export const getAllPayments = async (req, res) => {
     const where = {};
 
     // ✅ ROLE BASED FILTER
+    // if (user?.role === "admin") {
+    //   where.createdById = user.id;
+    // }
+
     if (user?.role === "admin") {
-      where.createdById = user.id;
-    }
+  const centerIds = Array.isArray(user?.centerIds) ? user.centerIds : [];
+
+  if (centerIds.length > 0) {
+    where.centerId = { in: centerIds }; // ✅ filter orders by center
+  } 
+  else{
+     return res.status(200).json({
+      success: false,
+      message: "No payments for this users",
+    });
+  }
+}
 
     // Apply filters
     if (orderId) where.orderId = parseInt(orderId);

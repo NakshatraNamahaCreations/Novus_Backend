@@ -232,8 +232,7 @@ export const getAllCentersforadmin = async (req, res) => {
         mobile: true,
         email: true,
         address: true,
-
-        // ✅ city
+        isSelf:true,
         city: true,
         centerSlots: true,
       },

@@ -279,8 +279,20 @@ export const getPopularCategories = async (req, res) => {
 export const getBasedOnTestType = async (req, res) => {
   try {
     const { type, limit = 50 } = req.query;
+
     const where = {};
-    if (type) where.type = type;
+
+    if (type) {
+      // ✅ Special case: if type=CHECKUP, return both PATHOLOGY + CURATED_CHECKUP
+      if (String(type).toUpperCase() === "CHECKUP") {
+        where.OR = [
+          { type: "PATHOLOGY" },
+          { type: "CURATED_CHECKUP" },
+        ];
+      } else {
+        where.type = type; // normal filter
+      }
+    }
 
     const categories = await prisma.category.findMany({
       where,

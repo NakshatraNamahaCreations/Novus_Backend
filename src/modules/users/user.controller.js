@@ -6,17 +6,49 @@ import nodemailer from "nodemailer";
 const JWT_SECRET = process.env.JWT_SECRET || "NOVUS!@2025";
 const prisma = new PrismaClient();
 
+
+function parseIdArray(value) {
+  if (!value) return [];
+
+  // already array -> [1,2]
+  if (Array.isArray(value)) return value.map((x) => Number(x)).filter(Number.isFinite);
+
+  // string -> "1,2" OR "[1,2]"
+  if (typeof value === "string") {
+    const v = value.trim();
+
+    if (!v) return [];
+
+    if (v.startsWith("[")) {
+      try {
+        const arr = JSON.parse(v);
+        return Array.isArray(arr) ? arr.map(Number).filter(Number.isFinite) : [];
+      } catch {
+        return [];
+      }
+    }
+
+    return v
+      .split(",")
+      .map((x) => Number(x.trim()))
+      .filter(Number.isFinite);
+  }
+
+  return [];
+}
+
+
 // ✅ CREATE User
 export const createUser = async (req, res) => {
   try {
-    const { name, email, phone, city, password, role, rights } = req.body;
+    const { name, email, phone, city, password, role, rights, centerIds } = req.body;
 
-    // Check for existing user
     const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing)
-      return res.status(400).json({ error: "Email already exists" });
+    if (existing) return res.status(400).json({ error: "Email already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    const centers = parseIdArray(centerIds); // ✅ optional
 
     const user = await prisma.user.create({
       data: {
@@ -27,6 +59,21 @@ export const createUser = async (req, res) => {
         password: hashedPassword,
         role,
         rights: typeof rights === "string" ? JSON.parse(rights) : rights || {},
+
+        // ✅ only add if provided
+        ...(centers.length > 0
+          ? {
+              assignedCenters: {
+                createMany: {
+                  data: centers.map((cid) => ({ centerId: cid })),
+                  skipDuplicates: true,
+                },
+              },
+            }
+          : {}),
+      },
+      include: {
+        assignedCenters: { include: { center: { select: { id: true, name: true } } } },
       },
     });
 
@@ -36,6 +83,7 @@ export const createUser = async (req, res) => {
     res.status(500).json({ error: "Failed to create user" });
   }
 };
+
 
 // ✅ READ ALL Users
 export const getAllUsers = async (req, res) => {
@@ -74,16 +122,21 @@ export const getAllUsers = async (req, res) => {
       ];
     }
 
-    // Fetch paginated + filtered results
+   
+
     const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where: filters,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: pageSize,
-      }),
-      prisma.user.count({ where: filters }),
-    ]);
+  prisma.user.findMany({
+    where: filters,
+    orderBy: { createdAt: "desc" },
+    skip,
+    take: pageSize,
+    include: {
+      assignedCenters: { include: { center: { select: { id: true, name: true } } } },
+    },
+  }),
+  prisma.user.count({ where: filters }),
+]);
+
 
     res.json({
       total,
@@ -103,7 +156,13 @@ export const getUserById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const user = await prisma.user.findUnique({ where: { id: Number(id) } });
+const user = await prisma.user.findUnique({
+  where: { id: Number(id) },
+  include: {
+    assignedCenters: { include: { center: { select: { id: true, name: true } } } },
+  },
+});
+
     if (!user) return res.status(404).json({ error: "User not found" });
 
     res.json(user);
@@ -127,35 +186,56 @@ export const updateUser = async (req, res) => {
       isActive,
       role,
       rights,
+      centerIds, // ✅ new
     } = req.body;
 
-    const existing = await prisma.user.findUnique({
-      where: { id: Number(id) },
-    });
+    const userId = Number(id);
+
+    const existing = await prisma.user.findUnique({ where: { id: userId } });
     if (!existing) return res.status(404).json({ error: "User not found" });
 
     let updatedPassword = existing.password;
-    if (password) {
-      updatedPassword = await bcrypt.hash(password, 10);
-    }
+    if (password) updatedPassword = await bcrypt.hash(password, 10);
 
-    const updated = await prisma.user.update({
-      where: { id: Number(id) },
-      data: {
-        name,
-        email,
-        phone,
-        city,
-        password: updatedPassword,
-        status,
-        isActive:
-          isActive !== undefined ? Boolean(isActive) : existing.isActive,
-        role,
-        rights:
-          typeof rights === "string"
-            ? JSON.parse(rights)
-            : rights || existing.rights, // ✅ handles both string/object safely
-      },
+    const hasCenterIdsKey = Object.prototype.hasOwnProperty.call(req.body, "centerIds");
+    const centers = parseIdArray(centerIds);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      // ✅ update user fields
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: {
+          name,
+          email,
+          phone,
+          city,
+          password: updatedPassword,
+          status,
+          isActive: isActive !== undefined ? Boolean(isActive) : existing.isActive,
+          role,
+          rights: typeof rights === "string" ? JSON.parse(rights) : rights || existing.rights,
+        },
+      });
+
+      // ✅ only touch centers IF centerIds field was sent
+      if (hasCenterIdsKey) {
+        await tx.userCenter.deleteMany({ where: { userId } });
+
+        if (centers.length > 0) {
+          await tx.userCenter.createMany({
+            data: centers.map((cid) => ({ userId, centerId: cid })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      // return with centers
+      return tx.user.findUnique({
+        where: { id: userId },
+        include: {
+          assignedCenters: { include: { center: { select: { id: true, name: true } } } },
+        },
+      });
     });
 
     res.json({ message: "User updated successfully", user: updated });
@@ -164,6 +244,7 @@ export const updateUser = async (req, res) => {
     res.status(500).json({ error: "Failed to update user" });
   }
 };
+
 
 // ✅ DELETE User
 export const deleteUser = async (req, res) => {
@@ -191,35 +272,41 @@ export const loginUser = async (req, res) => {
     if (!email || !password)
       return res.status(400).json({ error: "Email and password are required" });
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: {
+        assignedCenters: { select: { centerId: true } }, // ✅
+      },
+    });
+
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword)
       return res.status(401).json({ error: "Invalid password" });
 
-    // ✅ Mark user as active
     await prisma.user.update({
       where: { id: user.id },
       data: { isActive: true },
     });
 
-    // ✅ Generate JWT token (2 hours)
+    // ✅ get assigned center ids
+    const centerIds = (user.assignedCenters || []).map((x) => x.centerId);
+
+    // ✅ put centers in token too (optional but useful)
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
+      { id: user.id, email: user.email, role: user.role, centerIds },
       JWT_SECRET,
       { expiresIn: "2h" }
     );
 
-    // ✅ Send token as httpOnly cookie (2 hours)
     res.cookie("token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 2 * 60 * 60 * 1000, // 2 hours in milliseconds
+      maxAge: 2 * 60 * 60 * 1000,
     });
 
-    // ✅ Respond with user info (no token in body)
     res.status(200).json({
       message: "Login successful",
       user: {
@@ -228,6 +315,7 @@ export const loginUser = async (req, res) => {
         email: user.email,
         role: user.role,
         rights: user.rights,
+        centerIds, // ✅ return to frontend
       },
     });
   } catch (error) {
@@ -235,6 +323,7 @@ export const loginUser = async (req, res) => {
     res.status(500).json({ error: "Login failed. Please try again." });
   }
 };
+
 
 export const logoutUser = async (req, res) => {
   try {

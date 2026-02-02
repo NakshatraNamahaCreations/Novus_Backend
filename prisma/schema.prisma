@@ -232,6 +232,7 @@ model User {
   createdNotifications             Notification[]
   createdTestParameters            TestParameter[]
   collectionPrices                 CollectionPrice[]
+    assignedCenters UserCenter[]
   createdCenterCategoryCommissions CenterCategoryCommission[] @relation("CenterCategoryCommissionCreatedBy")
 
   // Payment relations FIXED
@@ -259,6 +260,22 @@ model User {
   createdDiagnosticCenters DiagnosticCenter[]
 }
 
+
+model UserCenter {
+  id Int @id @default(autoincrement())
+
+  userId   Int
+  centerId Int
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  center Center @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, centerId])
+  @@index([userId])
+  @@index([centerId])
+}
 model Patient {
   id       Int       @id @default(autoincrement())
   fullName String?
@@ -674,6 +691,7 @@ model Center {
   categories                CenterCategory[]
   collectionPrices          CollectionPrice[]
   centerCategoryCommissions CenterCategoryCommission[]
+    assignedUsers UserCenter[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
