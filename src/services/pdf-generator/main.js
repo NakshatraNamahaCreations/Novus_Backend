@@ -1,9 +1,9 @@
-// main.js - Updated imports and data handling
+
 import { PatientService } from "./services/patientService.js";
 import { SignatureService } from "./services/signatureService.js";
 import { TrendService } from "./services/trendService.js";
 import { ImageUtils } from "./utils/imageUtils.js";
-import { PdfProcessor } from "./processors/pdfProcessor.js";
+import { generateSingleImagePagePdf, PdfProcessor } from "./processors/pdfProcessor.js";
 import { PdfUtils } from "./utils/pdfUtils.js";
 import { PageProcessor } from "./processors/pageProcessor.js";
 import { PatientHeader } from "./html-generators/patientHeader.js";
@@ -11,11 +11,7 @@ import { PathologyTable } from "./html-generators/pathologyTable.js";
 import { RadiologyContent } from "./html-generators/radiologyContent.js";
 import { SignatureSection } from "./html-generators/signatureSection.js";
 import { Styles } from "./html-generators/styles.js";
-import { 
-  safeTrim, 
-  escapeHtml,
-  getRefDoctorDisplay 
-} from "./utils/stringUtils.js";
+
 import { 
   calculateAge,
   formatShortDate,
@@ -35,17 +31,9 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
       PatientService.getPatientResults(orderId, patientId)
     ]);
 
-    if (!order) {
-      throw new Error(`Order ${orderId} not found`);
-    }
-    
-    if (!patient) {
-      throw new Error(`Patient ${patientId} not found`);
-    }
-    
-    if (!rawResults.length) {
-      throw new Error("No test results found for this patient");
-    }
+    if (!order) throw new Error(`Order ${orderId} not found`);
+    if (!patient) throw new Error(`Patient ${patientId} not found`);
+    if (!rawResults.length) throw new Error("No test results found for this patient");
 
     console.log(`Found ${rawResults.length} test results for patient`);
 
@@ -58,18 +46,15 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
     const defaultSignatures = await SignatureService.getDefaultSignaturesByCategory(categoryIds);
     const results = await SignatureService.augmentResultsWithSignatures(rawResults, defaultSignatures);
 
-    // 3. Build Trend Map
-    const trendMap = await TrendService.buildTrendMap({ results, patientId });
-
-    // 4. Optimize Images
+    // 3. Optimize Images
     const optimizedImages = await ImageUtils.optimizeLayoutImages(layout);
 
-    // 5. Create Browser Instance
+    // 4. Create Browser Instance
     const browser = await PdfProcessor.createBrowser();
     console.log("Browser instance created");
 
     try {
-      // 6. Generate Plain PDF (without header/footer)
+      // 5. Generate Plain PDF (without header/footer)
       console.log("Generating plain PDF...");
       const plainPdf = await generatePdf({
         browser,
@@ -83,7 +68,7 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
         layout
       });
 
-      // 7. Generate Letterhead PDF (with header/footer)
+      // 6. Generate Letterhead PDF (with header/footer)
       console.log("Generating letterhead PDF...");
       const letterheadPdf = await generatePdf({
         browser,
@@ -97,19 +82,19 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
         layout
       });
 
-      // 8. Generate Full PDF (cover + content with trends + last page)
+      // 7. Generate Full PDF (cover + letterhead + last page)
       console.log("Generating full PDF...");
       const fullPdf = await generateFullPdf({
         browser,
         order,
         patient,
         results,
-        trendMap,
+        trendMap: null, // No trends needed
         layout,
         optimizedImages
       });
 
-      // 9. Compress PDFs
+      // 8. Compress PDFs
       console.log("Compressing PDFs...");
       const [plainCompressed, letterheadCompressed, fullCompressed] = await Promise.all([
         PdfUtils.compressPdfBuffer(Buffer.from(plainPdf)),
@@ -140,14 +125,17 @@ async function generatePdf(options) {
     order,
     patient,
     results,
-    mode,
+    mode = "standard", // Only used for row limits, not content differences
     trendMap,
     headerImg,
     footerImg,
     layout
   } = options;
 
+  console.log(`Generating PDF with mode: ${mode}`);
+  
   const pages = PageProcessor.processResults(results, mode);
+  console.log(`Processed ${pages.length} pages from ${results.length} results`);
   
   // Get reference doctor and partner info
   const refDoctor = PatientService.getRefDoctorInfo(order);
@@ -158,9 +146,9 @@ async function generatePdf(options) {
     patient,
     refDoctor,
     partner,
-    trendMap,
+    trendMap: null, // No trends for regular/letterhead PDFs
     layout,
-    mode
+    mode: "standard" // Always standard for regular PDFs
   })).join('');
 
   const html = generateCompleteHtml(pageContents, {
@@ -173,52 +161,61 @@ async function generatePdf(options) {
 }
 
 async function generateFullPdf(options) {
-  const {
-    browser,
-    order,
-    patient,
-    results,
-    trendMap,
-    layout,
-    optimizedImages
+  const { 
+    browser, 
+    order, 
+    patient, 
+    results, 
+    trendMap, 
+    layout, 
+    optimizedImages 
   } = options;
 
-  const pdfBuffers = [];
+  console.log("Generating full PDF (letterhead + cover/last pages)...");
 
-  // Add cover page if exists
-  if (optimizedImages.cover) {
-    console.log("Adding cover page...");
-    const coverPdf = await PdfProcessor.generateFullPageImage(browser, optimizedImages.cover);
-    pdfBuffers.push(coverPdf);
-  }
-
-  // Generate main content with trends
-  console.log("Generating main content with trends...");
-  const mainPdf = await generatePdf({
+  // Generate the SAME content as letterhead PDF
+  const letterheadPdf = await generatePdf({
     browser,
     order,
     patient,
     results,
-    mode: "full",
-    trendMap,
+    mode: "standard", // Same mode as letterhead
+    trendMap: null,    // No trends (same as letterhead)
     headerImg: optimizedImages.header,
     footerImg: optimizedImages.footer,
     layout
   });
-  pdfBuffers.push(mainPdf);
 
-  // Add last page if exists
+  const pdfBuffers = [];
+
+  // 1. Add cover page if exists
+  if (optimizedImages.cover) {
+    console.log("Adding cover page...");
+    const coverPdf = await generateSingleImagePagePdf(browser, optimizedImages.cover);
+    pdfBuffers.push(coverPdf);
+  }
+
+  // 2. Add the main letterhead content
+  console.log("Adding letterhead content...");
+  pdfBuffers.push(letterheadPdf);
+
+  // 3. Add last page if exists
   if (optimizedImages.last) {
     console.log("Adding last page...");
-    const lastPdf = await PdfProcessor.generateFullPageImage(browser, optimizedImages.last);
+    const lastPdf = await generateSingleImagePagePdf(browser, optimizedImages.last);
     pdfBuffers.push(lastPdf);
   }
 
-  // Merge all PDFs
-  console.log("Merging PDF pages...");
-  const mergedPdf = await PdfUtils.mergePdfs(pdfBuffers);
-  return mergedPdf;
+  // Only merge if we have multiple pages
+  if (pdfBuffers.length > 1) {
+    console.log(`Merging ${pdfBuffers.length} PDFs...`);
+    return PdfUtils.mergePdfs(pdfBuffers);
+  }
+  
+  // If no cover/last pages, just return the letterhead PDF
+  return letterheadPdf;
 }
+
 
 function generatePageContent(page, options) {
   const {
@@ -234,14 +231,14 @@ function generatePageContent(page, options) {
   const isFull = mode === "full";
   const testTitle = PageProcessor.generateTestTitle(page.testName, page.chunkIndex, page.chunkCount);
   
-  // Get signatures for this result
+  // Get signatures
   const signatures = {
     left: page.result?.leftSignature,
     center: page.result?.centerSignature,
     right: page.result?.rightSignature
   };
 
-  // Generate patient header with correct data
+  // Generate patient header
   const patientHeader = PatientHeader.generate({
     order,
     patient,
@@ -256,6 +253,8 @@ function generatePageContent(page, options) {
     <div class="test-name">${testTitle}</div>
   `;
 
+  let tableHtml = '';
+  
   if (page.isRadiology) {
     // Handle radiology content
     content += RadiologyContent.generateContent(page.reportChunk);
@@ -264,10 +263,10 @@ function generatePageContent(page, options) {
     const hasTrends = isFull && trendMap && 
       TrendService.hasAnyTrendsForTest(trendMap, page.testId, page.result.parameterResults);
     
-    let tableHtml = PathologyTable.generate(page.chunk || []);
+    tableHtml = PathologyTable.generate(page.chunk || []);
 
     if (hasTrends && page.chunkIndex === 0) {
-      // Get trend dates from the first parameter
+      // Get trend dates
       const firstParamId = page.result.parameterResults?.[0]?.parameterId;
       const trendDates = ['Previous 1', 'Previous 2', 'Previous 3'];
       
@@ -298,8 +297,11 @@ function generatePageContent(page, options) {
 
   const signatureSection = SignatureSection.generate(signatures);
   
+  // Add mode-specific class to page
+  const pageClass = isFull ? 'page full-mode' : 'page';
+  
   return `
-    <div class="page">
+    <div class="${pageClass}">
       <div class="page-content">${content}</div>
       ${signatureSection}
     </div>
@@ -307,13 +309,17 @@ function generatePageContent(page, options) {
 }
 
 function generateCompleteHtml(pageContents, options) {
-  const { headerImg, footerImg, reserveHeaderFooterSpace } = options;
+  const { headerImg, footerImg, reserveHeaderFooterSpace, mode } = options;
+  
+  // Calculate dimensions based on mode
+  const isFull = mode === 'full';
+  const sigH = isFull ? CONFIG.DIMENSIONS.signatureHeight + 20 : CONFIG.DIMENSIONS.signatureHeight;
   
   // Get CSS with correct dimensions
   const css = Styles.generate({
     headerH: reserveHeaderFooterSpace ? CONFIG.DIMENSIONS.headerHeight : headerImg ? CONFIG.DIMENSIONS.headerHeight : 0,
     footerH: reserveHeaderFooterSpace ? CONFIG.DIMENSIONS.footerHeight : footerImg ? CONFIG.DIMENSIONS.footerHeight : 0,
-    sigH: CONFIG.DIMENSIONS.signatureHeight,
+    sigH: sigH,
     fontPx: CONFIG.FONT_SIZES.base
   });
 
@@ -328,7 +334,7 @@ function generateCompleteHtml(pageContents, options) {
         <meta name="page-number" content="counter(page) of counter(pages)">
         ${css}
       </head>
-      <body>
+      <body class="${mode}-mode">
         <div class="${headerClass}">
           ${headerImg ? `<img src="${headerImg}" alt="header" />` : ''}
         </div>

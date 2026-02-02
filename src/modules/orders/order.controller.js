@@ -359,7 +359,7 @@ if (isNaN(orderDate.getTime())) {
       if (isHomeSample) {
         await bookSlotTx(tx, Number(slotId), orderDate);
       } else {
-        await bookCenterSlotTx(tx, Number(centerSlotId), orderDate);
+        // await bookCenterSlotTx(tx, Number(centerSlotId), orderDate);
       }
 
       const createdOrder = await tx.order.create({
@@ -627,20 +627,14 @@ export const createAdminOrder = async (req, res) => {
       return "test";
     };
 
-    const parseDateOrToday = (v) => {
-      if (!v) return new Date();
-      const d = new Date(v);
-      return Number.isNaN(d.getTime()) ? new Date() : d;
-    };
+ 
 
     if (!patientId || !Array.isArray(selectedTests) || selectedTests.length === 0) {
       return res.status(400).json({ success: false, message: "Patient & items required" });
     }
 
-    const diagId = castInt(diagnosticCenterId);
-    if (!diagId) {
-      return res.status(400).json({ success: false, message: "diagnosticCenterId is required" });
-    }
+
+   
 
     // If home collection => address required + slotId required
     if (Boolean(homeCollection)) {
@@ -650,11 +644,10 @@ export const createAdminOrder = async (req, res) => {
       if (!sId) return res.status(400).json({ success: false, message: "slotId is required for home collection" });
     } else {
       const finalCenterId = castInt(centerId ?? collectionCenterId);
-      const cSlotId = castInt(centerSlotId);
+   
       if (!finalCenterId)
         return res.status(400).json({ success: false, message: "collectionCenterId/centerId is required for center collection" });
-      if (!cSlotId)
-        return res.status(400).json({ success: false, message: "centerSlotId is required for center collection" });
+      
     }
 
     // order number
@@ -714,36 +707,6 @@ export const createAdminOrder = async (req, res) => {
     const testMap = new Map(tests.map((t) => [t.id, t]));
     const pkgMap = new Map(packages.map((p) => [p.id, p]));
 
-//     for (const t of tests) {
-//       const unit = normalizeUnit(t.reportUnit);
-//       const dueAt = computeDueAt(orderDate, t.reportWithin, unit);
-// console.log("unit",unit)
-//             console.log("dueAt",dueAt)
-//       console.log("now",now)
-//       console.log("dueAt <= now",dueAt <= now)
-//       if (dueAt && dueAt <= now) {
-//         return res.status(400).json({
-//           success: false,
-//           message: `Cannot create order: SLA already over for test "${t.name}"`,
-//           testId: t.id,
-//           reportDueAt: dueAt,
-//         });
-//       }
-//     }
-//     for (const p of packages) {
-//       const unit = normalizeUnit(p.reportUnit);
-//       const dueAt = computeDueAt(orderDate, p.reportWithin, unit);
-//       if (dueAt && dueAt <= now) {
-//         return res.status(400).json({
-//           success: false,
-//           message: `Cannot create order: SLA already over for package "${p.name}"`,
-//           packageId: p.id,
-//           reportDueAt: dueAt,
-//         });
-//       }
-//     }
-
-    /* -------------------- build create data -------------------- */
     const dataToCreate = {
       orderNumber,
       createdBy: { connect: { id: castInt(req.user?.id) } },
@@ -756,7 +719,7 @@ export const createAdminOrder = async (req, res) => {
       discountAmount: Number(discountAmt),
       finalAmount: Number(finalAmt),
 
-      diagnosticCenter: { connect: { id: diagId } },
+
       source: source ?? undefined,
 
       date: orderDate,
@@ -775,9 +738,9 @@ export const createAdminOrder = async (req, res) => {
 
     if (!Boolean(homeCollection)) {
       const finalCenterId = castInt(centerId ?? collectionCenterId);
-      const cSlotId = castInt(centerSlotId);
+    
       if (finalCenterId) dataToCreate.center = { connect: { id: finalCenterId } };
-      if (cSlotId) dataToCreate.centerSlot = { connect: { id: cSlotId } };
+   
     }
 
     const dId = castInt(doctorId);
@@ -837,8 +800,7 @@ export const createAdminOrder = async (req, res) => {
         doctor: true,
         refCenter: true,
         center: true,
-        centerSlot: true,
-        diagnosticCenter: true,
+   
         slot: true,
       },
     });

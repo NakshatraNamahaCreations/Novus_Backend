@@ -1,18 +1,17 @@
-// html-generators/pathologyTable.js
-import { 
-  safeTrim, 
-  escapeHtml, 
-  getFlagKind, 
-  formatValueWithoutUnit 
+import {
+  safeTrim,
+  escapeHtml,
+  getFlagKind,
+  formatValueWithoutUnit,
 } from "../utils/stringUtils.js";
 import { PatientService } from "../services/patientService.js";
 
 export class PathologyTable {
   static generate(parameterResults, options = {}) {
     const { showTrends = false, trendData = null } = options;
-    
-    const rows = parameterResults.map(pr => this.generateRow(pr, trendData));
-    
+
+    const rows = parameterResults.map((pr) => this.generateRow(pr, trendData));
+
     return `
       <table>
         <thead>
@@ -22,23 +21,21 @@ export class PathologyTable {
             <th style="width:35%">BIO REF. INTERVAL</th>
           </tr>
         </thead>
-        <tbody>${rows.join('')}</tbody>
+        <tbody>${rows.join("")}</tbody>
       </table>
     `;
   }
 
   static generateRow(parameterResult, trendData = null) {
-    const valueRaw = parameterResult.valueNumber ?? parameterResult.valueText ?? "—";
+    const valueRaw =
+      parameterResult.valueNumber ?? parameterResult.valueText ?? "—";
     const unit = parameterResult.unit || parameterResult.parameter?.unit || "";
-    const method = parameterResult.method || parameterResult.parameter?.method || "";
-   
-    
+    const method =
+      parameterResult.method || parameterResult.parameter?.method || "";
+
     // Use the service method to get reference range
     const rangeText = PatientService.getReferenceRangeText(parameterResult);
     const rangeCell = this.formatRangeForDisplay(rangeText, unit);
-    
-  
-
 
     return `
       <tr>
@@ -62,18 +59,18 @@ export class PathologyTable {
   static formatRangeForDisplay(rangeText, unit) {
     const rt = safeTrim(rangeText);
     const u = safeTrim(unit);
-    
+
     if (!rt) return "—";
     if (!u) return rt;
     if (rt.toLowerCase().includes(u.toLowerCase())) return rt;
-    
+
     return `${rt} ${u}`;
   }
 
   static renderResultWithColoredArrow(valueText, flag) {
     const kind = getFlagKind(flag);
     const numericValue = formatValueWithoutUnit(valueText);
-    
+
     let colorClass = "";
     if (kind === "high") colorClass = "result-high";
     else if (kind === "low") colorClass = "result-low";

@@ -24,7 +24,6 @@ router.post(
   ]),
   createLayout
 );
-
 // UPDATE single layout ✅ (NO :id)
 router.put(
   "/",

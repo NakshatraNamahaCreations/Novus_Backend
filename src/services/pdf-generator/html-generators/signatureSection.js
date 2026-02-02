@@ -15,20 +15,44 @@ export class SignatureSection {
   }
 
   static renderSignatureCell(signature, position) {
-    const name = signature ? StringUtils.safeTrim(signature.name) : "";
-    const designation = signature 
-      ? StringUtils.safeTrim(signature.designation) || StringUtils.safeTrim(signature.qualification)
-      : "";
+    // Always return a cell with center-aligned content
+    const cellClass = `sig-cell center`; // Force center alignment for all cells
+    
+    if (!signature) {
+      return `<div class="${cellClass}"></div>`;
+    }
+    
+    const name = StringUtils.safeTrim(signature.name);
+    const designation = StringUtils.safeTrim(signature.designation) || 
+                       StringUtils.safeTrim(signature.qualification);
+    
+    // If no name, return empty cell
+    if (!name) {
+      return `<div class="${cellClass}"></div>`;
+    }
     
     const img = signature?.signatureImg
       ? `<img class="sig-img" src="${signature.signatureImg}" alt="signature" />`
-      : "";
+      : '<div class="sig-placeholder"></div>';
 
+    // Build content
+    let content = `
+      <div class="sig-img-wrap">${img}</div>
+    `;
+    
+    // Add name
+    content += `<div class="sig-name">${StringUtils.escapeHtml(name)}</div>`;
+    
+    // Add designation if exists
+    if (designation) {
+      content += `<div class="sig-desig">${StringUtils.escapeHtml(designation)}</div>`;
+    }
+    
     return `
-      <div class="sig-cell ${position}">
-        <div class="sig-img-wrap">${img || '<div class="sig-placeholder"></div>'}</div>
-        <div class="sig-name">${StringUtils.escapeHtml(name || "")}</div>
-        <div class="sig-desig">${StringUtils.escapeHtml(designation || "")}</div>
+      <div class="${cellClass}">
+        <div class="sig-content">
+          ${content}
+        </div>
       </div>
     `;
   }

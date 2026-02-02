@@ -130,6 +130,8 @@ export class PatientService {
    */
   static getPatientIdentifier(patientData, orderData = null) {
     if (!patientData) return "—";
+
+   
     
     const identifiers = [
       patientData.initial,

@@ -1,4 +1,4 @@
-// config/constants.js
+
 export const CONFIG = {
   FONT_SIZES: {
     base: 11.5,
@@ -9,13 +9,13 @@ export const CONFIG = {
     large: 13
   },
   
-  DIMENSIONS: {
+DIMENSIONS: {
     pageWidth: '210mm',
     pageHeight: '297mm',
-    headerHeight: 120,
-    footerHeight: 75,
-    signatureHeight: 120,
-    patientStripHeight: 180
+    headerHeight: 110,  // Reduced from 120
+    footerHeight: 65,   // Reduced from 75
+    signatureHeight: 100, // Reduced from 120
+    patientStripHeight: 160 // Reduced from 180
   },
   
   COLORS: {

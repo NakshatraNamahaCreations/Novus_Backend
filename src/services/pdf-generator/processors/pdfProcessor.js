@@ -92,4 +92,32 @@ export class PdfProcessor {
 
     return this.generateSinglePagePdf(browser, html);
   }
+  
+}
+
+export async function generateSingleImagePagePdf(browser, imageUrl) {
+  const html = `<!doctype html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <style>
+        @page { size: A4; margin: 0; }
+        html, body { margin: 0; padding: 0; height: 100%; }
+        img {
+          width: 100%;
+          height: 100%;
+          display: block;
+          object-fit: cover; /* use contain if you don't want cropping */
+        }
+      </style>
+    </head>
+    <body>
+      <img src="${imageUrl}" />
+    </body>
+  </html>`;
+
+  return PdfProcessor.generatePdf(browser, html, {
+    margin: { top: "0", right: "0", bottom: "0", left: "0" },
+    printBackground: true,
+  });
 }

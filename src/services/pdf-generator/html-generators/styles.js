@@ -1,4 +1,3 @@
-// html-generators/styles.js
 import { CONFIG } from "../config/constants.js";
 
 export class Styles {
@@ -82,13 +81,13 @@ export class Styles {
       .header { 
         top: 0; 
         height: var(--header-h);
-        border-bottom: 1px solid var(--border-color);
+     
       }
       
       .footer { 
         bottom: 0; 
         height: var(--footer-h);
-        border-top: 1px solid var(--border-color);
+       
       }
       
       .header img, .footer img {
@@ -125,11 +124,26 @@ export class Styles {
         overflow: hidden;
       }
       
-      .page-content {
-        max-height: calc(100% - 40px);
-        overflow: hidden;
-        position: relative;
-      }
+.page-content {
+  max-height: calc(
+    var(--page-height) - 
+    var(--header-h) - 
+    var(--footer-h) - 
+    var(--sig-h) - 
+    70px /* top/bottom padding */
+  );
+  overflow-y: auto;
+  position: relative;
+}
+  .page.full-mode .page-content {
+  max-height: calc(
+    var(--page-height) - 
+    var(--header-h) - 
+    var(--footer-h) - 
+    var(--sig-h) - 
+    90px /* extra space for trend box */
+  );
+}
       
       .page-number {
         position: fixed;
@@ -157,7 +171,7 @@ export class Styles {
         padding: 12px 14px;
         margin: 0 0 16px 0;
         background: #ffffff;
-        border: 1px solid grey; /* Changed from blue to black */
+        border: 1px solid #ebdfdf; /* Changed from blue to black */
         border-radius: 8px;
         box-shadow: 0 1px 2px rgba(46, 45, 45, 0.1);
         position: relative;
@@ -185,11 +199,30 @@ export class Styles {
   display: flex;
   flex-direction: column;
 }
+  .ps-mid .ps-row {
+  margin: 2px 0;
+  padding: 2px 0;
+  align-items: flex-start;  /* so label stays aligned when partner wraps */
+}
+
+
+/* ✅ Partner can wrap to next line without adding big gap */
+.ps-v-partner {
+  white-space: normal !important;     /* allow wrap */
+  overflow: visible !important;       /* no clipping */
+  text-overflow: unset !important;
+  line-height: 1.15;                  /* tighter line spacing */
+  max-height: 2.3em;                  /* ~2 lines */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;              /* clamp to 2 lines */
+  -webkit-box-orient: vertical;
+}
+
       
       .ps-header {
         margin-bottom: 12px;
         padding-bottom: 8px;
-        border-bottom: 1px dashed var(--border-color);
+ 
       }
       
       .ps-name {
@@ -199,6 +232,9 @@ export class Styles {
         margin-bottom: 4px;
         color: var(--primary-color);
       }
+        .ps-name-large{
+         font-size: 18px;
+        }
       
       .ps-age-gender {
         display: flex;
@@ -237,12 +273,11 @@ export class Styles {
       
        .ps-row {
         display: flex;
-        justify-content: space-between;
-        align-items: center;
+
         font-size: 12px;
         margin: 5px 0;
         padding: 4px 0;
-        border-bottom: 1px solid #f3f4f6;
+     
       }
 
       .ps-kv {
@@ -252,7 +287,7 @@ export class Styles {
         font-size: 12px;
         margin: 5px 0;
         padding: 4px 0;
-        border-bottom: 1px solid #f3f4f6;
+        
       }
       
       .ps-kv:last-child, .ps-row:last-child {
@@ -273,8 +308,7 @@ export class Styles {
         text-overflow: ellipsis;
         white-space: nowrap;
         flex: 1;
-        text-align: right;
-        padding-left: 10px;
+  
       }
       
       .ps-v.highlight {
@@ -340,7 +374,7 @@ export class Styles {
         font-weight: 700;
         color: var(--primary-color);
         padding-bottom: 5px;
-        border-bottom: 1px solid var(--border-color);
+       
         page-break-after: avoid;
         break-after: avoid;
       }
@@ -364,7 +398,7 @@ export class Styles {
         font-weight: 600;
         text-align: left;
         color: var(--primary-color);
-        border-bottom: 2px solid var(--border-color);
+        border-bottom: 1px solid var(--border-color);
         font-size: 12px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -509,132 +543,151 @@ export class Styles {
 
   static generateSignatureStyles() {
     return `
-      .sig-row {
-        position: absolute;
-        left: 20px;
-        right: 20px;
-        bottom: calc(var(--footer-h) + 25px);
-        height: var(--sig-h);
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: 15px;
-        align-items: flex-end;
-        padding-top: 20px;
-        border-top: 1px solid var(--border-color);
-        box-sizing: border-box;
-        background: white;
-        z-index: 5;
-        page-break-inside: avoid;
-        break-inside: avoid;
-        page-break-before: avoid;
-        break-before: avoid;
-      }
-      
-      .sig-cell {
-        min-width: 0;
-        min-height: 80px;
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-end;
-      }
-      
-      .sig-cell.left { 
-        text-align: left;
-        align-items: flex-start;
-      }
-      
-      .sig-cell.center { 
-        text-align: center;
-        align-items: center;
-      }
-      
-      .sig-cell.right { 
-        text-align: right;
-        align-items: flex-end;
-      }
-      
-      .sig-img-wrap {
-        min-height: 50px;
-        display: flex;
-        align-items: flex-end;
-        margin-bottom: 8px;
-      }
-      
-      .sig-placeholder {
-        height: 45px;
-        width: 100%;
-      }
-      
-      .sig-img {
-        max-height: 50px;
-        max-width: 160px;
-        object-fit: contain;
-        display: block;
-        filter: brightness(0.9);
-      }
-      
-      .sig-name {
-        font-weight: 700;
-        color: var(--primary-color);
-        margin-top: 6px;
-        font-size: 12px;
-        min-height: 18px;
-      }
-      
-      .sig-desig {
-        color: var(--secondary-color);
-        margin-top: 3px;
-        font-size: 12px;
-        min-height: 16px;
-      }
-    `;
+    .sig-row {
+      position: absolute;
+      left: 20px;
+      right: 20px;
+      bottom: calc(var(--footer-h) + 25px);
+      height: var(--sig-h);
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 15px;
+      align-items: flex-end;
+      padding-top: 10px;
+      background: white;
+      z-index: 5;
+      page-break-inside: avoid;
+      break-inside: avoid;
+      page-break-before: avoid;
+      break-before: avoid;
+    }
+    
+    .sig-cell {
+      min-width: 0;
+      min-height: 80px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center; /* Center horizontally */
+      text-align: center; /* Center text alignment */
+    }
+    
+    /* Remove left/right specific classes since all are centered */
+    .sig-cell.left, 
+    .sig-cell.center, 
+    .sig-cell.right { 
+      text-align: center;
+      align-items: center;
+    }
+    
+    .sig-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      width: 100%;
+      height: 100%;
+    }
+    
+    .sig-img-wrap {
+      min-height: 50px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center; /* Center image horizontally */
+      margin-bottom: 8px;
+      width: 100%;
+    }
+    
+    .sig-placeholder {
+      height: 45px;
+      width: 160px; /* Fixed width to match max-width of sig-img */
+      background: transparent;
+    }
+    
+    .sig-img {
+      max-height: 50px;
+      max-width: 160px;
+      object-fit: contain;
+      display: block;
+      margin: 0 auto; /* Center the image */
+    }
+    
+    .sig-name {
+      font-weight: 700;
+      color: var(--primary-color);
+      margin-top: 6px;
+      font-size: 12px;
+      min-height: 18px;
+      width: 100%;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .sig-desig {
+      color: var(--secondary-color);
+      margin-top: 3px;
+      font-size: 12px;
+      min-height: 16px;
+      width: 100%;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    /* For cells with both name and designation */
+    .sig-cell.has-desig .sig-name {
+      margin-top: 4px;
+    }
+    
+    .sig-cell.has-desig .sig-desig {
+      margin-top: 2px;
+    }
+  `;
   }
 
   static generateUtilityStyles() {
     return `
-      .radiology-wrap {
-        margin-top: 12px;
-        margin-bottom: 20px;
-        font-size: 12px;
-        line-height: 1.5;
-        color: var(--primary-color);
-        overflow-wrap: break-word;
-        word-wrap: break-word;
-      }
-      
-      .radiology-wrap h1,
-      .radiology-wrap h2,
-      .radiology-wrap h3,
-      .radiology-wrap h4 {
-        color: var(--primary-color);
-        margin-top: 10px;
-        margin-bottom: 5px;
-        font-weight: 600;
-        line-height: 1.3;
-      }
-      
-      .radiology-wrap p {
-        margin: 5px 0;
-        text-align: justify;
-        line-height: 1.5;
-      }
-      
-      .radiology-wrap strong,
-      .radiology-wrap b {
-        font-weight: 600;
-        color: var(--primary-color);
-      }
-      
-      .radiology-wrap ul,
-      .radiology-wrap ol {
-        margin: 5px 0 5px 20px;
-      }
-      
-      .radiology-wrap li {
-        margin: 2px 0;
-        line-height: 1.5;
-      }
-    `;
+    .radiology-wrap {
+      margin-top: 12px;
+      margin-bottom: 20px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--primary-color);
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+    }
+
+    .radiology-wrap p {
+      margin: 5px 0;
+      text-align: justify;
+      line-height: 1.5;
+    }
+
+    /* ✅ Quill alignment classes (must override default p rule) */
+    .radiology-wrap .ql-align-center { text-align: center !important; }
+    .radiology-wrap .ql-align-right  { text-align: right !important; }
+    .radiology-wrap .ql-align-justify{ text-align: justify !important; }
+    .radiology-wrap .ql-align-left   { text-align: left !important; }
+
+    .radiology-wrap strong,
+    .radiology-wrap b {
+      font-weight: 600;
+      color: var(--primary-color);
+    }
+
+    .radiology-wrap ul,
+    .radiology-wrap ol {
+      margin: 5px 0 5px 20px;
+    }
+
+    .radiology-wrap li {
+      margin: 2px 0;
+      line-height: 1.5;
+    }
+  `;
   }
 
   static generatePrintStyles() {
@@ -687,10 +740,12 @@ export class Styles {
           break-inside: avoid;
         }
         
-        .page-content {
-          page-break-inside: auto;
-          break-inside: auto;
-        }
+       .page-content{
+  position: relative;
+  overflow: hidden;
+  max-height: calc(var(--page-height) - var(--header-h) - var(--footer-h) - var(--sig-h) - 70px);
+}
+
       }
     `;
   }

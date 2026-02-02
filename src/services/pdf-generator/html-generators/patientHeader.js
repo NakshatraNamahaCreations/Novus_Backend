@@ -12,10 +12,13 @@ export class PatientHeader {
       partner = "-",
     } = options;
 
-    // Get identifiers using the service methods
-    const patientIdentifier = PatientService.getPatientIdentifier(patient, order);
+   
+
+   
     const reportRefId = PatientService.getReportRefId(order);
     
+
+
     // Get date information
     const dates = PatientService.getOrderDates(order);
     const collectedAt = dates.collectedAt;
@@ -33,7 +36,7 @@ export class PatientHeader {
         <!-- COLUMN 1: Patient Info (Less width) -->
         <div class="ps-col ps-left">
           <div class="ps-patient-main">
-            <div class="ps-name-large">${escapeHtml(patient.fullName || "N/A")}</div>
+            <div class="ps-name">${escapeHtml(patient.fullName || "N/A")}</div>
             <div class="ps-age-gender-large">
               <span class="ps-age">${escapeHtml(String(patientAge))} Year(s)</span>
               <span class="ps-separator"> | </span>
@@ -58,11 +61,12 @@ export class PatientHeader {
             </div>
             <div class="ps-row">
               <span class="ps-k">Patient ID :</span>
-              <span class="ps-v highlight">${escapeHtml(patientIdentifier)}</span>
+              <span class="ps-v highlight">${escapeHtml(patient?.id)}</span>
             </div>
             <div class="ps-row">
               <span class="ps-k">Partner :</span>
-              <span class="ps-v">${escapeHtml(partner)}</span>
+             <span class="ps-v ps-v-partner">${escapeHtml(partner)}</span>
+
             </div>
           </div>
         </div>
@@ -80,7 +84,7 @@ export class PatientHeader {
             </div>
             <div class="ps-row">
               <span class="ps-k">Reported :</span>
-              <span class="ps-v ">${escapeHtml(formatDateTime(reportedAt))}</span>
+              <span class="ps-v">${escapeHtml(formatDateTime(reportedAt))}</span>
             </div>
           </div>
         </div>

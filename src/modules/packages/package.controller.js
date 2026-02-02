@@ -685,27 +685,55 @@ export const updateTest = async (req, res) => {
 export const deleteTest = async (req, res) => {
   try {
     const { id } = req.params;
+    const testId = Number(id);
 
     const existing = await prisma.test.findUnique({
-      where: { id: Number(id) },
+      where: { id: testId },
+      select: { id: true, imgUrl: true }, // keep it small
     });
 
     if (!existing) return res.status(404).json({ error: "Test not found" });
 
-    if (existing.imgUrl) {
-      await deleteFromS3(existing.imgUrl);
-    }
-
+    // ✅ 1) Delete DB record first
     await prisma.test.delete({
-      where: { id: Number(id) },
+      where: { id: testId },
     });
 
-    res.json({ message: "Test deleted successfully" });
+    // ✅ 2) After DB delete success, delete S3 image (best-effort)
+    if (existing.imgUrl) {
+      try {
+        await deleteFromS3(existing.imgUrl);
+      } catch (e) {
+        console.warn("S3 delete failed (ignored):", e?.message || e);
+        // optional: you could log this for later cleanup
+      }
+    }
+
+    return res.json({ message: "Test deleted successfully" });
   } catch (error) {
     console.error("Error deleting test:", error);
-    res.status(500).json({ error: "Failed to delete test" });
+
+    // ✅ Friendly FK error
+    if (error?.code === "P2003") {
+      // optional: check constraint
+      if (error?.meta?.constraint === "PatientTestResult_testId_fkey") {
+        return res.status(409).json({
+          error:
+            "You can’t delete this test because patient results are already created for it.",
+          code: "TEST_IN_USE",
+        });
+      }
+
+      return res.status(409).json({
+        error: "You can’t delete this test because it is used elsewhere.",
+        code: "FK_CONSTRAINT",
+      });
+    }
+
+    return res.status(500).json({ error: "Failed to delete test" });
   }
 };
+
 
 export const getTestsByCategory = async (req, res) => {
   try {

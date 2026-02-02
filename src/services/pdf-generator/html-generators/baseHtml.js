@@ -1,8 +1,6 @@
-// html-generators/baseHtml.js
+
 import { CONFIG, HTML_CLASSES } from "../config/constants.js";
-import { StringUtils } from "../utils/stringUtils.js";
-import { PatientHeader } from "./patientHeader.js";
-import { SignatureSection } from "./signatureSection.js";
+
 
 export class BaseHtmlGenerator {
   constructor(options = {}) {
