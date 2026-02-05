@@ -10,12 +10,12 @@ const prisma = new PrismaClient();
 const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
-// Calculate age if dob is given
 const calculateAge = (dob) => {
   if (!dob) return null;
   const now = dayjs();
   const birthDate = dayjs(dob);
-  return now.diff(birthDate, "year");
+  if (!birthDate.isValid()) return null;
+  return now.diff(birthDate, "year"); // ✅ number
 };
 
 export const createPatient = async (req, res) => {
@@ -275,30 +275,88 @@ export const resendOtp = async (req, res) => {
   }
 };
 
+const toNullableInt = (v) => {
+  if (v === undefined) return undefined; // don't touch field
+  if (v === null) return null;
+
+  const s = String(v).trim();
+  if (s === "") return null;
+
+  const n = parseInt(s, 10);
+  if (!Number.isFinite(n)) return null; // or throw 400
+  return n;
+};
+
+const toNullableString = (v) => {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+
+  const s = String(v).trim();
+  return s === "" ? null : s;
+};
+
+const toNullableDate = (v) => {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const stripUndefined = (obj) => {
+  Object.keys(obj).forEach((k) => obj[k] === undefined && delete obj[k]);
+  return obj;
+};
+
 // UPDATE PROFILE
 export const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
-    const data = req.body;
 
+    // copy body so we don't mutate req.body directly
+    const body = { ...req.body };
 
-    // calculate age if dob is provided
-    if (data.dob) {
-      data.age = calculateAge(data.dob);
-      data.dob = new Date(data.dob);
+    // ✅ if dob provided, compute age from dob
+    // (this will override any age coming from client)
+    if (body.dob) {
+      const computedAge = calculateAge(body.dob); // number or null
+      body.age = computedAge;
     }
+
+    // ✅ build sanitized data for Prisma
+    const data = stripUndefined({
+      fullName: toNullableString(body.fullName),
+      initial: toNullableString(body.initial),
+      gender: toNullableString(body.gender),
+
+      // if dob exists -> convert to Date, else pass through (null/undefined)
+      dob: toNullableDate(body.dob),
+
+      // if dob was provided above, body.age is already a number
+      // otherwise, convert whatever came from client
+      age: body.dob ? body.age : toNullableInt(body.age),
+
+      email: toNullableString(body.email),
+      aadharNo: toNullableString(body.aadharNo),
+      passportNo: toNullableString(body.passportNo),
+      address: toNullableString(body.address),
+
+      // include other fields similarly...
+    });
 
     const updated = await prisma.patient.update({
       where: { id: Number(id) },
       data,
     });
 
-    res.json(updated);
+    return res.json(updated);
   } catch (error) {
     console.error("Error updating profile:", error);
-    res.status(500).json({ error: "Failed to update profile" });
+    return res.status(500).json({ error: "Failed to update profile" });
   }
 };
+
+
 
 // ADD FAMILY MEMBER
 export const addFamilyMember = async (req, res) => {
@@ -306,7 +364,7 @@ export const addFamilyMember = async (req, res) => {
     const { primaryId } = req.params;
     const { fullName, dob, gender, email, bloodType, relationship, contactNo } =
       req.body;
-    console.log("contactNo", contactNo);
+ 
     const data = {
       fullName,
       dob: dob ? new Date(dob) : null,

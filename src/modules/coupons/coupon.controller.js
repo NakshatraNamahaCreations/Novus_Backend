@@ -2,6 +2,17 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
+const getPatientType = async (patientId) => {
+  const count = await prisma.order.count({
+    where: {
+      patientId: Number(patientId),
+      status: { not: "cancelled" }, // adjust if needed
+    },
+  });
+  return count === 0 ? "NEW_PATIENT" : "EXISTING_PATIENT";
+};
+
+
 /* ---------------------------------------------------------
    CREATE COUPON
 --------------------------------------------------------- */
@@ -10,7 +21,7 @@ export const createCoupon = async (req, res) => {
     const {
       code,
       description,
-      discountType,
+      discountType = "percentage",
       discountValue,
       minOrderAmount,
       maxDiscount,
@@ -21,45 +32,41 @@ export const createCoupon = async (req, res) => {
       autoApply,
       isPatientCoupon,
       patientId,
-      createdBy,
+      audience, // ✅ NEW: "ALL" | "NEW_PATIENT" | "EXISTING_PATIENT"
     } = req.body;
 
     if (!code || !discountValue || Number(discountValue) <= 0) {
-      return res.status(400).json({ 
-        error: "Code and positive discount value are required" 
+      return res.status(400).json({
+        error: "Code and positive discount value are required",
       });
     }
 
-    // Validate discount type
     if (!["percentage", "fixed"].includes(discountType)) {
-      return res.status(400).json({ 
-        error: "Discount type must be 'percentage' or 'fixed'" 
+      return res.status(400).json({
+        error: "Discount type must be 'percentage' or 'fixed'",
       });
     }
 
-    // Validate dates for general coupons
-    if (!isPatientCoupon) {
+    if (isPatientCoupon) {
+      if (!patientId) {
+        return res.status(400).json({ error: "patientId is required for patient coupon" });
+      }
+    } else {
+      // validate dates only for non-patient coupons
       if (validFrom && validUntil && new Date(validUntil) <= new Date(validFrom)) {
-        return res.status(400).json({
-          error: "Valid until must be after valid from"
-        });
+        return res.status(400).json({ error: "Valid until must be after valid from" });
       }
     }
 
-    // Check duplicate coupon
     const existing = await prisma.coupon.findUnique({
-      where: { code: code.toUpperCase() }
+      where: { code: code.toUpperCase() },
     });
-
-    if (existing) {
-      return res.status(400).json({ error: "Coupon code already exists" });
-    }
+    if (existing) return res.status(400).json({ error: "Coupon code already exists" });
 
     const coupon = await prisma.coupon.create({
       data: {
         code: code.toUpperCase(),
         description,
-        createdById:req.user.id,
         discountType,
         discountValue: Number(discountValue),
         minOrderAmount: minOrderAmount ? Number(minOrderAmount) : null,
@@ -71,25 +78,26 @@ export const createCoupon = async (req, res) => {
         usageLimit: usageLimit ? Number(usageLimit) : null,
         perUserLimit: perUserLimit ? Number(perUserLimit) : null,
 
+        autoApply: !!autoApply,
+        isActive: true,
+
         isPatientCoupon: !!isPatientCoupon,
         patientId: isPatientCoupon ? Number(patientId) : null,
 
-        autoApply: !!autoApply,
-        isActive: true,
-        createdById: createdBy ? Number(createdBy) : null,
+        // ✅ requires schema field audience (enum)
+        audience: audience || "ALL",
+
+        createdById: req.user.id, // ✅ keep only this
       },
     });
 
-    res.status(201).json({
-      message: "Coupon created successfully",
-      coupon,
-    });
-
+    return res.status(201).json({ message: "Coupon created successfully", coupon });
   } catch (error) {
     console.error("Error creating coupon:", error);
-    res.status(500).json({ error: "Failed to create coupon" });
+    return res.status(500).json({ error: "Failed to create coupon" });
   }
 };
+
 
 /* ---------------------------------------------------------
    GET ALL COUPONS
@@ -220,136 +228,130 @@ export const deleteCoupon = async (req, res) => {
 export const getActiveCouponsForPatient = async (req, res) => {
   try {
     const { patientId } = req.query;
+    if (!patientId) return res.status(400).json({ error: "patientId is required" });
+
     const now = new Date();
+    const patientType = await getPatientType(patientId);
 
     const coupons = await prisma.coupon.findMany({
       where: {
         isActive: true,
         OR: [
-          { isPatientCoupon: true,  },
+          // ✅ patient-specific coupon only for this patient
+          { isPatientCoupon: true, patientId: Number(patientId) },
+
+          // ✅ general coupons with date + audience filtering
           {
             isPatientCoupon: false,
             AND: [
               { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
               { OR: [{ validUntil: null }, { validUntil: { gte: now } }] },
-            ]
-          }
-        ]
+              {
+                OR: [
+                  { audience: "ALL" },
+                  { audience: patientType }, // "NEW_PATIENT" or "EXISTING_PATIENT"
+                ],
+              },
+            ],
+          },
+        ],
       },
       include: {
-        couponUsages: {
-          where: { patientId: Number(patientId) }
-        }
+        couponUsages: { where: { patientId: Number(patientId) } },
       },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
 
-    const result = coupons.map(c => ({
+    const result = coupons.map((c) => ({
       ...c,
       usedCount: c.couponUsages.length,
       isUsed: c.couponUsages.length > 0,
-      couponUsages: undefined
+      couponUsages: undefined,
     }));
 
-    res.json(result);
+    return res.json(result);
   } catch (error) {
     console.error("Error fetching coupons:", error);
-    res.status(500).json({ error: "Failed to fetch coupons" });
+    return res.status(500).json({ error: "Failed to fetch coupons" });
   }
 };
+
 
 /* ---------------------------------------------------------
    APPLY COUPON
 --------------------------------------------------------- */
 export const applyCoupon = async (req, res) => {
   try {
-    const { code, patientId, orderAmount } = req.body;
+    const { code, patientId, orderAmount, currentOrderId } = req.body;
 
     if (!code || !patientId || !orderAmount) {
-      return res.status(400).json({
-        error: "code, patientId, and orderAmount are required"
-      });
+      return res.status(400).json({ error: "code, patientId, orderAmount are required" });
     }
 
     const coupon = await prisma.coupon.findUnique({
-      where: { code: code.toUpperCase() }
+      where: { code: code.toUpperCase() },
     });
-
     if (!coupon) return res.status(404).json({ error: "Invalid coupon" });
 
-    // Patient-specific coupon validation
-    if (coupon.isPatientCoupon && coupon.patientId !== Number(patientId)) {
+    // ✅ patient coupon validation
+    if (coupon.isPatientCoupon && Number(coupon.patientId) !== Number(patientId)) {
       return res.status(400).json({ error: "This coupon is not valid for this patient" });
     }
 
-    // General coupon date validation
+    // ✅ audience validation (requires schema field)
     if (!coupon.isPatientCoupon) {
+      const patientType = await getPatientType(patientId);
+      if (coupon.audience !== "ALL" && coupon.audience !== patientType) {
+        return res.status(400).json({ error: `Coupon only for ${coupon.audience.replace("_", " ").toLowerCase()}` });
+      }
+
+      // date validation
       const now = new Date();
-      if (coupon.validFrom && now < coupon.validFrom)
-        return res.status(400).json({ error: "Coupon not yet valid" });
-
-      if (coupon.validUntil && now > coupon.validUntil)
-        return res.status(400).json({ error: "Coupon expired" });
+      if (coupon.validFrom && now < coupon.validFrom) return res.status(400).json({ error: "Coupon not yet valid" });
+      if (coupon.validUntil && now > coupon.validUntil) return res.status(400).json({ error: "Coupon expired" });
     }
 
-    // Min order amount
-    if (coupon.minOrderAmount && orderAmount < coupon.minOrderAmount) {
-      return res.status(400).json({
-        error: `Minimum order amount is ₹${coupon.minOrderAmount}`
-      });
+    // min order
+    if (coupon.minOrderAmount && Number(orderAmount) < coupon.minOrderAmount) {
+      return res.status(400).json({ error: `Minimum order amount is ₹${coupon.minOrderAmount}` });
     }
 
-    // Total usage limit
+    // total usage limit
     if (coupon.usageLimit) {
-      const totalUses = await prisma.couponUsage.count({
-        where: { couponId: coupon.id }
-      });
-      if (totalUses >= coupon.usageLimit)
-        return res.status(400).json({ error: "Usage limit reached" });
+      const totalUses = await prisma.couponUsage.count({ where: { couponId: coupon.id } });
+      if (totalUses >= coupon.usageLimit) return res.status(400).json({ error: "Usage limit reached" });
     }
 
-    // Per-user limit
+    // per user limit
     if (coupon.perUserLimit) {
       const userUses = await prisma.couponUsage.count({
-        where: { couponId: coupon.id, patientId: Number(patientId) }
+        where: { couponId: coupon.id, patientId: Number(patientId) },
       });
-      if (userUses >= coupon.perUserLimit)
-        return res.status(400).json({ error: "You have already used this coupon" });
+      if (userUses >= coupon.perUserLimit) return res.status(400).json({ error: "You have already used this coupon" });
     }
 
-    // Calculate discount
-    let discount = coupon.discountType === "fixed"
-      ? coupon.discountValue
-      : Math.min((orderAmount * coupon.discountValue) / 100,
-                  coupon.maxDiscount || Infinity);
+    // discount calc
+    const amt = Number(orderAmount);
+    let discount =
+      coupon.discountType === "fixed"
+        ? coupon.discountValue
+        : Math.min((amt * coupon.discountValue) / 100, coupon.maxDiscount || Infinity);
 
-    const finalAmount = orderAmount - discount;
+    discount = Math.min(discount, amt); // avoid negative final
+    const finalAmount = amt - discount;
 
-    // Record usage
-    await prisma.couponUsage.create({
-      data: {
-        couponId: coupon.id,
-        patientId: Number(patientId),
-      }
-    });
-
-    // Increment usage count
-    await prisma.coupon.update({
-      where: { id: coupon.id },
-      data: { usedCount: { increment: 1 } }
-    });
-
-    res.json({
-      message: "Coupon applied successfully",
+    return res.json({
+      message: "Coupon validated",
+      couponId: coupon.id,
       discount,
       finalAmount,
     });
-
   } catch (error) {
     console.error("Error applying coupon:", error);
-    res.status(500).json({ error: "Failed to apply coupon" });
+    return res.status(500).json({ error: "Failed to apply coupon" });
   }
 };
+
 
 /* ---------------------------------------------------------
    TOGGLE COUPON STATUS

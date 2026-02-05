@@ -2202,6 +2202,7 @@ export const updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, paymentStatus, sampleCollected, reportReady, reportUrl } = req.body;
+    console.log( status, paymentStatus, sampleCollected, reportReady, reportUrl )
 
     const order = await prisma.order.update({
       where: { id: Number(id) },
@@ -3177,7 +3178,7 @@ export const getOrdersExpiringSoon = async (req, res) => {
 };
 
 
-const OPEN_STATUSES = ["NOT_READY", "READY"]; // still not dispatched
+const OPEN_STATUSES = ["NOT_READY", "READY"]; 
 const CLOSED_STATUSES = ["DISPATCHED", "DELIVERED"];
 
 export const fetchReportDue = async (req, res) => {

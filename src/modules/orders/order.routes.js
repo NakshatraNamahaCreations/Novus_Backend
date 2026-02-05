@@ -97,8 +97,6 @@ router.post("/complete-order", async (req, res) => {
   }
 });
 
-
-
 router.patch("/:id/document", upload.single("documentImage"), updateDocumentImage);
 
 export default router;

@@ -105,266 +105,198 @@ export class Styles {
     `;
   }
 
-  static generatePageStyles() {
-    return `
-      .page {
-        position: relative;
-        width: var(--page-width);
-        height: var(--page-height);
-        box-sizing: border-box;
-        padding-top: calc(var(--header-h) + 15px);
-        padding-left: 20px;
-        padding-right: 20px;
-        padding-bottom: calc(var(--footer-h) + var(--sig-h) + 45px);
-        page-break-after: always;
-        break-after: page;
-        page-break-inside: avoid;
-        break-inside: avoid;
-        background: white;
-        overflow: hidden;
-      }
-      
-.page-content {
-  max-height: calc(
-    var(--page-height) - 
-    var(--header-h) - 
-    var(--footer-h) - 
-    var(--sig-h) - 
-    70px /* top/bottom padding */
-  );
-  overflow-y: auto;
-  position: relative;
-}
-  .page.full-mode .page-content {
-  max-height: calc(
-    var(--page-height) - 
-    var(--header-h) - 
-    var(--footer-h) - 
-    var(--sig-h) - 
-    90px /* extra space for trend box */
-  );
-}
-      
-      .page-number {
-        position: fixed;
-        right: 20px;
-        bottom: 10px;
-        z-index: 11;
-        font-size: 10.5px;
-        color: var(--secondary-color);
-        font-weight: 400;
-      }
-      
-      .page-number:before {
-        content: "Page " counter(page) " / " counter(pages);
-      }
-    `;
-  }
+static generatePageStyles() {
+  return `
+    .page {
+      position: relative;
+      width: var(--page-width);
+      height: var(--page-height);
+      box-sizing: border-box;
 
-  static generatePatientStripStyles() {
-    return `
-      .ps-wrap {
-        display: flex;
-        justify-content: space-between;
-        grid-template-columns: 1fr 1.1fr 0.55fr;
-        column-gap: 0;
-        padding: 12px 14px;
-        margin: 0 0 16px 0;
-        background: #ffffff;
-        border: 1px solid #ebdfdf; /* Changed from blue to black */
-        border-radius: 8px;
-        box-shadow: 0 1px 2px rgba(46, 45, 45, 0.1);
-        position: relative;
-        overflow: hidden;
-      }
-      
-      .ps-col {
-        padding: 0 14px;
-        min-width: 0;
-        position: relative;
-      }
-      
-   .ps-left {
-  flex: 0 0 25%; /* Fixed width of 25% */
-  max-width: 25%;
-  padding: 0 15px;
-  display: flex;
-  flex-direction: column;
-}
+      padding-top: calc(var(--header-h) + 15px);
+      padding-left: 20px;
+      padding-right: 20px;
 
-/* Middle and right columns share the remaining width equally */
-.ps-mid, .ps-right {
-  flex: 1; /* Equal distribution of remaining space */
-  padding: 0 15px;
-  display: flex;
-  flex-direction: column;
-}
-  .ps-mid .ps-row {
-  margin: 2px 0;
-  padding: 2px 0;
-  align-items: flex-start;  /* so label stays aligned when partner wraps */
-}
+  padding-bottom: calc(var(--footer-h) + 5px);
 
 
-/* ✅ Partner can wrap to next line without adding big gap */
-.ps-v-partner {
-  white-space: normal !important;     /* allow wrap */
-  overflow: visible !important;       /* no clipping */
-  text-overflow: unset !important;
-  line-height: 1.15;                  /* tighter line spacing */
-  max-height: 2.3em;                  /* ~2 lines */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;              /* clamp to 2 lines */
-  -webkit-box-orient: vertical;
-}
-
-      
-      .ps-header {
-        margin-bottom: 12px;
-        padding-bottom: 8px;
- 
-      }
-      
-      .ps-name {
-        font-weight: 800;
-        font-size: 18px;
-        line-height: 1.15;
-        margin-bottom: 4px;
-        color: var(--primary-color);
-      }
-        .ps-name-large{
-         font-size: 18px;
-        }
-      
-      .ps-age-gender {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        font-weight: 600;
-      }
-      
-      .ps-age {
-        color: var(--success-color);
-        background: #d1fae5;
-        padding: 2px 8px;
-        border-radius: 12px;
-      }
-      
-      .ps-gender {
-        color: var(--warning-color);
-        background: #ede9fe;
-        padding: 2px 8px;
-        border-radius: 12px;
-      }
-      
-      .ps-separator {
-        color: var(--secondary-color);
-        font-weight: 300;
-      }
-      
-      .ps-section {
-        margin-bottom: 10px;
-      }
-      
-      .ps-section:last-child {
-        margin-bottom: 0;
-      }
-      
-       .ps-row {
-        display: flex;
-
-        font-size: 12px;
-        margin: 5px 0;
-        padding: 4px 0;
+      page-break-after: always;
+      break-after: page;
+  background: white;
+  overflow: hidden;
      
-      }
+    }
+      .sig-break{
+  page-break-before: always;
+  break-before: page;
+  height: 0;
+}
+.page-break {
+  page-break-before: always;
+  break-before: page;
+}
 
-      .ps-kv {
-        display: flex;
-    
-        align-items: center;
-        font-size: 12px;
-        margin: 5px 0;
-        padding: 4px 0;
-        
-      }
-      
-      .ps-kv:last-child, .ps-row:last-child {
-        border-bottom: none;
-      }
-      
-      .ps-k {
-        color: var(--secondary-color);
-        font-weight: 600;
-        white-space: nowrap;
-        min-width: 90px;
-      }
-      
-      .ps-v {
-        color: var(--primary-color);
-        font-weight: 500;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        flex: 1;
-  
-      }
-      
-      .ps-v.highlight {
-        color: var(--primary-color);
-        font-weight: 700;
-        background: var(--light-bg);
-        padding: 2px 8px;
-        border-radius: 4px;
-        display: inline-block;
-      }
-      
-      .ps-right-wrap {
-        display: flex;
-        gap: 15px;
-        justify-content: flex-end;
-        align-items: flex-start;
-        height: 100%;
-        padding-top: 8px;
-      }
-      
-      .ps-stamp {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        min-width: 80px;
-      }
-      
-      .ps-stamp-img {
-        width: 65px;
-        height: 65px;
-        object-fit: contain;
-        display: block;
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        padding: 4px;
-        background: white;
-      }
-      
-      .ps-stamp-code {
-        margin-top: 6px;
-        font-size: 10px;
-        font-weight: 700;
-        color: var(--primary-color);
-        background: var(--light-bg);
-        padding: 2px 6px;
-        border-radius: 4px;
-      }
-      
-      .ph {
-        background: var(--light-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        border-style: dashed;
-      }
-    `;
+
+.page-content{
+  /* ✅ Let content flow naturally */
+  max-height: none;
+  overflow: visible;
+
+  /* Optional: prevent footer overlap by keeping safe space */
+  padding-bottom: 10px;
+}
+
+
+    .page-number {
+      position: fixed;
+      right: 20px;
+      bottom: 10px;
+      z-index: 11;
+      font-size: 10.5px;
+      color: var(--secondary-color);
+      font-weight: 400;
+    }
+
+    .page-number:before {
+      content: "Page " counter(page) " / " counter(pages);
+    }
+  `;
+}
+
+
+static generatePatientStripStyles() {
+  return `
+ /* Patient Strip - Ultra Compact Professional */
+.ps-wrap {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+  margin: 0 0 6px 0;
+  background: #ffffff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.ps-wrap.ps-pro {
+  display: flex;
+  gap: 10px;
+  padding: 6px 10px;
+  margin: 0 0 6px 0;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.ps-col { 
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.ps-left {
+  flex: 0 0 28%;
+  padding-right: 8px;
+  border-right: 1px solid #eee;
+}
+
+.ps-mid {
+  flex: 0 0 38%;
+  padding: 0 8px;
+  border-right: 1px solid #eee;
+}
+
+.ps-right {
+  flex: 1;
+  padding-left: 8px;
+}
+
+/* Name - NO bottom margin */
+.ps-name {
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1;
+  color: #111;
+  margin: 0;
+}
+
+/* Subline - minimal spacing */
+.ps-subline {
+  font-size: 11px;
+  color: #555;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 0 0 0;
+  line-height: 1;
+}
+
+.ps-dot { 
+  color: #999; 
+  font-size: 8px; 
+}
+
+/* Key/Value - ZERO vertical gaps */
+.ps-kv {
+  display: flex;
+  gap: 1px;
+  margin: 0;
+  line-height: 1;
+  align-items: baseline;
+}
+
+.ps-kv + .ps-kv {
+  margin-top: 3px;
+}
+
+.ps-kv-compact { 
+  margin-top: 4px;
+}
+
+.ps-k {
+  min-width: 75px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #666;
+  white-space: nowrap;
+}
+
+.ps-v {
+  font-size: 11px;
+  font-weight: 500;
+  color: #111;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Partner text wrapping - tighter */
+.ps-wraptext {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.2;
+  max-height: 2.4em;
+}
+
+/* Monospace IDs */
+.ps-mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  letter-spacing: 0;
+}
+
+@media print {
+  .ps-wrap, 
+  .ps-wrap.ps-pro {
+    border-color: #bbb;
   }
+}
+  `;
+}
 
   static generateTableStyles() {
     return `
@@ -543,108 +475,84 @@ export class Styles {
 
   static generateSignatureStyles() {
     return `
-    .sig-row {
-      position: absolute;
-      left: 20px;
-      right: 20px;
-      bottom: calc(var(--footer-h) + 25px);
-      height: var(--sig-h);
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 15px;
-      align-items: flex-end;
-      padding-top: 10px;
-      background: white;
-      z-index: 5;
-      page-break-inside: avoid;
-      break-inside: avoid;
-      page-break-before: avoid;
-      break-before: avoid;
-    }
-    
-    .sig-cell {
-      min-width: 0;
-      min-height: 80px;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      align-items: center; /* Center horizontally */
-      text-align: center; /* Center text alignment */
-    }
-    
-    /* Remove left/right specific classes since all are centered */
-    .sig-cell.left, 
-    .sig-cell.center, 
-    .sig-cell.right { 
-      text-align: center;
-      align-items: center;
-    }
-    
-    .sig-content {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-end;
-      width: 100%;
-      height: 100%;
-    }
-    
-    .sig-img-wrap {
-      min-height: 50px;
-      display: flex;
-      align-items: flex-end;
-      justify-content: center; /* Center image horizontally */
-      margin-bottom: 8px;
-      width: 100%;
-    }
-    
-    .sig-placeholder {
-      height: 45px;
-      width: 160px; /* Fixed width to match max-width of sig-img */
-      background: transparent;
-    }
-    
-    .sig-img {
-      max-height: 50px;
-      max-width: 160px;
-      object-fit: contain;
-      display: block;
-      margin: 0 auto; /* Center the image */
-    }
-    
-    .sig-name {
-      font-weight: 700;
-      color: var(--primary-color);
-      margin-top: 6px;
-      font-size: 12px;
-      min-height: 18px;
-      width: 100%;
-      text-align: center;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    
-    .sig-desig {
-      color: var(--secondary-color);
-      margin-top: 3px;
-      font-size: 12px;
-      min-height: 16px;
-      width: 100%;
-      text-align: center;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    
-    /* For cells with both name and designation */
-    .sig-cell.has-desig .sig-name {
-      margin-top: 4px;
-    }
-    
-    .sig-cell.has-desig .sig-desig {
-      margin-top: 2px;
-    }
+.sig-row{
+  margin-top: 14px;
+  display: grid;
+  gap: 30px;
+  align-items: end;
+  page-break-inside: avoid;
+
+    break-inside: avoid;
+
+  break-before: auto;
+  page-break-before: auto;
+}
+
+
+
+/* Dynamic columns */
+.sig-row.cols-1{ grid-template-columns: 1fr; }
+.sig-row.cols-2{ grid-template-columns: 1fr 1fr; }
+.sig-row.cols-3{ grid-template-columns: 1fr 1fr 1fr; }
+
+.sig-cell{
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 110px;
+}
+
+/* Alignment per cell */
+.sig-cell.left   { align-items: flex-start; text-align: left; }
+.sig-cell.center { align-items: center;     text-align: center; }
+.sig-cell.right  { align-items: flex-end;   text-align: right; }
+
+.sig-img-wrap{
+  min-height: 70px;
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+}
+
+.sig-cell.left .sig-img-wrap   { justify-content: flex-start; }
+.sig-cell.center .sig-img-wrap { justify-content: center; }
+.sig-cell.right .sig-img-wrap  { justify-content: flex-end; }
+
+.sig-img{
+  max-height: 70px;
+  max-width: 180px;
+  object-fit: contain;
+  display: block;
+}
+
+.sig-name,
+.sig-desig {
+  width: 100%;
+}
+
+/* Left signature text aligned left */
+.sig-cell.left .sig-name,
+.sig-cell.left .sig-desig {
+  text-align: left;
+}
+
+/* Center signature text aligned center */
+.sig-cell.center .sig-name,
+.sig-cell.center .sig-desig {
+  text-align: center;
+}
+
+/* Right signature text aligned right */
+.sig-cell.right .sig-name,
+.sig-cell.right .sig-desig {
+  text-align: right;
+}
+
+.sig-placeholder{
+  height: 70px;
+  width: 180px;
+}
+
   `;
   }
 
@@ -665,6 +573,12 @@ export class Styles {
       text-align: justify;
       line-height: 1.5;
     }
+      .radiology-wrap img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
 
     /* ✅ Quill alignment classes (must override default p rule) */
     .radiology-wrap .ql-align-center { text-align: center !important; }
@@ -687,6 +601,76 @@ export class Styles {
       margin: 2px 0;
       line-height: 1.5;
     }
+.conditions{
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+}
+
+
+.conditions-title{
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.conditions-body p{
+  margin: 4px 0;
+  color: #374151;
+}
+
+
+
+
+.conditions-list{
+  margin: 0;
+  padding-left: 16px;
+}
+
+.conditions-list li{
+  margin: 3px 0;
+  color: #374151;
+}
+.end-page {
+  margin-top: 10px;
+}
+
+.conditions {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 10.5px;
+  line-height: 1.45;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.conditions-title {
+  font-weight: 700;
+  font-size: 11px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.conditions-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.conditions-list li {
+  margin: 4px 0;
+  color: #111827;
+}
+
+.conditions-list li.sub {
+  margin: 3px 0 3px 12px;
+  list-style-type: circle;
+  color: #374151;
+}
+
   `;
   }
 
@@ -714,16 +698,20 @@ export class Styles {
           break-inside: auto;
         }
         
-        tr {
-          page-break-inside: avoid;
-          break-inside: avoid;
-        }
-        
-        thead {
-          page-break-after: avoid;
-          break-after: avoid;
-        }
-        
+       /* ✅ Allow body rows to break, but keep headers together */
+tbody tr {
+  page-break-inside: auto;
+  break-inside: auto;
+}
+
+/* Keep header from splitting */
+thead {
+  display: table-header-group;
+}
+tfoot {
+  display: table-footer-group;
+}
+
         tr:hover td {
           background: transparent;
         }
@@ -735,16 +723,7 @@ export class Styles {
           break-inside: avoid;
         }
         
-        .sig-row {
-          page-break-inside: avoid;
-          break-inside: avoid;
-        }
-        
-       .page-content{
-  position: relative;
-  overflow: hidden;
-  max-height: calc(var(--page-height) - var(--header-h) - var(--footer-h) - var(--sig-h) - 70px);
-}
+
 
       }
     `;

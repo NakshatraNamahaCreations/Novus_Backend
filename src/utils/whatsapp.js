@@ -30,7 +30,7 @@ export const WhatsAppMessage = async ({
       headers: { "Content-Type": "application/json" },
     });
 
-   
+   console.log("response.data",response.data)
     return response.data;
   } catch (error) {
     console.error(

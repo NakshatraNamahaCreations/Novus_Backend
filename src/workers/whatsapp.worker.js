@@ -59,6 +59,23 @@ const extractTestNamesForPatient = (order, patientId) => {
   }
 };
 
+const formatOrderDateTime = (order) => {
+  const dateStr = order?.date ? dayjs(order.date).format("DD MMM YYYY") : "-";
+
+  // Prefer centerSlot for center visit (if available), else fallback to slot
+  const s = order?.centerSlot || order?.slot;
+
+  if (s?.startTime && s?.endTime) {
+    const timeStr = `${dayjs(s.startTime).format("hh:mm A")} - ${dayjs(
+      s.endTime,
+    ).format("hh:mm A")}${s?.name ? ` (${s.name})` : ""}`;
+
+    return `${dateStr} ${timeStr}`;
+  }
+
+  return dateStr;
+};
+
 /* ----------------------------------
    Fetch order with common includes
 ---------------------------------- */
@@ -70,6 +87,7 @@ const fetchOrder = async (orderId) => {
         patient: true,
         address: true,
         slot: true,
+        centerSlot: true,
         orderMembers: {
           include: {
             patient: true, // ✅ important for patient-wise send
@@ -144,17 +162,56 @@ const handleSendReport = async (order) => {
   return { success: true, type: "order-report" };
 };
 
+const handleSendCenterConfirmation = async (order) => {
+
+  console.log("order?.isHomeSample",order?.isHomeSample)
+  console.log("!order?.centerId",!order?.centerId,order?.centerId)
+
+  // Only for center visit orders
+  if (order?.isHomeSample) return { skipped: true, reason: "home-sample" };
+  if (!order?.centerId) return { skipped: true, reason: "no-centerId" };
+
+  const centerPhone = order?.center?.mobile;
+
+  console.log("centerPhone",centerPhone)
+  if (!centerPhone) {
+    return { skipped: true, reason: "center mobile missing" };
+  }
+
+  const tpl = WHATSAPP_TEMPLATES.CENTER_CONFIRMATION;
+
+  const testsStr = extractTestNames(order);
+  const dateTime = formatOrderDateTime(order);
+
+  const variables = tpl.mapVariables({
+    centerName: safe(order.center?.contactName || order.center?.name, "Center"),
+    patientName: safe(order.patient?.fullName, "Patient"),
+    tests: safe(testsStr, "As per prescription"),
+    dateTime: safe(dateTime, "-"),
+  });
+
+  console.log("variables",variables)
+  await WhatsAppMessage({
+    phone: `${centerPhone}`,
+    templateId: tpl.templateId,
+    message: tpl.message,
+    variables,
+  });
+
+  return { success: true, type: "center-confirmation" };
+};
+
 /* ----------------------------------
    Send PATIENT-wise report
 ---------------------------------- */
 const handleSendPatientReport = async (
   order,
-  { patientId, pdfType = "full" }
+  { patientId, pdfType = "full" },
 ) => {
   if (!patientId) throw new Error("Missing patientId");
 
   const member = (order.orderMembers || []).find(
-    (m) => Number(m.patientId) === Number(patientId)
+    (m) => Number(m.patientId) === Number(patientId),
   );
 
   const patient = member?.patient || order.patient;
@@ -168,7 +225,7 @@ const handleSendPatientReport = async (
 
   if (!reportLink) {
     throw new Error(
-      `Patient report not ready (orderId=${order.id}, patientId=${patientId}, pdfType=${pdfType})`
+      `Patient report not ready (orderId=${order.id}, patientId=${patientId}, pdfType=${pdfType})`,
     );
   }
 
@@ -220,19 +277,13 @@ const handleWelcomeNewPatient = async ({ contactNo, patientName }) => {
 const handleSendOrderConfirmed = async (order) => {
   const testsStr = extractTestNames(order);
 
-  // ✅ Choose template based on home vs center
   const tpl = order?.isHomeSample
-    ? WHATSAPP_TEMPLATES.ORDER_CONFIRMED // Home Sample template
-    : WHATSAPP_TEMPLATES.CENTER_VISIT; // Center Visit template
+    ? WHATSAPP_TEMPLATES.ORDER_CONFIRMED
+    : WHATSAPP_TEMPLATES.CENTER_VISIT;
 
-  // ✅ Build variables per template
   let variables = [];
 
-  // console.log("tpl", tpl);
-  // console.log("order?.isHomeSample", order?.isHomeSample);
-
   if (order?.isHomeSample) {
-    // HOME SAMPLE (ORDER_CONFIRMED)
     variables = tpl.mapVariables({
       customerName: safe(order.patient?.fullName, "Customer"),
       bookingId: safe(order.id),
@@ -242,10 +293,10 @@ const handleSendOrderConfirmed = async (order) => {
         : "-",
       timeSlot: order?.slot
         ? `${dayjs(order.slot.startTime).format("hh:mm A")} - ${dayjs(
-            order.slot.endTime
-          ).format("hh:mm A")}${
-            order.slot?.name ? ` (${order.slot.name})` : ""
-          }`
+            order.slot.endTime,
+          ).format(
+            "hh:mm A",
+          )}${order.slot?.name ? ` (${order.slot.name})` : ""}`
         : "-",
       address: [
         order.address?.address,
@@ -259,8 +310,6 @@ const handleSendOrderConfirmed = async (order) => {
       supportNumber: process.env.SUPPORT_PHONE || "8050065924",
     });
   } else {
-    const testsStr = extractTestNames(order);
-
     const centerAddress = [
       order.center?.address,
       order.center?.city?.name || order.center?.city,
@@ -274,18 +323,22 @@ const handleSendOrderConfirmed = async (order) => {
       tests: safe(testsStr, "As per prescription"),
       centerName: safe(
         order.center?.name || order.address?.centerName,
-        "Novus Health Labs"
+        "Novus Health Labs",
       ),
       centerAddress: safe(centerAddress, "N/A"),
     });
   }
 
+  // ✅ 1) Send to customer
   await WhatsAppMessage({
     phone: order.patient?.contactNo,
     templateId: tpl.templateId,
     message: tpl.message,
     variables,
   });
+
+  // ✅ 2) ALSO send to center (only if isHomeSample=false and centerId exists)
+  await handleSendCenterConfirmation(order);
 
   return {
     success: true,
@@ -405,7 +458,7 @@ new Worker(
       throw error;
     }
   },
-  { connection: queueRedis, concurrency: 10 }
+  { connection: queueRedis, concurrency: 10 },
 );
 
 console.log("✅ WhatsApp Worker running...");

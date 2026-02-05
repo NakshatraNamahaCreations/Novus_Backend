@@ -1,58 +1,48 @@
-// html-generators/signatureSection.js
 import { StringUtils } from "../utils/stringUtils.js";
 
 export class SignatureSection {
   static generate(signatures) {
     const { left, center, right } = signatures || {};
-    
+
+    const slots = [
+      { pos: "left", sig: left },
+      { pos: "center", sig: center },
+      { pos: "right", sig: right },
+    ];
+
+    const active = slots.filter(x => x.sig && StringUtils.safeTrim(x.sig.name));
+    const cols = Math.max(active.length, 1); // 1,2,3
+
+    // Render only active signatures (so no empty columns)
+    const html = active.map(x => this.renderSignatureCell(x.sig, x.pos)).join("");
+
     return `
-      <div class="sig-row">
-        ${this.renderSignatureCell(left, "left")}
-        ${this.renderSignatureCell(center, "center")}
-        ${this.renderSignatureCell(right, "right")}
+      <div class="sig-row cols-${cols}">
+        ${html || ""}
       </div>
     `;
   }
 
   static renderSignatureCell(signature, position) {
-    // Always return a cell with center-aligned content
-    const cellClass = `sig-cell center`; // Force center alignment for all cells
-    
-    if (!signature) {
-      return `<div class="${cellClass}"></div>`;
-    }
-    
+    if (!signature) return "";
+
     const name = StringUtils.safeTrim(signature.name);
-    const designation = StringUtils.safeTrim(signature.designation) || 
-                       StringUtils.safeTrim(signature.qualification);
-    
-    // If no name, return empty cell
-    if (!name) {
-      return `<div class="${cellClass}"></div>`;
-    }
-    
+    if (!name) return "";
+
+    const designation =
+      StringUtils.safeTrim(signature.designation) ||
+      StringUtils.safeTrim(signature.qualification) ||
+      "";
+
     const img = signature?.signatureImg
       ? `<img class="sig-img" src="${signature.signatureImg}" alt="signature" />`
-      : '<div class="sig-placeholder"></div>';
+      : `<div class="sig-placeholder"></div>`;
 
-    // Build content
-    let content = `
-      <div class="sig-img-wrap">${img}</div>
-    `;
-    
-    // Add name
-    content += `<div class="sig-name">${StringUtils.escapeHtml(name)}</div>`;
-    
-    // Add designation if exists
-    if (designation) {
-      content += `<div class="sig-desig">${StringUtils.escapeHtml(designation)}</div>`;
-    }
-    
     return `
-      <div class="${cellClass}">
-        <div class="sig-content">
-          ${content}
-        </div>
+      <div class="sig-cell ${position}">
+        <div class="sig-img-wrap">${img}</div>
+        <div class="sig-name">${StringUtils.escapeHtml(name)}</div>
+        ${designation ? `<div class="sig-desig">${StringUtils.escapeHtml(designation)}</div>` : ``}
       </div>
     `;
   }

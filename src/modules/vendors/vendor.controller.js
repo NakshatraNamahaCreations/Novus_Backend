@@ -129,8 +129,6 @@ export const loginVendor = async (req, res) => {
 };
 
 
-
-// ✅ LOGOUT (client just deletes token)
 export const logoutVendor = async (req, res) => {
   try {
  
@@ -363,23 +361,70 @@ export const getAllVendors = async (req, res) => {
   }
 };
 
-// ✅ GET Vendor by ID
+
 export const getVendorById = async (req, res) => {
   try {
     const { id } = req.params;
+    const vendorId = Number(id);
 
-    const vendor = await prisma.vendor.findUnique({
-      where: { id: Number(id) },
-    });
+  
+    const now = new Date();
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+    // fetch vendor + today's attendance in parallel
+    const [vendor, todayAttendance] = await Promise.all([
+      prisma.vendor.findUnique({
+        where: { id: vendorId },
+        // optional: don't return password
+        select: {
+          id: true,
+          name: true,
+          number: true,
+          city: true,
+          category: true,
+          gender: true,
+          dob: true,
+          age: true,
+          pincode: true,
+          radius: true,
+          earnings: true,
+          address: true,
+          email: true,
+          status: true,
+          block: true,
+          isOnline: true,
+          createdAt: true,
+          updatedAt: true,
+          createdById: true,
+          overallRating:true,
+          totalReviews:true
+        },
+      }),
+      prisma.vendorAttendance.findUnique({
+        where: {
+          vendorId_day: { vendorId, day: todayUTC }, 
+        },
+        select: {
+          id: true,
+          day: true,
+
+        },
+      }),
+    ]);
 
     if (!vendor) return res.status(404).json({ error: "Vendor not found" });
 
-    res.json(vendor);
+    return res.json({
+      ...vendor,
+      attendanceAddedToday: !!todayAttendance,
+   
+    });
   } catch (error) {
     console.error("Error fetching vendor:", error);
     res.status(500).json({ error: "Failed to fetch vendor" });
   }
 };
+
 
 // ✅ GET Vendors by Category
 export const getVendorsByCategory = async (req, res) => {
@@ -795,7 +840,7 @@ export const addVendorReview = async (req, res) => {
     await prisma.vendor.update({
       where: { id: Number(vendorId) },
       data: {
-        overallRating: newOverallRating,
+        overallRating:  Number(newOverallRating.toFixed(2)),
         totalReviews: newTotalReviews,
       },
     });

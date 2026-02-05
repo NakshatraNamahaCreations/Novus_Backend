@@ -1,7 +1,7 @@
 import { Worker, QueueEvents } from "bullmq";
 import { queueRedis } from "../config/redisQueue.js";
 import { PrismaClient, ReportDispatchStatus } from "@prisma/client";
-import { generatePatient3Pdfs } from "../services/patientReportPdf.service.js";
+
 import { uploadBufferToS3 } from "../config/s3.js";
 import { whatsappQueue } from "../queues/whatsapp.queue.js";
 import { generatePatient3PdfsNew } from "../services/pdf-generator/main.js";
@@ -112,7 +112,7 @@ new Worker(
             // dispatchStatus: ReportDispatchStatus.NOT_READY,
           },
           data: {
-            dispatchStatus: ReportDispatchStatus.READY,
+            dispatchStatus: ReportDispatchStatus.DISPATCHED,
             readyAt: new Date(),
             dispatchedAt:new Date()
           },

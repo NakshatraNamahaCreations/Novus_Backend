@@ -98,18 +98,7 @@ function getFlagKind(flag) {
   return "normal";
 }
 
-function renderResultWithArrow(valueText, flag) {
-  const kind = getFlagKind(flag);
-  const arrowClass = kind === "high" ? "red" : 
-                    kind === "low" ? "green" : "";
-  
-  if (kind === "high") 
-    return `${escapeHtml(valueText)} <span class="arrow ${arrowClass}">↑</span>`;
-  if (kind === "low") 
-    return `${escapeHtml(valueText)} <span class="arrow ${arrowClass}">↓</span>`;
-  
-  return `${escapeHtml(valueText)}`;
-}
+
 
 function formatValueWithUnit(value, unit) {
   const v = value == null || String(value).trim() === "" ? "—" : String(value);
@@ -118,14 +107,7 @@ function formatValueWithUnit(value, unit) {
   return `${v} ${u}`;
 }
 
-function formatRangeWithUnit(rangeText, unit) {
-  const rt = safeTrim(rangeText);
-  const u = safeTrim(unit);
-  if (!rt) return "—";
-  if (!u) return rt;
-  if (rt.toLowerCase().includes(u.toLowerCase())) return rt;
-  return `${rt} ${u}`;
-}
+
 
 function getReferenceRangeText(pr) {
   const direct =

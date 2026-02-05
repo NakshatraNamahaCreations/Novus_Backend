@@ -1,4 +1,4 @@
-// services/patientService.js
+
 import { PrismaClient } from "@prisma/client";
 import { safeTrim } from "../utils/stringUtils.js";
 

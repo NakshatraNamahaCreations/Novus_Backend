@@ -12,6 +12,12 @@ enum PrescriptionFileType {
   PDF
 }
 
+enum CouponAudience {
+  ALL
+  NEW_PATIENT
+  EXISTING_PATIENT
+}
+
 enum CommissionType {
   PERCENT
   AMOUNT
@@ -529,25 +535,32 @@ model CheckupPackage {
   @@map("CheckupPackage")
 }
 
+
+
 model Coupon {
   id              Int       @id @default(autoincrement())
   code            String    @unique
   description     String?
-  discountType    String    @default("percentage") // "percentage" or "fixed"
+  discountType    String    @default("percentage")
   discountValue   Float
   minOrderAmount  Float?
   maxDiscount     Float?
-  validFrom       DateTime? // renamed from startDate
-  validUntil      DateTime? // renamed from expiryDate
+  validFrom       DateTime?
+  validUntil      DateTime?
   usageLimit      Int?
   perUserLimit    Int?
-  usedCount       Int?      @default(0) // ADDED: Track usage count
+  usedCount       Int?      @default(0)
   isActive        Boolean   @default(true)
   autoApply       Boolean   @default(false)
-  isPatientCoupon Boolean   @default(false) // ADDED: Patient-specific coupon
-  patientId       Int? // ADDED: If coupon is for specific patient
 
-  createdById Int? // Track who created the coupon
+  // ✅ keep for patient-specific coupons (single user)
+  isPatientCoupon Boolean   @default(false)
+  patientId       Int?
+
+  // ✅ NEW: choose who can use
+  audience        CouponAudience @default(ALL)
+
+  createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
 
   createdAt    DateTime      @default(now())
@@ -555,6 +568,7 @@ model Coupon {
   orders       Order[]       @relation("OrderCouponRelation")
   couponUsages CouponUsage[]
 }
+
 
 model CouponUsage {
   id        Int  @id @default(autoincrement())

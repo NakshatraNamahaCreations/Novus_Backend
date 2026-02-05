@@ -48,7 +48,7 @@ export const ParameterController = {
       });
     }
 
-    const list = await ParameterService.listByTest1(testId, gender);
+    const list = await ParameterService.listByTest(testId, gender);
 
     return res.json({ success: true, data: list });
   } catch (err) {
@@ -60,8 +60,7 @@ export const ParameterController = {
    listByTest1: async (req, res) => {
    try {
     const { testId } = req.params;
-   
-
+  
     const list = await ParameterService.listByTest1(testId);
 
     return res.json({ success: true, data: list });

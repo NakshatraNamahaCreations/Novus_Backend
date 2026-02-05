@@ -494,7 +494,10 @@ export const getNearbyCenters = async (req, res) => {
       const { password, ...rest } = row;
       return {
         ...rest,
-        distance: typeof rest.distance === "string" ? parseFloat(rest.distance) : rest.distance,
+        distance:
+          typeof rest.distance === "string"
+            ? parseFloat(rest.distance)
+            : rest.distance,
       };
     });
 
@@ -507,13 +510,27 @@ export const getNearbyCenters = async (req, res) => {
       include: { category: true },
     });
 
-    // ✅ optional filter by requested categories
+    // ✅ filter centers: MUST have ALL requested categories
     let filteredCenters = sanitized;
 
     if (categoryIdList.length > 0) {
-      const matched = centerCategories.filter((cc) => categoryIdList.includes(cc.categoryId));
-      const allowedCenterIds = new Set(matched.map((m) => m.centerId));
-      filteredCenters = sanitized.filter((center) => allowedCenterIds.has(center.id));
+      // build centerId -> Set(categoryId)
+      const centerToCategorySet = new Map();
+
+      for (const cc of centerCategories) {
+        if (!centerToCategorySet.has(cc.centerId)) {
+          centerToCategorySet.set(cc.centerId, new Set());
+        }
+        centerToCategorySet.get(cc.centerId).add(cc.categoryId);
+      }
+
+      filteredCenters = sanitized.filter((center) => {
+        const set = centerToCategorySet.get(center.id);
+        if (!set) return false;
+
+        // ✅ must contain ALL
+        return categoryIdList.every((catId) => set.has(catId));
+      });
 
       if (filteredCenters.length === 0) {
         return res.json({ count: 0, centers: [] });
@@ -538,6 +555,7 @@ export const getNearbyCenters = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch nearby centers" });
   }
 };
+
 
 
 

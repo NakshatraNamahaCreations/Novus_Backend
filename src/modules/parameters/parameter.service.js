@@ -143,33 +143,75 @@ export const ParameterService = {
       },
     });
   },
-  listByTest: async (testId, gender = "Both") => {
-    try {
-      const tId = Number(testId);
-      const g = (gender || "Both").trim();
 
-      // If user passes Male/Female, also include "Both" rows.
-      const genderFilter = g === "Both" ? ["Both"] : [g, "Both"];
 
-      return await prisma.testParameter.findMany({
-        where: { testId: tId },
-        orderBy: { order: "asc" },
-        include: {
-          ranges: {
-            where: { gender: { in: genderFilter } },
-            orderBy: { id: "asc" }, // optional
-          },
+listByTest: async (testId, gender = "Both") => {
+  const tId = Number(testId);
+  const g = String(gender || "Both").trim();
 
-          // ✅ Only keep this if `resultOpts` table has a `gender` field
-          resultOpts: {
-            where: { gender: { in: genderFilter } },
-            orderBy: { id: "asc" }, // optional
-          },
-        },
-      });
-    } catch (err) {
-      console.error("ParameterService.listByTest error:", err);
-      throw err;
+  // If user passes Male/Female/Kids, also include "Both" rows.
+  const genderFilter = g === "Both" ? ["Both"] : [g, "Both"];
+
+  const includeWithGender = {
+    ranges: {
+      where: { gender: { in: genderFilter } },
+      orderBy: { id: "asc" },
+    },
+    resultOpts: {
+      where: { gender: { in: genderFilter } },
+      orderBy: { id: "asc" },
+    },
+  };
+
+  const includeNoGender = {
+    ranges: { orderBy: { id: "asc" } },
+    resultOpts: { orderBy: { id: "asc" } },
+  };
+
+  try {
+    return await prisma.testParameter.findMany({
+      where: { testId: tId },
+      orderBy: { order: "asc" },
+      include: includeWithGender,
+    });
+  } catch (err) {
+    // ✅ Prisma schema/client on server likely doesn't know `gender`
+    const msg = String(err?.message || "");
+    const isGenderSchemaProblem =
+      msg.includes("Unknown argument `gender`") ||
+      msg.includes("Unknown field") ||
+      msg.includes("Available options are marked with ?");
+
+    if (!isGenderSchemaProblem) throw err;
+
+    // Fallback: fetch without gender filtering
+    const rows = await prisma.testParameter.findMany({
+      where: { testId: tId },
+      orderBy: { order: "asc" },
+      include: includeNoGender,
+    });
+
+    // Filter in JS only if the returned items actually have a gender field
+    if (g !== "Both") {
+      for (const p of rows) {
+        if (Array.isArray(p.ranges) && p.ranges.some(r => "gender" in r)) {
+          const hasSpecific = p.ranges.some(r => r.gender === g);
+          p.ranges = hasSpecific
+            ? p.ranges.filter(r => r.gender === g)
+            : p.ranges.filter(r => r.gender === "Both");
+        }
+
+        if (Array.isArray(p.resultOpts) && p.resultOpts.some(o => "gender" in o)) {
+          const hasSpecific = p.resultOpts.some(o => o.gender === g);
+          p.resultOpts = hasSpecific
+            ? p.resultOpts.filter(o => o.gender === g)
+            : p.resultOpts.filter(o => o.gender === "Both");
+        }
+      }
     }
-  },
+
+    return rows;
+  }
+}
+
 };

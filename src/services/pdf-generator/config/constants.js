@@ -12,10 +12,10 @@ export const CONFIG = {
 DIMENSIONS: {
     pageWidth: '210mm',
     pageHeight: '297mm',
-    headerHeight: 110,  // Reduced from 120
-    footerHeight: 65,   // Reduced from 75
-    signatureHeight: 100, // Reduced from 120
-    patientStripHeight: 160 // Reduced from 180
+    headerHeight: 110,  
+    footerHeight: 65,   
+    signatureHeight: 100, 
+    patientStripHeight: 160 
   },
   
   COLORS: {
