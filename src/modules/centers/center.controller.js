@@ -28,6 +28,7 @@ export const createCenter = async (req, res) => {
       long,
       cityId,
       isSelf,
+        showApp,  
       testIds = [],
     } = req.body;
 
@@ -82,6 +83,7 @@ export const createCenter = async (req, res) => {
         email: email || null,
         alternativeEmail: alternativeEmail || null,
         mobile: mobile || null,
+         showApp: toBool(showApp, false),
         isSelf: toBool(isSelf, false), // ✅ FIXED
         lat:
           lat !== undefined && lat !== null && lat !== "" ? Number(lat) : null,
@@ -234,6 +236,7 @@ export const getAllCentersforadmin = async (req, res) => {
         address: true,
         isSelf:true,
         city: true,
+           showApp: true,
         centerSlots: true,
       },
       orderBy: { name: "asc" },
@@ -299,6 +302,7 @@ export const updateCenter = async (req, res) => {
       long,
       cityId,
       isSelf,
+       showApp,
       testIds = [],
     } = req.body;
 
@@ -353,6 +357,7 @@ export const updateCenter = async (req, res) => {
           ? { alternativeEmail: alternativeEmail || null }
           : {}),
         ...(mobile !== undefined ? { mobile: mobile || null } : {}),
+          ...(showApp !== undefined ? { showApp: toBool(showApp, existing.showApp) } : {}), 
         ...(isSelf !== undefined
           ? { isSelf: toBool(isSelf, existing.isSelf) }
           : {}), // ✅ FIXED
@@ -422,22 +427,7 @@ export const deleteCenter = async (req, res) => {
   }
 };
 
-/* -----------------------------
-   Nearby Centers (unchanged logic, only include city if needed)
------------------------------- */
 
-// Convert slot time string "02:30 PM" → Date object (today at that time)
-function getSlotDate(slotTimeString) {
-  const [time, modifier] = slotTimeString.split(" ");
-  let [hours, minutes] = time.split(":").map(Number);
-
-  if (modifier === "PM" && hours !== 12) hours += 12;
-  if (modifier === "AM" && hours === 12) hours = 0;
-
-  const d = new Date();
-  d.setHours(hours, minutes, 0, 0);
-  return d;
-}
 
 export const getNearbyCenters = async (req, res) => {
   try {
@@ -476,6 +466,7 @@ export const getNearbyCenters = async (req, res) => {
         )) AS distance
       FROM "Center" c
       WHERE c.lat IS NOT NULL AND c.long IS NOT NULL
+          AND c."showApp" = true
         AND (6371 * acos(
            cos(radians(${userLat})) * cos(radians(c.lat)) *
            cos(radians(c.long) - radians(${userLong})) +
@@ -688,25 +679,22 @@ export const getCenterSlots = async (req, res) => {
     const slots = await prisma.centerSlot.findMany({
       where,
       orderBy: { startTime: "asc" },
-      // NOTE: only keep this include if your relation field is exactly "category"
+  
       include: {
         category: { select: { id: true, name: true } },
       },
     });
 
-    // 2) bookings grouped by slot for that date
-    // If you have quantity: use _sum.quantity
-    // If you don't: use _count._all
+   
     const grouped = await prisma.centerSlotBooking.groupBy({
       by: ["centerSlotId"],
       where: {
         centerId,
         slotDate: { gte: startOfDay, lte: endOfDay },
-        // optionally filter cancelled etc:
-        // status: "CONFIRMED",
+       
       },
       _count: { _all: true },
-      _sum: { quantity: true }, // safe even if you later add quantity
+      _sum: { quantity: true }, 
     });
 
     const bookedMap = new Map(
@@ -834,10 +822,6 @@ export const getCenterCategoryCommissions = async (req, res) => {
   }
 };
 
-/**
- * PUT /api/centers/:centerId/commissions
- * body: { commissions: [{ categoryId, type, value, isActive }] }
- */
 export const upsertCenterCategoryCommissions = async (req, res) => {
   try {
     const centerId = Number(req.params.centerId);

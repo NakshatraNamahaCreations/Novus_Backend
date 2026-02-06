@@ -93,6 +93,7 @@ app.use(
   cors({
     origin: [
       "http://localhost:4028",
+      
       "https://novushealth.in",
       "https://api.novushealth.in",
       "https://newapi.novushealth.in",

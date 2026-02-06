@@ -1,17 +1,10 @@
-// main.js (COMPLETE COPY-PASTE)
-// ✅ Output:
-// 1) Plain PDF (no header/footer)
-// 2) Letterhead PDF (with header/footer)
-// 3) Full PDF (optional cover + letterhead + optional last)
-// ✅ Signatures:
-// - Show signatures ONLY on the LAST page of each test (radiology + pathology)
-// ✅ Conditions:
-// - Show CONDITIONS only once, on the LAST overall page, directly AFTER the signatures
-//   (same page; will auto-break only if content overflows)
+// main.js - ENHANCED VERSION with signature debugging
+// ✅ Larger font sizes
+// ✅ Better signature handling (FIXED signatureImg)
+// ✅ Debugging for signature issues
 
 import { PatientService } from "./services/patientService.js";
 import { SignatureService } from "./services/signatureService.js";
-import { TrendService } from "./services/trendService.js";
 import { ImageUtils } from "./utils/imageUtils.js";
 import { generateSingleImagePagePdf, PdfProcessor } from "./processors/pdfProcessor.js";
 import { PdfUtils } from "./utils/pdfUtils.js";
@@ -19,9 +12,7 @@ import { PageProcessor } from "./processors/pageProcessor.js";
 import { PatientHeader } from "./html-generators/patientHeader.js";
 import { PathologyTable } from "./html-generators/pathologyTable.js";
 import { RadiologyContent } from "./html-generators/radiologyContent.js";
-import { SignatureSection } from "./html-generators/signatureSection.js";
 import { Styles } from "./html-generators/styles.js";
-import { ConditionsSection } from "./html-generators/conditionsSection.js";
 import { CONFIG } from "./config/constants.js";
 
 export async function generatePatient3PdfsNew({ orderId, patientId }) {
@@ -38,23 +29,11 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
 
     if (!order) throw new Error(`Order ${orderId} not found`);
     if (!patient) throw new Error(`Patient ${patientId} not found`);
-    if (!rawResults.length) throw new Error("No test results found for this patient");
+    if (!rawResults.length) throw new Error("No test results found");
 
-    console.log(`Found ${rawResults.length} test results for patient`);
-    console.log(
-      "RAW RESULTS TESTS:",
-      rawResults.map((r) => ({
-        id: r.id,
-        testId: r.testId,
-        testName: r.test?.name,
-        patientId: r.patientId,
-        orderMemberId: r.orderMemberId,
-        params: (r.parameterResults || []).length,
-        hasHtml: Boolean(r.reportHtml && String(r.reportHtml).trim()),
-      }))
-    );
+    console.log(`Found ${rawResults.length} test results`);
 
-    // 2) Signatures: defaults + attach into each result (sigLeft/sigCenter/sigRight)
+    // 2) Augment with signatures
     const categoryIds = rawResults
       .map((r) => r.test?.categoryId)
       .filter(Boolean)
@@ -66,15 +45,52 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
       defaultSignatures
     );
 
-    // 3) Optimize Images (header/footer/cover/last)
+    // ✅ Debug signature data
+    console.log("=== SIGNATURE DEBUG ===");
+    resultsWithSigs.forEach((result, idx) => {
+      console.log(`Test ${idx}: ${result.test?.name}`);
+      console.log(
+        "  Left:",
+        result.sigLeft
+          ? {
+              name: result.sigLeft.name,
+              hasSignatureImg: Boolean(result.sigLeft.signatureImg),
+              signatureImgLength: result.sigLeft.signatureImg?.length || 0,
+            }
+          : "null"
+      );
+      console.log(
+        "  Center:",
+        result.sigCenter
+          ? {
+              name: result.sigCenter.name,
+              hasSignatureImg: Boolean(result.sigCenter.signatureImg),
+              signatureImgLength: result.sigCenter.signatureImg?.length || 0,
+            }
+          : "null"
+      );
+      console.log(
+        "  Right:",
+        result.sigRight
+          ? {
+              name: result.sigRight.name,
+              hasSignatureImg: Boolean(result.sigRight.signatureImg),
+              signatureImgLength: result.sigRight.signatureImg?.length || 0,
+            }
+          : "null"
+      );
+    });
+    console.log("=== END SIGNATURE DEBUG ===");
+
+    // 3) Optimize images
     const optimizedImages = await ImageUtils.optimizeLayoutImages(layout);
 
-    // 4) Browser
+    // 4) Create browser
     const browser = await PdfProcessor.createBrowser();
     console.log("Browser instance created");
 
     try {
-      // 5) Plain PDF
+      // 5) Plain PDF (NO debug)
       console.log("Generating plain PDF...");
       const plainPdf = await generatePdf({
         browser,
@@ -85,9 +101,10 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
         headerImg: null,
         footerImg: null,
         layout,
+        debug: false,
       });
 
-      // 6) Letterhead PDF
+      // 6) Letterhead PDF (NO debug)
       console.log("Generating letterhead PDF...");
       const letterheadPdf = await generatePdf({
         browser,
@@ -98,9 +115,10 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
         headerImg: optimizedImages.header,
         footerImg: optimizedImages.footer,
         layout,
+        debug: false,
       });
 
-      // 7) Full PDF (cover + letterhead + last)
+      // 7) Full PDF (NO debug)
       console.log("Generating full PDF...");
       const fullPdf = await generateFullPdf({
         browser,
@@ -109,9 +127,10 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
         results: resultsWithSigs,
         layout,
         optimizedImages,
+        debug: false,
       });
 
-      // 8) Compress PDFs (if gs missing -> returns original)
+      // 8) Compress
       console.log("Compressing PDFs...");
       const [plainCompressed, letterheadCompressed, fullCompressed] = await Promise.all([
         PdfUtils.compressPdfBuffer(Buffer.from(plainPdf)),
@@ -128,7 +147,7 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
       };
     } finally {
       await browser.close();
-      console.log("Browser instance closed");
+      console.log("Browser closed");
     }
   } catch (error) {
     console.error("PDF generation failed:", error);
@@ -136,32 +155,39 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
   }
 }
 
-/* -------------------------------------------------------
-   ✅ Generate main PDF (plain / letterhead)
-   - Sort pathology first (optional)
-   - Creates pages from PageProcessor
-   - Adds signatures only on last page of each test
-   - Adds conditions ONLY ONCE (last overall page) after signatures
-------------------------------------------------------- */
+/**
+ * Generate main PDF (plain or letterhead)
+ */
 async function generatePdf(options) {
-  const { browser, order, patient, results, mode = "standard", headerImg, footerImg, layout } =
-    options;
+  const {
+    browser,
+    order,
+    patient,
+    results,
+    mode = "standard",
+    headerImg,
+    footerImg,
+    layout,
+    debug = false,
+  } = options;
 
-  console.log(`Generating PDF with mode: ${mode}`);
+  console.log(`Generating PDF - mode: ${mode}, debug: ${debug}`);
 
-  // Optional: pathology first, radiology later
+  // Sort: pathology first
   const resultsSorted = [...results].sort((a, b) => {
     const aIsRad = Boolean(a.reportHtml && String(a.reportHtml).trim());
     const bIsRad = Boolean(b.reportHtml && String(b.reportHtml).trim());
     return Number(aIsRad) - Number(bIsRad);
   });
 
+  // Process results into pages
   const pages = PageProcessor.processResults(resultsSorted, mode);
-  console.log(`Processed ${pages.length} pages from ${resultsSorted.length} results`);
+  console.log(`Processed ${pages.length} pages`);
 
   const refDoctor = PatientService.getRefDoctorInfo(order);
   const partner = PatientService.getPartnerInfo(order);
 
+  // Generate HTML for each page
   const pageContents = pages
     .map((page, idx) =>
       generatePageContent(page, {
@@ -176,25 +202,26 @@ async function generatePdf(options) {
     )
     .join("");
 
+  // Generate complete HTML document
   const html = generateCompleteHtml(pageContents, {
     headerImg,
     footerImg,
-    reserveHeaderFooterSpace: true,
     mode,
+    debug,
   });
 
   return PdfProcessor.generatePdf(browser, html);
 }
 
-/* -------------------------------------------------------
-   ✅ Full PDF: optional cover + letterhead + optional last
-------------------------------------------------------- */
+/**
+ * Full PDF with cover and last pages
+ */
 async function generateFullPdf(options) {
-  const { browser, order, patient, results, layout, optimizedImages } = options;
+  const { browser, order, patient, results, layout, optimizedImages, debug = false } = options;
 
-  console.log("Generating full PDF (letterhead + cover/last pages)...");
+  console.log("Generating full PDF...");
 
-  // Letterhead (includes signatures + conditions logic inside)
+  // Main content
   const letterheadPdf = await generatePdf({
     browser,
     order,
@@ -204,22 +231,21 @@ async function generateFullPdf(options) {
     headerImg: optimizedImages.header,
     footerImg: optimizedImages.footer,
     layout,
+    debug,
   });
 
   const pdfBuffers = [];
 
-  // Cover page (optional)
+  // Optional cover
   if (optimizedImages.cover) {
     console.log("Adding cover page...");
     const coverPdf = await generateSingleImagePagePdf(browser, optimizedImages.cover);
     pdfBuffers.push(coverPdf);
   }
 
-  // Main content
-  console.log("Adding letterhead content...");
   pdfBuffers.push(letterheadPdf);
 
-  // Last page (optional)
+  // Optional last page
   if (optimizedImages.last) {
     console.log("Adding last page...");
     const lastPdf = await generateSingleImagePagePdf(browser, optimizedImages.last);
@@ -234,17 +260,16 @@ async function generateFullPdf(options) {
   return letterheadPdf;
 }
 
-/* -------------------------------------------------------
-   ✅ One page content
-   - normal test content
-   - signatures ONLY on last page of this test
-   - conditions ONLY once at the very end (after signatures)
-------------------------------------------------------- */
+/**
+ * Generate content for a single page
+ * ✅ Unified structure for both radiology and pathology
+ */
 function generatePageContent(page, options) {
-  const { order, patient, refDoctor, partner, layout, mode, isLastOverallPage } = options;
+  const { order, patient, refDoctor, partner, layout, isLastOverallPage } = options;
 
-  const testTitle = PageProcessor.generateTestTitle(page.testName, page.chunkIndex, page.chunkCount);
+  const isLastPageOfTest = page.chunkIndex === page.chunkCount - 1;
 
+  // Patient header (shows on every page)
   const patientHeader = PatientHeader.generate({
     order,
     patient,
@@ -254,76 +279,150 @@ function generatePageContent(page, options) {
     stampCode: layout?.sealCode || "MC-6367",
   });
 
-  let content = `
-    ${patientHeader}
-    <div class="test-name">${testTitle}</div>
-  `;
+  // Test title
+  const testTitle = PageProcessor.generateTestTitle(page.testName, page.chunkIndex, page.chunkCount);
 
+  // Main content
+  let contentHtml = "";
   if (page.isRadiology) {
-    content += RadiologyContent.generateContent(page.reportChunk);
+    contentHtml = RadiologyContent.generateContent(page.reportChunk);
   } else {
-    // (Optional trends not enabled in this version)
-    content += PathologyTable.generate(page.chunk || []);
+    contentHtml = PathologyTable.generate(page.chunk || []);
   }
 
-  // ✅ Signatures only on last page of this test
-  const isLastPageOfThisTest = page.chunkIndex === page.chunkCount - 1;
+  // ✅ Signatures (only on last page of THIS test)
+  let signaturesHtml = "";
+  if (isLastPageOfTest) {
+    const sigs = {
+      left: page.result?.sigLeft || null,
+      center: page.result?.sigCenter || null,
+      right: page.result?.sigRight || null,
+    };
 
-  // IMPORTANT: you store augmented signatures as sigLeft/sigCenter/sigRight
-  const signatures = {
-    left:
-      page.result?.leftSignature ||
-      page.result?.sigLeft ||
-      null,
-    center:
-      page.result?.centerSignature ||
-      page.result?.sigCenter ||
-      null,
-    right:
-      page.result?.rightSignature ||
-      page.result?.sigRight ||
-      null,
-  };
+    const hasAnySig = Boolean(sigs.left || sigs.center || sigs.right);
+    if (hasAnySig) {
+      signaturesHtml = generateSignatures(sigs);
+    }
+  }
 
-  // ✅ render signature row only if at least one signature exists
-  const hasAnySig = Boolean(signatures.left || signatures.center || signatures.right);
-  const signatureHtml = isLastPageOfThisTest && hasAnySig ? SignatureSection.generate(signatures) : "";
-
-  // ✅ Conditions ONLY once, only after the last test's last page
-  const conditionsHtml =
-    isLastPageOfThisTest && isLastOverallPage ? ConditionsSection.generate() : "";
+  // Conditions (only once, on the very last page)
+  let conditionsHtml = "";
+  if (isLastPageOfTest && isLastOverallPage) {
+    conditionsHtml = generateConditions();
+  }
 
   return `
     <div class="page">
-      <div class="page-content">
-        ${content}
-        ${signatureHtml}
-        ${conditionsHtml}
-      </div>
+      ${patientHeader}
+      <div class="test-name">${testTitle}</div>
+      ${contentHtml}
+      ${signaturesHtml}
+      ${conditionsHtml}
     </div>
   `;
 }
 
-/* -------------------------------------------------------
-   ✅ Full HTML wrapper
-------------------------------------------------------- */
-function generateCompleteHtml(pageContents, options) {
-  const { headerImg, footerImg, reserveHeaderFooterSpace, mode } = options;
+/**
+ * ✅ FIXED Generate signatures section
+ * - Uses signatureImg correctly
+ * - Keeps 3 fixed cells (left/center/right)
+ * - Alignment reads sig.alignment too
+ */
+function generateSignatures(signatures) {
+  const slots = [
+    { key: "left", fallbackAlign: "left" },
+    { key: "center", fallbackAlign: "center" },
+    { key: "right", fallbackAlign: "right" },
+  ];
 
+  const hasAnySig = Boolean(signatures?.left || signatures?.center || signatures?.right);
+  if (!hasAnySig) {
+    console.log("⚠️ No signatures found");
+    return "";
+  }
+
+  const cellHtml = slots
+    .map(({ key, fallbackAlign }) => {
+      const sig = signatures?.[key];
+
+      // ✅ IMPORTANT: your object has `signatureImg`
+      const imageUrl =
+        sig?.imageUrl ||
+        sig?.signatureImg || // ✅ FIX
+        sig?.signatureUrl ||
+        sig?.signatureImage ||
+        sig?.image ||
+        sig?.signature ||
+        sig?.url;
+
+      // alignment could be "LEFT"/"RIGHT"/"CENTER"
+      const align =
+        (sig?.alignment ? String(sig.alignment).toLowerCase() : "") ||
+        sig?.position ||
+        fallbackAlign;
+
+      console.log(`Signature slot=${key}`, {
+        name: sig?.name,
+        align,
+        hasImageUrl: Boolean(imageUrl),
+        keys: sig ? Object.keys(sig) : null,
+        imageUrlPreview: imageUrl ? String(imageUrl).slice(0, 60) + "..." : null,
+      });
+
+      return `
+        <div class="sig-cell ${align}">
+          ${
+            imageUrl
+              ? `
+                <div class="sig-img-wrap">
+                  <img
+                    src="${imageUrl}"
+                    alt="Signature of ${sig?.name || "Doctor"}"
+                    class="sig-img"
+                  />
+                </div>
+              `
+              : `<div class="sig-placeholder"></div>`
+          }
+          <div class="sig-name">${sig?.name || ""}</div>
+          <div class="sig-desig">${sig?.designation || ""}</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  return `<div class="sig-row cols-3">${cellHtml}</div>`;
+}
+
+/**
+ * Generate conditions section
+ */
+function generateConditions() {
+  return `
+    <div class="conditions">
+      <div class="conditions-title">CONDITIONS OF LABORATORY TESTING & REPORTING</div>
+      <ul class="conditions-list">
+        <li>All reports are subject to the terms and conditions specified by Novus Health Labs.</li>
+        <li>This is a computer-generated report and does not require a physical signature.</li>
+        <li>Results are valid for diagnostic purposes only.</li>
+      </ul>
+    </div>
+  `;
+}
+
+/**
+ * Generate complete HTML document
+ */
+function generateCompleteHtml(pageContents, options) {
+  const { headerImg, footerImg, mode = "standard", debug = false } = options;
+
+  // Generate CSS with debug flag
   const css = Styles.generate({
-    headerH: reserveHeaderFooterSpace
-      ? CONFIG.DIMENSIONS.headerHeight
-      : headerImg
-      ? CONFIG.DIMENSIONS.headerHeight
-      : 0,
-    footerH: reserveHeaderFooterSpace
-      ? CONFIG.DIMENSIONS.footerHeight
-      : footerImg
-      ? CONFIG.DIMENSIONS.footerHeight
-      : 0,
-    // NOTE: signature is NOT fixed, so keep sigH 0 (avoid reserved space)
-    sigH: 0,
+    headerH: CONFIG.DIMENSIONS.headerHeight,
+    footerH: CONFIG.DIMENSIONS.footerHeight,
+    sigH: CONFIG.DIMENSIONS.signatureHeight,
     fontPx: CONFIG.FONT_SIZES.base,
+    debug,
   });
 
   const headerClass = headerImg ? "header" : "header blank";
@@ -334,19 +433,18 @@ function generateCompleteHtml(pageContents, options) {
     <html>
       <head>
         <meta charset="utf-8" />
-        <meta name="page-number" content="counter(page) of counter(pages)">
-        ${css}
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Medical Report</title>
+        <style>${css}</style>
       </head>
       <body class="${mode}-mode">
         <div class="${headerClass}">
-          ${headerImg ? `<img src="${headerImg}" alt="header" />` : ""}
+          ${headerImg ? `<img src="${headerImg}" alt="Header" />` : ""}
         </div>
 
         <div class="${footerClass}">
-          ${footerImg ? `<img src="${footerImg}" alt="footer" />` : ""}
+          ${footerImg ? `<img src="${footerImg}" alt="Footer" />` : ""}
         </div>
-
-        <div class="page-number"></div>
 
         ${pageContents}
       </body>

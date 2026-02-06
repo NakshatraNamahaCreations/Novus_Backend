@@ -1,132 +1,218 @@
+// html-generators/radiologyContent.js
 import { StringUtils } from "../utils/stringUtils.js";
-import { CONFIG } from "../config/constants.js";
 
 export class RadiologyContent {
-static splitIntoPages(reportHtml, maxChars = 1800, minChars = 900) {
-  let html = StringUtils.safeTrim(reportHtml);
-  if (!html) return [""];
+  /**
+   * Split HTML content into A4-sized pages with accurate height calculation
+   * Uses a simpler, more predictable approach
+   */
+  static splitIntoPages(reportHtml, options = {}) {
+    const {
+      pageHeight = 1123,           // A4 height in pixels at 96dpi
+      headerHeight = 110,
+      footerHeight = 65,
+      signatureHeight = 100,
+      patientStripHeight = 60,
+      testNameHeight = 30,
+      topMargin = 15,
+      bottomMargin = 10,
+    } = options;
 
-  // 1) ✅ Protect base64 images (avoid splitting inside <img ...>)
-  const imgTokens = [];
-  html = html.replace(/<img\b[^>]*>/gi, (tag) => {
-    const m = tag.match(/src\s*=\s*["']([^"']+)["']/i);
-    const src = m?.[1] || "";
-    // if it's a data:image base64 OR even normal images, protect it
-    const token = `__IMG_TOKEN_${imgTokens.length}__`;
-    imgTokens.push({ token, tag });
-    return token;
-  });
+    let html = StringUtils.safeTrim(reportHtml);
+    if (!html) return [""];
 
-  // 2) ✅ Remove any stray base64 that is not inside <img>
-  html = html.replace(/data:image\/[a-zA-Z+.-]+;base64,[A-Za-z0-9+/=\s]+/g, (m) =>
-    m.length > 200 ? "" : m
-  );
+    // Calculate available heights
+    const commonOverhead = headerHeight + footerHeight + patientStripHeight + 
+                          testNameHeight + topMargin + bottomMargin;
+    
+    // First page - full content area available
+    const firstPageAvailable = pageHeight - commonOverhead;
+    
+    // Middle pages - same as first (patient strip on every page)
+    const middlePageAvailable = pageHeight - commonOverhead;
+    
+    // Last page - reserve space for signatures + conditions
+    const lastPageAvailable = pageHeight - commonOverhead - signatureHeight - 100;
 
-  // 3) Normalize only on block boundaries (safe)
-  const normalized = html
-    .replace(/\r/g, "")
-    .replace(/<br\s*\/?>/gi, "<br/>\n")
-    .replace(/<\/p>/gi, "</p>\n")
-    .replace(/<\/div>/gi, "</div>\n")
-    .replace(/<\/li>/gi, "</li>\n")
-    .replace(/<\/tr>/gi, "</tr>\n")
-    .replace(/<\/h[1-6]>/gi, (m) => m + "\n");
+    console.log('Page heights:', {
+      firstPageAvailable,
+      middlePageAvailable,
+      lastPageAvailable,
+      pageHeight,
+      commonOverhead
+    });
 
-  const sections = normalized
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
+    // Protect images from splitting
+    const imgTokens = [];
+    html = html.replace(/<img\b[^>]*>/gi, (tag) => {
+      const token = `__IMG_TOKEN_${imgTokens.length}__`;
+      imgTokens.push({ token, tag });
+      return token;
+    });
 
-  const pages = [];
-  let currentPage = "";
-  let currentLength = 0;
+    // Clean up stray base64 data
+    html = html.replace(
+      /data:image\/[a-zA-Z+.-]+;base64,[A-Za-z0-9+/=\s]{200,}/g,
+      ""
+    );
 
-  for (const section of sections) {
-    const len = section.length;
+    // Extract blocks
+    const blocks = this.extractBlocks(html);
+    console.log(`Extracted ${blocks.length} content blocks`);
 
-    if (len > maxChars) {
-      if (currentPage) {
-        pages.push(currentPage);
-        currentPage = "";
-        currentLength = 0;
+    // Distribute blocks with better logic
+    const pages = this.distributeBlocksSimple(blocks, {
+      firstPageHeight: firstPageAvailable,
+      middlePageHeight: middlePageAvailable,
+      lastPageHeight: lastPageAvailable,
+    });
+
+    console.log(`Split into ${pages.length} pages`);
+
+    // Restore images
+    const restored = pages.map((pageContent) => {
+      let content = pageContent;
+      for (const { token, tag } of imgTokens) {
+        content = content.replaceAll(token, tag);
       }
-      const words = section.split(/\s+/);
-      let chunk = "";
-      for (const w of words) {
-        if ((chunk + " " + w).length > maxChars) {
-          if (chunk) pages.push(chunk);
-          chunk = w;
-        } else {
-          chunk = chunk ? chunk + " " + w : w;
-        }
-      }
-      if (chunk) pages.push(chunk);
-      continue;
-    }
+      return content;
+    });
 
-    if (currentLength + len + 1 > maxChars && currentPage) {
-      pages.push(currentPage);
-      currentPage = section;
-      currentLength = len;
-    } else {
-      currentPage = currentPage ? currentPage + "\n" + section : section;
-      currentLength += len + 1;
-    }
+    return restored.length ? restored : [reportHtml];
   }
 
-  if (currentPage) pages.push(currentPage);
+  /**
+   * Extract block-level elements
+   */
+  static extractBlocks(html) {
+    const normalized = html
+      .replace(/\r/g, "")
+      .replace(/<br\s*\/?>/gi, "<br/>")
+      .replace(/>\s+</g, "><");
 
-  const merged = this.mergeShortPages(pages, minChars, maxChars);
+    const blockTags = ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'table', 'blockquote', 'pre'];
+    const blockPattern = new RegExp(`<\\/(${blockTags.join('|')})>`, 'gi');
+    
+    const blocks = [];
+    let lastIndex = 0;
+    let match;
 
-  // 4) ✅ Restore <img> tags back
-  const restored = merged.map((p) => {
-    let out = p;
-    for (const { token, tag } of imgTokens) {
-      out = out.replaceAll(token, tag);
+    while ((match = blockPattern.exec(normalized)) !== null) {
+      const endIndex = match.index + match[0].length;
+      const block = normalized.substring(lastIndex, endIndex).trim();
+      if (block) {
+        blocks.push(block);
+      }
+      lastIndex = endIndex;
     }
-    return out;
-  });
 
-  return restored.length ? restored : [reportHtml];
-}
+    const remaining = normalized.substring(lastIndex).trim();
+    if (remaining) {
+      blocks.push(remaining);
+    }
 
+    return blocks.length ? blocks : [html];
+  }
 
-  static mergeShortPages(pages, minChars, maxChars) {
-    const merged = [];
+  /**
+   * Simplified distribution - more conservative and predictable
+   */
+  static distributeBlocksSimple(blocks, options) {
+    const { firstPageHeight, middlePageHeight, lastPageHeight } = options;
+    
+    const pages = [];
+    let currentPage = [];
+    let currentHeight = 0;
+    let pageIndex = 0;
 
-    for (let i = 0; i < pages.length; i++) {
-      const current = pages[i];
-      const next = pages[i + 1];
+    // Conservative line height estimate (increased for larger font)
+    const LINE_HEIGHT = 22; // ✅ Increased from 20
+    const CHARS_PER_LINE = 90; // ✅ Adjusted for larger font
 
-      if (
-        current.length < minChars &&
-        next &&
-        current.length + next.length < maxChars * 1.3
-      ) {
-        pages[i + 1] = current + "\n" + next;
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      const blockHeight = this.estimateBlockHeightSimple(block, LINE_HEIGHT, CHARS_PER_LINE);
+      
+      // Determine available space
+      let availableHeight;
+      if (pageIndex === 0) {
+        availableHeight = firstPageHeight;
+      } else {
+        // Check if this might be the last page
+        const remainingBlocks = blocks.slice(i);
+        const estimatedRemaining = remainingBlocks.reduce(
+          (sum, b) => sum + this.estimateBlockHeightSimple(b, LINE_HEIGHT, CHARS_PER_LINE), 
+          0
+        );
+        
+        availableHeight = estimatedRemaining < lastPageHeight ? lastPageHeight : middlePageHeight;
+      }
+
+      // Force oversized blocks onto their own page
+      if (blockHeight > middlePageHeight * 1.2) {
+        if (currentPage.length > 0) {
+          pages.push(currentPage.join("\n"));
+          currentPage = [];
+          currentHeight = 0;
+          pageIndex++;
+        }
+        pages.push(block);
+        pageIndex++;
         continue;
       }
 
-      merged.push(current);
-    }
-
-    // Handle last page if too short
-    if (merged.length >= 2) {
-      const last = merged[merged.length - 1];
-      const secondLast = merged[merged.length - 2];
-
-      if (
-        last.length < minChars &&
-        secondLast.length + last.length < maxChars * 1.3
-      ) {
-        merged[merged.length - 2] = secondLast + "\n" + last;
-        merged.pop();
+      // Check if we need a new page
+      if (currentHeight + blockHeight > availableHeight && currentPage.length > 0) {
+        pages.push(currentPage.join("\n"));
+        currentPage = [block];
+        currentHeight = blockHeight;
+        pageIndex++;
+      } else {
+        currentPage.push(block);
+        currentHeight += blockHeight;
       }
     }
 
-    return merged.length ? merged : [html];
+    // Add final page
+    if (currentPage.length > 0) {
+      pages.push(currentPage.join("\n"));
+    }
+
+    return pages.length ? pages : [""];
   }
 
+  /**
+   * Simple, conservative height estimation
+   */
+  static estimateBlockHeightSimple(block, lineHeight, charsPerLine) {
+    // Special cases
+    if (block.includes("<img")) return 200;
+    
+    if (block.includes("<table")) {
+      const rows = (block.match(/<tr/g) || []).length;
+      return Math.max(rows * 35, 100);
+    }
+    
+    if (block.match(/<h[1-6]/)) {
+      return lineHeight * 2;
+    }
+    
+    if (block.includes("<ul") || block.includes("<ol")) {
+      const items = (block.match(/<li/g) || []).length;
+      return items * lineHeight * 1.5;
+    }
+
+    // Default: estimate from text content
+    const textContent = block.replace(/<[^>]+>/g, " ").trim();
+    const charCount = textContent.length;
+    const estimatedLines = Math.ceil(charCount / charsPerLine);
+    
+    return Math.max(estimatedLines * lineHeight, lineHeight);
+  }
+
+  /**
+   * Generate radiology content wrapper
+   */
   static generateContent(reportHtml) {
     return `
       <div class="radiology-wrap">

@@ -91,30 +91,39 @@ export const getEnquiries = async (req, res) => {
   try {
     const {
       search = "",
-      status,
+      status = "",
       page = "1",
       limit = "20",
       sortBy = "createdAt",
       order = "desc",
     } = req.query;
 
+    // ✅ pagination (frontend expects pages/total/items)
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
-    const sortField = ["createdAt", "updatedAt"].includes(sortBy) ? sortBy : "createdAt";
+    // ✅ sorting (frontend sends sortBy=createdAt|updatedAt and order=asc|desc)
+    const sortField = ["createdAt", "updatedAt"].includes(sortBy)
+      ? sortBy
+      : "createdAt";
     const sortOrder = String(order).toLowerCase() === "asc" ? "asc" : "desc";
 
     const where = {};
 
+    // ✅ status filter
     if (status) {
       const st = String(status);
       if (!ALLOWED_STATUS.has(st)) {
-        return bad(res, `Invalid status. Allowed: ${Array.from(ALLOWED_STATUS).join(", ")}`);
+        return bad(
+          res,
+          `Invalid status. Allowed: ${Array.from(ALLOWED_STATUS).join(", ")}`
+        );
       }
       where.status = st;
     }
 
+    // ✅ search filter (name or number)
     if (search && String(search).trim()) {
       const s = String(search).trim();
       where.OR = [
@@ -131,23 +140,30 @@ export const getEnquiries = async (req, res) => {
         take: limitNum,
         orderBy: { [sortField]: sortOrder },
         include: {
-          updatedBy: true,
+          updatedBy: {
+            select: { id: true, name: true, email: true },
+          },
         },
       }),
     ]);
 
+    const pages = Math.max(1, Math.ceil(total / limitNum));
+
+    // ✅ exact shape your frontend uses
     return ok(res, "Enquiries fetched", {
+      items,
       total,
+      pages,
       page: pageNum,
       limit: limitNum,
-      pages: Math.ceil(total / limitNum),
-      items,
+      sortBy: sortField,
+      order: sortOrder,
     });
   } catch (err) {
     console.error("getEnquiries error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
-};
+}
 
 /**
  * ✅ GET /enquiry/:id

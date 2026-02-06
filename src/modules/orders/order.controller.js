@@ -1599,9 +1599,7 @@ export const getAllOrders = async (req, res) => {
 
     let where = {};
 
-//     if (user?.role === "admin") {
-//   where.createdById = user.id; // only orders created by this admin
-// }
+
 
 if (user?.role === "admin") {
   const centerIds = Array.isArray(user?.centerIds) ? user.centerIds : [];
@@ -1621,16 +1619,25 @@ if (user?.role === "admin") {
     /* ----------------------------------
        SEARCH FILTER
     ---------------------------------- */
-    if (search) {
-      where.OR = [
-        { orderNumber: { contains: search, mode: "insensitive" } },
-        { trackingId: { contains: search, mode: "insensitive" } },
-        { source: { contains: search, mode: "insensitive" } },
-        { patient: { fullName: { contains: search, mode: "insensitive" } } },
-        { patient: { contactNo: { contains: search, mode: "insensitive" } } },
-      ];
-    }
+   if (search) {
+  const s = String(search).trim();
 
+  // if search is numeric -> treat as order.id
+  const asNumber = Number(s);
+  const isNumeric = s !== "" && Number.isFinite(asNumber);
+
+  where.OR = [
+    // ✅ search by Order ID (numeric)
+    ...(isNumeric ? [{ id: asNumber }] : []),
+
+    // existing searches
+    { orderNumber: { contains: s, mode: "insensitive" } },
+    { trackingId: { contains: s, mode: "insensitive" } },
+    { source: { contains: s, mode: "insensitive" } },
+    { patient: { fullName: { contains: s, mode: "insensitive" } } },
+    { patient: { contactNo: { contains: s, mode: "insensitive" } } },
+  ];
+}
     /* ----------------------------------
        ORDER STATUS FILTER
     ---------------------------------- */
@@ -3178,76 +3185,39 @@ export const getOrdersExpiringSoon = async (req, res) => {
 };
 
 
-const OPEN_STATUSES = ["NOT_READY", "READY"]; 
-const CLOSED_STATUSES = ["DISPATCHED", "DELIVERED"];
+const OPEN_STATUSES = ["NOT_READY", "READY"];
 
 export const fetchReportDue = async (req, res) => {
   try {
-    const beforeMin = Number(req.query.beforeMin ?? 10); // 10 min before
-    const limit = Number(req.query.limit ?? 100);
+    const beforeMin = Number(req.query.beforeMin ?? 10);
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const pageSize = Math.max(1, Number(req.query.pageSize ?? 10));
+    const tab = (req.query.tab ?? "overdue").toString(); // "overdue" | "dueSoon"
 
     const now = new Date();
     const soonEnd = new Date(now.getTime() + beforeMin * 60 * 1000);
 
-    // ✅ Due soon: now -> now+beforeMin
-    const dueSoon = await prisma.orderMemberPackage.findMany({
-      where: {
-        reportDueAt: { gte: now, lte: soonEnd },
-        dispatchStatus: { in: OPEN_STATUSES },
-      },
-      include: {
-        test: { select: { id: true, name: true } },
-        package: { select: { id: true, name: true } },
-        orderMember: {
-          include: {
-            patient: { select: { id: true, fullName: true, contactNo: true } },
-            order: {
-              select: {
-                id: true,
-                orderNumber: true,
-                date: true,
-                testType: true,
-                status: true,
-                isHomeSample: true,
-              },
+    // common includes
+    const include = {
+      test: { select: { id: true, name: true } },
+      package: { select: { id: true, name: true } },
+      orderMember: {
+        include: {
+          patient: { select: { id: true, fullName: true, contactNo: true } },
+          order: {
+            select: {
+              id: true,
+              orderNumber: true,
+              date: true,
+              testType: true,
+              status: true,
+              isHomeSample: true,
             },
           },
         },
       },
-      orderBy: { reportDueAt: "asc" },
-      take: limit,
-    });
+    };
 
-    // ✅ Overdue: reportDueAt < now
-    const overdue = await prisma.orderMemberPackage.findMany({
-      where: {
-        reportDueAt: { lt: now },
-        dispatchStatus: { in: OPEN_STATUSES },
-      },
-      include: {
-        test: { select: { id: true, name: true } },
-        package: { select: { id: true, name: true } },
-        orderMember: {
-          include: {
-            patient: { select: { id: true, fullName: true, contactNo: true } },
-            order: {
-              select: {
-                id: true,
-                orderNumber: true,
-                date: true,
-                testType: true,
-                status: true,
-                isHomeSample: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: { reportDueAt: "desc" },
-      take: limit,
-    });
-
-    // ✅ Format helper for UI
     const mapRow = (x) => {
       const dueAt = x.reportDueAt ? new Date(x.reportDueAt) : null;
       const diffMs = dueAt ? dueAt.getTime() - now.getTime() : null;
@@ -3264,12 +3234,61 @@ export const fetchReportDue = async (req, res) => {
           ? dayjs(dueAt).tz("Asia/Kolkata").format("YYYY-MM-DD hh:mm A")
           : null,
 
-        minutesLeft: diffMin, // positive => due soon, negative => overdue
+        minutesLeft: diffMin,
 
         order: x.orderMember?.order,
         patient: x.orderMember?.patient,
       };
     };
+
+    // Build where for each tab
+    const whereDueSoon = {
+      reportDueAt: { gte: now, lte: soonEnd },
+      dispatchStatus: { in: OPEN_STATUSES },
+    };
+
+    const whereOverdue = {
+      reportDueAt: { lt: now },
+      dispatchStatus: { in: OPEN_STATUSES },
+    };
+
+    // totals (for pagination)
+    const [totalDueSoon, totalOverdue] = await Promise.all([
+      prisma.orderMemberPackage.count({ where: whereDueSoon }),
+      prisma.orderMemberPackage.count({ where: whereOverdue }),
+    ]);
+
+    // only fetch one list based on tab (faster)
+    const skip = (page - 1) * pageSize;
+
+    let rows = [];
+    let total = 0;
+    let totalPages = 0;
+
+    if (tab === "dueSoon") {
+      total = totalDueSoon;
+      totalPages = Math.ceil(total / pageSize);
+
+      rows = await prisma.orderMemberPackage.findMany({
+        where: whereDueSoon,
+        include,
+        orderBy: { reportDueAt: "asc" },
+        skip,
+        take: pageSize,
+      });
+    } else {
+      // default overdue
+      total = totalOverdue;
+      totalPages = Math.ceil(total / pageSize);
+
+      rows = await prisma.orderMemberPackage.findMany({
+        where: whereOverdue,
+        include,
+        orderBy: { reportDueAt: "desc" },
+        skip,
+        take: pageSize,
+      });
+    }
 
     return res.json({
       success: true,
@@ -3280,18 +3299,27 @@ export const fetchReportDue = async (req, res) => {
         soonEndUTC: soonEnd.toISOString(),
         soonEndIST: dayjs(soonEnd).tz("Asia/Kolkata").format("YYYY-MM-DD hh:mm A"),
       },
-      counts: {
-        dueSoon: dueSoon.length,
-        overdue: overdue.length,
+      totals: {
+        overdue: totalOverdue,
+        dueSoon: totalDueSoon,
       },
-      dueSoon: dueSoon.map(mapRow),
-      overdue: overdue.map(mapRow),
+      pagination: {
+        tab,
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+      data: rows.map(mapRow),
     });
   } catch (err) {
     console.error("fetchReportDue error:", err);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
+
 
 
 export const rescheduleOrder = async (req, res) => {

@@ -282,6 +282,7 @@ model UserCenter {
   @@index([userId])
   @@index([centerId])
 }
+
 model Patient {
   id       Int       @id @default(autoincrement())
   fullName String?
@@ -690,6 +691,7 @@ model Center {
   long             Float?
   isSelf           Boolean @default(false)
   status           String  @default("active")
+  showApp           Boolean @default(false)
 
   cityId Int?
   city   City? @relation(fields: [cityId], references: [id])
@@ -705,7 +707,7 @@ model Center {
   categories                CenterCategory[]
   collectionPrices          CollectionPrice[]
   centerCategoryCommissions CenterCategoryCommission[]
-    assignedUsers UserCenter[]
+  assignedUsers UserCenter[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

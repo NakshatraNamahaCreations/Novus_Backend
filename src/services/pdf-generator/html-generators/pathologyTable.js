@@ -1,3 +1,4 @@
+// html-generators/pathologyTable.js
 import {
   safeTrim,
   escapeHtml,
@@ -7,18 +8,26 @@ import {
 import { PatientService } from "../services/patientService.js";
 
 export class PathologyTable {
+  /**
+   * Generate pathology table using CSS classes (no inline styles)
+   * Matches the structure used in radiology content
+   */
   static generate(parameterResults, options = {}) {
     const { showTrends = false, trendData = null } = options;
+
+    if (!parameterResults || parameterResults.length === 0) {
+      return '<div class="no-data">No parameters to display</div>';
+    }
 
     const rows = parameterResults.map((pr) => this.generateRow(pr, trendData));
 
     return `
-      <table>
+      <table class="pathology-table">
         <thead>
           <tr>
-            <th style="width:45%">PARAMETER / METHOD</th>
-            <th style="width:20%">RESULT</th>
-            <th style="width:35%">BIO REF. INTERVAL</th>
+            <th class="col-parameter">PARAMETER / METHOD</th>
+            <th class="col-result">RESULT</th>
+            <th class="col-range">BIO REF. INTERVAL</th>
           </tr>
         </thead>
         <tbody>${rows.join("")}</tbody>
@@ -26,6 +35,9 @@ export class PathologyTable {
     `;
   }
 
+  /**
+   * Generate a single parameter row
+   */
   static generateRow(parameterResult, trendData = null) {
     const valueRaw =
       parameterResult.valueNumber ?? parameterResult.valueText ?? "—";
@@ -33,47 +45,64 @@ export class PathologyTable {
     const method =
       parameterResult.method || parameterResult.parameter?.method || "";
 
-    // Use the service method to get reference range
+    // Get reference range using the service method
     const rangeText = PatientService.getReferenceRangeText(parameterResult);
     const rangeCell = this.formatRangeForDisplay(rangeText, unit);
 
+    // Parameter name
+    const parameterName = escapeHtml(
+      parameterResult.parameter?.name || 
+      parameterResult.parameterName || 
+      "—"
+    );
+
     return `
       <tr>
-        <td style="width:45%">
-          <div class="parameter-name">
-            <strong>${escapeHtml(parameterResult.parameter?.name || "—")}</strong>
-           
-          </div>
-          <div class="method">${escapeHtml(method || "-")}</div>
+        <td class="col-parameter">
+          <div class="parameter-name">${parameterName}</div>
+          ${method ? `<div class="method">${escapeHtml(method)}</div>` : ''}
         </td>
-        <td style="width:20%" class="result-cell">
+        <td class="col-result result-cell">
           ${this.renderResultWithColoredArrow(valueRaw, parameterResult.flag)}
         </td>
-        <td style="width:35%" class="range-cell">
+        <td class="col-range range-cell">
           ${escapeHtml(rangeCell || "—")}
         </td>
       </tr>
     `;
   }
 
+  /**
+   * Format reference range for display
+   */
   static formatRangeForDisplay(rangeText, unit) {
     const rt = safeTrim(rangeText);
     const u = safeTrim(unit);
 
     if (!rt) return "—";
     if (!u) return rt;
-    if (rt.toLowerCase().includes(u.toLowerCase())) return rt;
+    
+    // Check if unit is already included in range text
+    if (rt.toLowerCase().includes(u.toLowerCase())) {
+      return rt;
+    }
 
     return `${rt} ${u}`;
   }
 
+  /**
+   * Render result value with colored arrow for abnormal values
+   */
   static renderResultWithColoredArrow(valueText, flag) {
     const kind = getFlagKind(flag);
     const numericValue = formatValueWithoutUnit(valueText);
 
     let colorClass = "";
-    if (kind === "high") colorClass = "result-high";
-    else if (kind === "low") colorClass = "result-low";
+    if (kind === "high") {
+      colorClass = "result-high";
+    } else if (kind === "low") {
+      colorClass = "result-low";
+    }
 
     const arrow = kind === "high" ? "↑" : kind === "low" ? "↓" : "";
 

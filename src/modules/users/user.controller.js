@@ -571,9 +571,14 @@ export const changePassword1 = async (req, res) => {
 
 export const getCurrentUser = async (req, res) => {
   try {
-    // assuming you use JWT or session middleware that attaches req.user
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const userId = Number(req.user.id);
+
     const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
+      where: { id: userId },
       select: {
         id: true,
         name: true,
@@ -581,13 +586,38 @@ export const getCurrentUser = async (req, res) => {
         phone: true,
         role: true,
         rights: true,
+
+        // ✅ relation from your schema: assignedCenters
+        assignedCenters: {
+          select: {
+            id: true,
+            centerId: true,
+          
+            center: {
+              select: {
+                id: true,
+                name: true,
+                cityId: true,
+                status: true,
+                showApp: true,
+              },
+            },
+          },
+        },
       },
     });
-    res.json({ user });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    return res.json({ success: true, user });
   } catch (error) {
-    res.status(500).json({ error: "Failed to fetch user info" });
+    console.error("getCurrentUser error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch user info" });
   }
 };
+
 
 export const updateCurrentUser = async (req, res) => {
   try {
