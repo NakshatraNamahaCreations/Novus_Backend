@@ -190,155 +190,126 @@ export const createPayment = async (req, res) => {
   }
 };
 
-/**
- * @desc    Get all payments with filters
- * @route   GET /api/payments
- * @access  Private (Admin)
- */
+const parseDateFlexible = (val, endOfDay = false) => {
+  try {
+    if (!val) return null;
+
+    // If ISO: 2026-02-07
+    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      return new Date(`${val}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+    }
+
+    // If DD-MM-YYYY: 07-02-2026 or 07/02/2026
+    const cleaned = String(val).trim().replace(/\//g, "-");
+    if (/^\d{2}-\d{2}-\d{4}$/.test(cleaned)) {
+      const [dd, mm, yyyy] = cleaned.split("-");
+      return new Date(`${yyyy}-${mm}-${dd}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+    }
+
+    return null;
+  } catch (e) {
+    return null;
+  }
+};
 
 export const getAllPayments = async (req, res) => {
   try {
     const {
       page = 1,
       limit = 20,
-      orderId,
-      patientId,
-      vendorId,
-      centerId,
-      paymentStatus,
+      billId,          // ✅ NEW (paymentId filter)
+      centerId,        // ✅ already
       paymentMethod,
-      paymentMode,
+      paymentStatus,
       startDate,
       endDate,
       search,
     } = req.query;
 
     const user = req.user;
-  
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const where = {};
 
-    // ✅ ROLE BASED FILTER
-    // if (user?.role === "admin") {
-    //   where.createdById = user.id;
-    // }
+    const where = { AND: [] };
 
+    // ✅ admin center restriction
     if (user?.role === "admin") {
-  const centerIds = Array.isArray(user?.centerIds) ? user.centerIds : [];
+      const centerIds = Array.isArray(user?.centerIds) ? user.centerIds : [];
+      if (centerIds.length > 0) where.AND.push({ centerId: { in: centerIds } });
+      else
+        return res.status(200).json({
+          success: false,
+          message: "No payments for this user",
+        });
+    }
 
-  if (centerIds.length > 0) {
-    where.centerId = { in: centerIds }; // ✅ filter orders by center
-  } 
-  else{
-     return res.status(200).json({
-      success: false,
-      message: "No payments for this users",
-    });
-  }
-}
+    // ✅ center filter from UI
+    if (centerId) where.AND.push({ centerId: parseInt(centerId) });
 
-    // Apply filters
-    if (orderId) where.orderId = parseInt(orderId);
-    if (patientId) where.patientId = parseInt(patientId);
-    if (vendorId) where.vendorId = parseInt(vendorId);
-    if (centerId) where.centerId = parseInt(centerId);
-    if (paymentStatus) where.paymentStatus = paymentStatus;
-    if (paymentMethod) where.paymentMethod = paymentMethod;
-    if (paymentMode) where.paymentMode = paymentMode;
+    // ✅ billId filter (paymentId)
+    if (billId) {
+      where.AND.push({
+        paymentId: { contains: String(billId), mode: "insensitive" },
+      });
+    }
 
-    // Date range filter
+    if (paymentMethod) where.AND.push({ paymentMethod });
+    if (paymentStatus) where.AND.push({ paymentStatus });
+
+    // ✅ date range uses paymentDate
     if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) where.createdAt.gte = new Date(startDate);
-      if (endDate) where.createdAt.lte = new Date(endDate);
+      const dateFilter = {};
+      if (startDate) dateFilter.gte = new Date(`${startDate}T00:00:00.000Z`);
+      if (endDate) dateFilter.lte = new Date(`${endDate}T23:59:59.999Z`);
+      where.AND.push({ paymentDate: dateFilter });
     }
 
-    // Search filter
+    // ✅ global search
     if (search) {
-      where.OR = [
-        { paymentId: { contains: search, mode: "insensitive" } },
-        { referenceId: { contains: search, mode: "insensitive" } },
-        {
-          order: {
-            orderNumber: { contains: search, mode: "insensitive" },
+      where.AND.push({
+        OR: [
+          { paymentId: { contains: search, mode: "insensitive" } },
+          { referenceId: { contains: search, mode: "insensitive" } },
+          { order: { orderId: { contains: search, mode: "insensitive" } } },
+          {
+            patient: {
+              OR: [
+                { fullName: { contains: search, mode: "insensitive" } },
+                { contactNo: { contains: search, mode: "insensitive" } },
+              ],
+            },
           },
-        },
-        {
-          patient: {
-            OR: [
-              { fullName: { contains: search, mode: "insensitive" } },
-              { contactNo: { contains: search, mode: "insensitive" } },
-            ],
-          },
-        },
-        {
-          vendor: {
-            name: { contains: search, mode: "insensitive" },
-          },
-        },
-      ];
+          { vendor: { name: { contains: search, mode: "insensitive" } } },
+          { center: { name: { contains: search, mode: "insensitive" } } },
+        ],
+      });
     }
 
-    // Get payments with pagination
+    if (where.AND.length === 0) delete where.AND;
+
     const [payments, total] = await Promise.all([
       prisma.payment.findMany({
         where,
         include: {
-          order: {
-            select: {
-              id: true,
-              orderNumber: true,
-              finalAmount: true,
-            },
-          },
-          patient: {
-            select: {
-              id: true,
-              fullName: true,
-              contactNo: true,
-            },
-          },
-          vendor: {
-            select: {
-              id: true,
-              name: true,
-              number: true,
-            },
-          },
-          center: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          createdBy: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
+          order: { select: { id: true, orderNumber: true, finalAmount: true } },
+          patient: { select: { id: true, fullName: true, contactNo: true } },
+          vendor: { select: { id: true, name: true, number: true } },
+          center: { select: { id: true, name: true } },
+          createdBy: { select: { id: true, name: true, email: true } },
         },
-        orderBy: {
-          createdAt: "desc",
-        },
+        orderBy: { createdAt: "desc" },
         skip,
         take: parseInt(limit),
       }),
       prisma.payment.count({ where }),
     ]);
 
-    // Calculate summary
-    const summary = await prisma.payment.aggregate({
+    const summaryAgg = await prisma.payment.aggregate({
       where,
-      _sum: {
-        amount: true,
-        refundAmount: true,
-      },
+      _sum: { amount: true, refundAmount: true },
       _count: true,
     });
 
-    res.json({
+    return res.json({
       success: true,
       payments,
       pagination: {
@@ -348,16 +319,15 @@ export const getAllPayments = async (req, res) => {
         pages: Math.ceil(total / parseInt(limit)),
       },
       summary: {
-        totalAmount: summary._sum.amount || 0,
-        totalRefunds: summary._sum.refundAmount || 0,
-        netAmount:
-          (summary._sum.amount || 0) - (summary._sum.refundAmount || 0),
-        totalPayments: summary._count,
+        totalAmount: summaryAgg._sum.amount || 0,
+        totalRefunds: summaryAgg._sum.refundAmount || 0,
+        netAmount: (summaryAgg._sum.amount || 0) - (summaryAgg._sum.refundAmount || 0),
+        totalPayments: summaryAgg._count || 0,
       },
     });
   } catch (error) {
     console.error("Get all payments error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Error fetching payments",
       error: error.message,

@@ -1301,7 +1301,12 @@ export const getOrdersByPatientId = async (req, res) => {
         },
         address: true,
         vendor: true,
-
+ payments: {
+          select: {
+            id: true,
+            invoiceUrl: true,
+          },
+        },
         orderMembers: {
           where: { patientId },
           include: {
@@ -1585,8 +1590,8 @@ export const getAllOrders = async (req, res) => {
       search = "",
       status = "",
       paymentStatus = "",
-      date = "all",
-      specificDate = "", 
+      fromDate,
+      toDate,
     } = req.query;
 
     page = Number(page);
@@ -1595,134 +1600,68 @@ export const getAllOrders = async (req, res) => {
 
     const user = req.user;
 
-    console.log("user",user)
-
     let where = {};
 
+    // ✅ ROLE BASED FILTER (center restriction for admin)
+    if (user?.role === "admin") {
+      const centerIds = Array.isArray(user?.centerIds) ? user.centerIds : [];
+      if (centerIds.length > 0) {
+        where.centerId = { in: centerIds };
+      } else {
+        return res.status(200).json({
+          success: false,
+          message: "No orders for this users",
+        });
+      }
+    }
 
+    // ✅ Default = TODAY ONLY (if not passed)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-if (user?.role === "admin") {
-  const centerIds = Array.isArray(user?.centerIds) ? user.centerIds : [];
+    if (!fromDate) fromDate = today.toISOString().split("T")[0];
+    if (!toDate) toDate = today.toISOString().split("T")[0];
 
-  if (centerIds.length > 0) {
-    where.centerId = { in: centerIds }; // ✅ filter orders by center
-  } 
-  else{
-     return res.status(200).json({
-      success: false,
-      message: "No orders for this users",
-    });
-  }
-}
+    // ✅ Search filter
+    if (search) {
+      const s = String(search).trim();
+      const asNumber = Number(s);
+      const isNumeric = s !== "" && Number.isFinite(asNumber);
 
+      where.OR = [
+        ...(isNumeric ? [{ id: asNumber }] : []),
+        { orderNumber: { contains: s, mode: "insensitive" } },
+        { trackingId: { contains: s, mode: "insensitive" } },
+        { source: { contains: s, mode: "insensitive" } },
+        { patient: { fullName: { contains: s, mode: "insensitive" } } },
+        { patient: { contactNo: { contains: s, mode: "insensitive" } } },
+      ];
+    }
 
-    /* ----------------------------------
-       SEARCH FILTER
-    ---------------------------------- */
-   if (search) {
-  const s = String(search).trim();
-
-  // if search is numeric -> treat as order.id
-  const asNumber = Number(s);
-  const isNumeric = s !== "" && Number.isFinite(asNumber);
-
-  where.OR = [
-    // ✅ search by Order ID (numeric)
-    ...(isNumeric ? [{ id: asNumber }] : []),
-
-    // existing searches
-    { orderNumber: { contains: s, mode: "insensitive" } },
-    { trackingId: { contains: s, mode: "insensitive" } },
-    { source: { contains: s, mode: "insensitive" } },
-    { patient: { fullName: { contains: s, mode: "insensitive" } } },
-    { patient: { contactNo: { contains: s, mode: "insensitive" } } },
-  ];
-}
-    /* ----------------------------------
-       ORDER STATUS FILTER
-    ---------------------------------- */
+    // ✅ Order status filter
     if (status && status !== "all") {
       where.status = status;
     }
 
-    /* ----------------------------------
-       PAYMENT STATUS FILTER
-    ---------------------------------- */
+    // ✅ Payment status filter
     if (paymentStatus === "pending") {
-      where.paymentStatus = {
-        in: ["pending", "AUTHORIZED", "FAILED"],
-      };
+      where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED"] };
     }
-
     if (paymentStatus === "paid") {
-      where.paymentStatus = {
-        in: ["CAPTURED", "COMPLETED", "paid"],
-      };
+      where.paymentStatus = { in: ["CAPTURED", "COMPLETED", "paid"] };
     }
 
-    /* ----------------------------------
-       DATE FILTERS
-    ---------------------------------- */
+    // ✅ Date range filter (Order date)
+    if (fromDate && toDate) {
+      const startDate = new Date(fromDate);
+      startDate.setHours(0, 0, 0, 0);
 
-    // ✅ 1) SPECIFIC DATE FILTER (exact day)
-    if (specificDate) {
-      const [y, m, d] = specificDate.split("-").map(Number);
+      const endDate = new Date(toDate);
+      endDate.setHours(23, 59, 59, 999);
 
-      const startDate = new Date(y, m - 1, d, 0, 0, 0, 0);
-      const endDate = new Date(y, m - 1, d, 23, 59, 59, 999);
-
-      // ✅ choose ONE
       where.date = { gte: startDate, lte: endDate };
-      // OR: where.date = { gte: startDate, lte: endDate };
     }
 
-    // ✅ 2) PRESET FILTERS ONLY IF specificDate NOT given
-    if (!specificDate && date && date !== "all") {
-      const now = new Date();
-      let startDate;
-      let endDate = new Date();
-
-      if (date === "today") {
-        startDate = new Date();
-        startDate.setHours(0, 0, 0, 0);
-
-        endDate = new Date();
-        endDate.setHours(23, 59, 59, 999);
-      }
-
-      if (date === "yesterday") {
-        startDate = new Date();
-        startDate.setDate(startDate.getDate() - 1);
-        startDate.setHours(0, 0, 0, 0);
-
-        endDate = new Date();
-        endDate.setDate(endDate.getDate() - 1);
-        endDate.setHours(23, 59, 59, 999);
-      }
-
-      if (date === "this_week") {
-        startDate = new Date();
-        startDate.setDate(startDate.getDate() - startDate.getDay());
-        startDate.setHours(0, 0, 0, 0);
-
-        endDate = new Date();
-        endDate.setHours(23, 59, 59, 999);
-      }
-
-      if (date === "this_month") {
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-      }
-
-      where.date = {
-        gte: startDate,
-        lte: endDate,
-      };
-    }
-
-    /* ----------------------------------
-       FETCH ORDERS
-    ---------------------------------- */
     const orders = await prisma.order.findMany({
       where,
       skip,
@@ -1745,19 +1684,12 @@ if (user?.role === "admin") {
         trackingId: true,
         isHomeSample: true,
         source: true,
-
         patient: {
           select: { id: true, fullName: true, email: true, contactNo: true },
         },
-        vendor: {
-          select: { id: true, name: true, email: true },
-        },
-        slot: {
-          select: { id: true, name: true, startTime: true, endTime: true },
-        },
-        address: {
-          select: { id: true, address: true, pincode: true, city: true },
-        },
+        vendor: { select: { id: true, name: true, email: true } },
+        slot: { select: { id: true, name: true, startTime: true, endTime: true } },
+        address: { select: { id: true, address: true, pincode: true, city: true } },
         center: {
           select: { id: true, name: true, contactName: true, address: true, mobile: true },
         },
