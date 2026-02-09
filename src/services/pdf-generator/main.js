@@ -321,15 +321,22 @@ function generateContentPagesHtml({ order, patient, pages, headerImg, footerImg,
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Medical Report - Content</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          @page { size: A4; margin: 0; }
-          body { font-family: 'Inter', sans-serif; font-size: 12px; line-height: 1.5; color: #000; background:#fff; }
-          table { page-break-inside: auto; }
-          tr { page-break-inside: avoid; page-break-after: auto; }
-          thead { display: table-header-group; }
-          tfoot { display: table-footer-group; }
-        </style>
+   <style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4; margin: 0; }
+  body { font-family: 'Inter', sans-serif; font-size: 12px; line-height: 1.5; color: #000; background:#fff; }
+  table { page-break-inside: auto; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+
+  /* Quill alignment */
+  .ql-align-center { text-align: center; }
+  .ql-align-right  { text-align: right; }
+  .ql-align-justify{ text-align: justify; }
+  .ql-editor p { margin: 0 0 8px 0; }
+</style>
+
       </head>
       <body style="margin:0; padding:0;">
         ${allPagesHtml}
@@ -750,6 +757,26 @@ function generatePatientDetailsCardHtml(patientDetails) {
   `;
 }
 
+function normalizeQuillHtml(html) {
+  if (!html) return "";
+  let s = String(html);
+
+  // handle \" and \\"
+  s = s.replace(/\\+"/g, '"');   // <-- converts \" and \\" and even \\\" to "
+  s = s.replace(/\\n/g, "\n");
+  s = s.replace(/\\t/g, "\t");
+  s = s.replace(/\\r/g, "\r");
+
+  // if fully JSON-stringified like "\"<p class=\\\"ql-align-center\\\">...\""
+  const t = s.trim();
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
+    try { s = JSON.parse(t); } catch {}
+  }
+
+  return s;
+}
+
+
 /**
  * ✅ PAGE HTML (with new pathology layout + trends panel)
  */
@@ -764,9 +791,12 @@ function generatePageHtml(page, patientDetails, isLastPage, headerImg = null, fo
     const isRadiology = Boolean(page?.isRadiology);
 
     let contentHtml = "";
-    if (page && isRadiology && page.reportChunk) {
-      contentHtml = `<div style="font-size: 13px; line-height: 1.6;">${page.reportChunk}</div>`;
-    } else if (page && page.chunk && page.chunk.length > 0) {
+   if (page && isRadiology && page.reportChunk) {
+  const clean = normalizeQuillHtml(page.reportChunk);
+  contentHtml = `<div class="ql-editor" style="font-size: 13px; line-height: 1.6;">${clean}</div>`;
+}
+
+     else if (page && page.chunk && page.chunk.length > 0) {
       const testId = page?.result?.testId || page?.result?.test?.id || page?.testId || null;
 
       // LEFT sections: if no sectionName/profileName in items => fallback to page.testName (CBC..)
