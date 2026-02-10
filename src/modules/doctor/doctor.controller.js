@@ -25,14 +25,16 @@ export const createDoctor = async (req, res) => {
       patientId,
     } = req.body;
 
-    if (!name || !number) {
-      return res.status(400).json({ message: "Name and number are required" });
-    }
+   if (!name) {
+  return res.status(400).json({ message: "Name is required" });
+}
 
-    const exist = await prisma.doctor.findUnique({
-      where: { number },
-      select: { id: true, name:true, number:true }, // lightweight check
-    });
+const exist = await prisma.doctor.findFirst({
+  where: { name: name.trim() }, // exact match
+  select: { id: true, name: true, number: true },
+});
+
+
 
     if (exist) {
       return res

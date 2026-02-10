@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Prince Running Header with Patient Row</title>
+  <link rel="stylesheet" href="test.css" />
+</head>
+<body>
+
+  <!-- ✅ Running header: contains BOTH header bg + user data row -->
+  <div class="doc-header">
+    <div class="hdr-top">
+      <div class="hdr-title">NOVUS LABS — HEADER (BG)</div>
+    </div>
+
+    <!-- patient/user row (this will also repeat on every page) -->
+    <div class="patient-strip">
+      <div class="ps-col">
+        <div class="ps-name">Patient: Yogesh Kumar</div>
+        <div class="ps-sub">Age/Gender: 32 / M</div>
+      </div>
+
+      <div class="ps-col right">
+        <div class="ps-kv"><span>Report ID:</span> NOV-2026-0001</div>
+        <div class="ps-kv"><span>Collected:</span> 10-Feb-2026</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ✅ Running footer -->
+  <div class="doc-footer">
+    <div class="ftr">FOOTER (BG) — centered</div>
+  </div>
+
+  <!-- normal content (multi-page) -->
+  <div class="content">
+    <h2>Content starts</h2>
+
+    <!-- filler to force multiple pages -->
+    <div class="filler">Line 1: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 2: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 3: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 4: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 5: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 6: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 7: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 8: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 9: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 10: Lorem ipsum dolor sit amet...</div>
+
+    <!-- add many lines to go 2 pages -->
+    <div class="filler">Line 11: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 12: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 13: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 14: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 15: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 16: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 17: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 18: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 19: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 20: Lorem ipsum dolor sit amet...</div>
+
+    <div class="filler">Line 21: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 22: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 23: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 24: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 25: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 26: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 27: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 28: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 29: Lorem ipsum dolor sit amet...</div>
+    <div class="filler">Line 30: Lorem ipsum dolor sit amet...</div>
+  </div>
+
+</body>
+</html>

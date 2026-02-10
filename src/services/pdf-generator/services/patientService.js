@@ -5,6 +5,42 @@ import { safeTrim } from "../utils/stringUtils.js";
 const prisma = new PrismaClient();
 
 export class PatientService {
+
+  static async getReportData({ orderId, patientId }) {
+  const [order, patient, layout, results] = await Promise.all([
+    this.getOrderData(orderId),
+    this.getPatientData(patientId),
+    this.getLayoutData(),
+    this.getPatientResults(orderId, patientId),
+  ]);
+
+
+
+  // Derived fields (these are commonly needed in PDF)
+  const derived = {
+    reportRefId: this.getReportRefId(order),
+    patientIdentifier: this.getPatientIdentifier(patient, order),
+    refDoctorInfo: this.getRefDoctorInfo(order),
+    partnerInfo: this.getPartnerInfo(order),
+    orderDates: this.getOrderDates(order),
+  };
+
+  // collect signatures (from results) – pick first non-null
+  const sig = {
+    left: results.find(r => r.leftSignature)?.leftSignature || null,
+    center: results.find(r => r.centerSignature)?.centerSignature || null,
+    right: results.find(r => r.rightSignature)?.rightSignature || null,
+  };
+
+  return {
+    order,
+    patient,
+    layout,
+    results,
+    signatures: sig,
+    derived,
+  };
+}
   static async getPatientData(patientId) {
     return await prisma.patient.findUnique({
       where: { id: Number(patientId) },
@@ -32,6 +68,7 @@ export class PatientService {
       }
     });
   }
+
 
   static async getOrderData(orderId) {
     return await prisma.order.findUnique({

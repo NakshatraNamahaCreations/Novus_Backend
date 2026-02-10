@@ -878,9 +878,9 @@ model Doctor {
   qualification  String?
   specialityType String?
   speciality     String?
-  mobile         String? @unique
+  mobile         String?
   landLine       String?
-  email          String? @unique
+  email          String? 
   venue          String?
   refCenter      String?
   source         String?
@@ -892,7 +892,7 @@ model Doctor {
   sendEmail        Boolean @default(false)
   consultingDoctor Boolean @default(false)
 
-  number String @unique
+  number String?
 
   createdById Int? // ⭐ ADDED: Track who created the doctor
   createdBy   User? @relation(fields: [createdById], references: [id])
