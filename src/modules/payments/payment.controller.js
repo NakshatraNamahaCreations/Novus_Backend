@@ -15,6 +15,7 @@ export const createPayment = async (req, res) => {
       patientId,
       vendorId,
       centerId,
+      diagnosticCenterId, // ✅ OPTIONAL
       paymentMethod,
       paymentMode,
       amount,
@@ -26,163 +27,159 @@ export const createPayment = async (req, res) => {
       ipAddress,
     } = req.body;
 
-    // Check if order exists
+    const toInt = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const toFloat = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const amt = toFloat(amount);
+    if (amt <= 0) {
+      return res.status(400).json({ success: false, message: "Valid amount is required" });
+    }
+
+    let order = null;
+
+    // ✅ If order exists, fetch once and reuse
     if (orderId) {
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
+      order = await prisma.order.findUnique({
+        where: { id: toInt(orderId) },
         include: { payments: true },
       });
 
       if (!order) {
-        return res.status(404).json({ message: "Order not found" });
+        return res.status(404).json({ success: false, message: "Order not found" });
       }
 
-      // Calculate total paid amount
-      const existingPaymentsTotal = order.payments.reduce((total, payment) => {
-        return total + (payment.amount || 0);
-      }, 0);
+      const existingPaymentsTotal = order.payments.reduce((t, p) => t + (p.amount || 0), 0);
 
-      // Check if payment exceeds order amount
-      if (existingPaymentsTotal + amount > order.finalAmount) {
+      if (existingPaymentsTotal + amt > (order.finalAmount || 0)) {
         return res.status(400).json({
+          success: false,
           message: `Payment amount exceeds order balance. Maximum allowed: ${
-            order.finalAmount - existingPaymentsTotal
+            (order.finalAmount || 0) - existingPaymentsTotal
           }`,
         });
       }
     }
 
-    // Generate unique payment ID
-    const paymentId = `PAY-${Date.now()}-${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
+    // ✅ Generate unique payment ID
+    const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
-    // Create payment
+    // ✅ diagnosticCenterId is OPTIONAL:
+    // If not provided, try to take from order (if order exists)
+    const finalDiagnosticCenterId =
+      toInt(diagnosticCenterId) ?? toInt(order?.diagnosticCenterId) ?? null;
+
+    // ✅ Create payment
     const payment = await prisma.payment.create({
       data: {
-        orderId,
-        patientId: patientId || req.user?.patientId,
-        userId: req.user?.id,
-        vendorId,
-        centerId,
+        orderId: orderId ? toInt(orderId) : null,
+        patientId: toInt(patientId) ?? toInt(req.user?.patientId) ?? null,
+        userId: toInt(req.user?.id) ?? null,
+
+        vendorId: toInt(vendorId),
+        centerId: toInt(centerId),
+
+        // ✅ Optional field (only store if exists)
+        diagnosticCenterId: finalDiagnosticCenterId,
+
         paymentId,
         paymentMethod,
         paymentMode,
-        paymentStatus: "COMPLETED", // Default for manual payments
-        amount,
+        paymentStatus: "COMPLETED", // manual default
+        amount: amt,
         currency,
         paymentDate: new Date(),
         transactionNote,
         referenceId,
         gatewayResponse,
-        capturedAmount: capturedAmount || amount,
+        capturedAmount: toFloat(capturedAmount) || amt,
         ipAddress: ipAddress || req.ip,
-        createdById: req.user?.id,
-        createdBy: req.user?.id ? { connect: { id: req.user.id } } : undefined,
+
+        createdById: toInt(req.user?.id),
+        createdBy: req.user?.id ? { connect: { id: toInt(req.user.id) } } : undefined,
       },
       include: {
         order: {
           include: {
-            patient: {
-              select: {
-                id: true,
-                fullName: true,
-                contactNo: true,
-              },
-            },
+            patient: { select: { id: true, fullName: true, contactNo: true } },
           },
         },
-        patient: {
-          select: {
-            id: true,
-            fullName: true,
-            contactNo: true,
-          },
-        },
-        vendor: {
-          select: {
-            id: true,
-            name: true,
-            number: true,
-          },
-        },
-        center: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
+        patient: { select: { id: true, fullName: true, contactNo: true } },
+        vendor: { select: { id: true, name: true, number: true } },
+        center: { select: { id: true, name: true, email: true } },
+        diagnosticCenter: { select: { id: true, name: true } }, // ✅ return it also
+        createdBy: { select: { id: true, name: true, email: true } },
       },
     });
 
-    // Update order payment status if order exists
+    // ✅ Update order payment status if order exists
     if (orderId) {
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
+      const refreshed = await prisma.order.findUnique({
+        where: { id: toInt(orderId) },
         include: { payments: true },
       });
 
-      if (order) {
-        const totalPaid =
-          order.payments.reduce((total, p) => total + p.amount, 0) + amount;
+      if (refreshed) {
+        const totalPaid = refreshed.payments.reduce((t, p) => t + (p.amount || 0), 0);
         const paymentStatus =
-          totalPaid >= order.finalAmount
+          totalPaid >= (refreshed.finalAmount || 0)
             ? "paid"
             : totalPaid > 0
-              ? "partially_paid"
-              : "pending";
+            ? "partially_paid"
+            : "pending";
 
         await prisma.order.update({
-          where: { id: orderId },
+          where: { id: toInt(orderId) },
           data: { paymentStatus },
         });
       }
     }
 
-    // Update vendor earnings if vendor payment
-    if (vendorId && amount > 0) {
+    // ✅ Update vendor earnings if vendor payment
+    if (vendorId && amt > 0) {
       await prisma.vendor.update({
-        where: { id: vendorId },
-        data: {
-          earnings: { increment: amount },
-        },
+        where: { id: toInt(vendorId) },
+        data: { earnings: { increment: amt } },
       });
 
-      // Create earnings history
+      const vendorAfter = await prisma.vendor.findUnique({
+        where: { id: toInt(vendorId) },
+        select: { earnings: true },
+      });
+
       await prisma.earningsHistory.create({
         data: {
-          vendorId,
+          vendorId: toInt(vendorId),
           title: "Payment Received",
-          desc: `Payment of ${amount} ${currency} received`,
-          amount,
+          desc: `Payment of ${amt} ${currency} received`,
+          amount: amt,
           type: "add",
-          balanceAfter: await prisma.vendor
-            .findUnique({
-              where: { id: vendorId },
-              select: { earnings: true },
-            })
-            .then((vendor) => vendor.earnings),
-          createdById: req.user?.id,
+          balanceAfter: vendorAfter?.earnings || 0,
+          createdById: toInt(req.user?.id),
         },
       });
     }
-    await invoiceQueue.add("generate-invoice", { paymentId });
-    res.status(201).json({
+
+    try {
+      await invoiceQueue.add("generate-invoice", { paymentId });
+    } catch (e) {
+      console.warn("invoiceQueue failed:", e?.message);
+    }
+
+    return res.status(201).json({
       success: true,
       message: "Payment created successfully",
       payment,
     });
   } catch (error) {
     console.error("Create payment error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Error creating payment",
       error: error.message,
@@ -190,35 +187,16 @@ export const createPayment = async (req, res) => {
   }
 };
 
-const parseDateFlexible = (val, endOfDay = false) => {
-  try {
-    if (!val) return null;
 
-    // If ISO: 2026-02-07
-    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
-      return new Date(`${val}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
-    }
 
-    // If DD-MM-YYYY: 07-02-2026 or 07/02/2026
-    const cleaned = String(val).trim().replace(/\//g, "-");
-    if (/^\d{2}-\d{2}-\d{4}$/.test(cleaned)) {
-      const [dd, mm, yyyy] = cleaned.split("-");
-      return new Date(`${yyyy}-${mm}-${dd}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
-    }
-
-    return null;
-  } catch (e) {
-    return null;
-  }
-};
 
 export const getAllPayments = async (req, res) => {
   try {
     const {
       page = 1,
       limit = 20,
-      billId,          // ✅ NEW (paymentId filter)
-      centerId,        // ✅ already
+      billId, // paymentId filter
+      diagnosticCenterId, // ✅ NEW: diagnostic center filter from UI (optional)
       paymentMethod,
       paymentStatus,
       startDate,
@@ -231,19 +209,26 @@ export const getAllPayments = async (req, res) => {
 
     const where = { AND: [] };
 
-    // ✅ admin center restriction
+    // ✅ admin diagnosticCenter restriction
     if (user?.role === "admin") {
-      const centerIds = Array.isArray(user?.centerIds) ? user.centerIds : [];
-      if (centerIds.length > 0) where.AND.push({ centerId: { in: centerIds } });
-      else
+      const diagnosticCenterIds = Array.isArray(user?.diagnosticCenterIds)
+        ? user.diagnosticCenterIds
+        : [];
+
+      if (diagnosticCenterIds.length > 0) {
+        where.AND.push({ diagnosticCenterId: { in: diagnosticCenterIds } });
+      } else {
         return res.status(200).json({
           success: false,
           message: "No payments for this user",
         });
+      }
     }
 
-    // ✅ center filter from UI
-    if (centerId) where.AND.push({ centerId: parseInt(centerId) });
+    // ✅ diagnostic center filter from UI
+    if (diagnosticCenterId) {
+      where.AND.push({ diagnosticCenterId: parseInt(diagnosticCenterId) });
+    }
 
     // ✅ billId filter (paymentId)
     if (billId) {
@@ -265,21 +250,24 @@ export const getAllPayments = async (req, res) => {
 
     // ✅ global search
     if (search) {
+      const s = String(search).trim();
       where.AND.push({
         OR: [
-          { paymentId: { contains: search, mode: "insensitive" } },
-          { referenceId: { contains: search, mode: "insensitive" } },
-          { order: { orderId: { contains: search, mode: "insensitive" } } },
+          { paymentId: { contains: s, mode: "insensitive" } },
+          { referenceId: { contains: s, mode: "insensitive" } },
+          // ✅ FIX: order has orderNumber, not orderId
+          { order: { orderNumber: { contains: s, mode: "insensitive" } } },
           {
             patient: {
               OR: [
-                { fullName: { contains: search, mode: "insensitive" } },
-                { contactNo: { contains: search, mode: "insensitive" } },
+                { fullName: { contains: s, mode: "insensitive" } },
+                { contactNo: { contains: s, mode: "insensitive" } },
               ],
             },
           },
-          { vendor: { name: { contains: search, mode: "insensitive" } } },
-          { center: { name: { contains: search, mode: "insensitive" } } },
+          { vendor: { name: { contains: s, mode: "insensitive" } } },
+          { center: { name: { contains: s, mode: "insensitive" } } }, // keep if you still use Center
+          { diagnosticCenter: { name: { contains: s, mode: "insensitive" } } }, // ✅ NEW
         ],
       });
     }
@@ -293,7 +281,15 @@ export const getAllPayments = async (req, res) => {
           order: { select: { id: true, orderNumber: true, finalAmount: true } },
           patient: { select: { id: true, fullName: true, contactNo: true } },
           vendor: { select: { id: true, name: true, number: true } },
+
+          // ✅ keep center if still relevant
           center: { select: { id: true, name: true } },
+
+          // ✅ NEW: diagnostic center data
+          diagnosticCenter: {
+            select: { id: true, name: true, address: true, pincode: true, cityId: true },
+          },
+
           createdBy: { select: { id: true, name: true, email: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -334,6 +330,7 @@ export const getAllPayments = async (req, res) => {
     });
   }
 };
+
 
 /**
  * @desc    Get payment by ID

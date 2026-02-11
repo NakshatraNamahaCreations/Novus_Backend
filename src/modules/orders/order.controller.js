@@ -642,13 +642,7 @@ export const createAdminOrder = async (req, res) => {
       if (!addr) return res.status(400).json({ success: false, message: "addressId is required for home collection" });
       const sId = castInt(slotId);
       if (!sId) return res.status(400).json({ success: false, message: "slotId is required for home collection" });
-    } else {
-      const finalCenterId = castInt(centerId ?? collectionCenterId);
-   
-      if (!finalCenterId)
-        return res.status(400).json({ success: false, message: "collectionCenterId/centerId is required for center collection" });
-      
-    }
+    } 
 
     // order number
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -675,10 +669,7 @@ export const createAdminOrder = async (req, res) => {
   const orderDate = parseISTDateTime(pickedDate);
 
 
-    /* ===========================
-       ✅ SLA PRECHECK (BLOCK ORDER)
-    ============================ */
-    const now = new Date();
+
 
     const testIds = selectedTests
       .filter((i) => normalizeType(i) === "test")
@@ -713,6 +704,9 @@ export const createAdminOrder = async (req, res) => {
       patient: { connect: { id: castInt(patientId) } },
 
       orderType: registrationType ?? null,
+     ...(castInt(diagnosticCenterId)
+  ? { diagnosticCenter: { connect: { id: castInt(diagnosticCenterId) } } }
+  : {}),
 
       totalAmount: Number(total),
       discount: discount != null ? Number(discount) : 0,
@@ -1602,15 +1596,19 @@ export const getAllOrders = async (req, res) => {
 
     let where = {};
 
-    // ✅ ROLE BASED FILTER (center restriction for admin)
+    // ✅ ROLE BASED FILTER (diagnosticCenter restriction for admin)
     if (user?.role === "admin") {
-      const centerIds = Array.isArray(user?.centerIds) ? user.centerIds : [];
-      if (centerIds.length > 0) {
-        where.centerId = { in: centerIds };
+      const diagnosticCenterIds = Array.isArray(user?.diagnosticCenterIds)
+        ? user.diagnosticCenterIds
+        : [];
+
+      if (diagnosticCenterIds.length > 0) {
+        // ✅ filter orders by diagnosticCenterId
+        where.diagnosticCenterId = { in: diagnosticCenterIds };
       } else {
         return res.status(200).json({
           success: false,
-          message: "No orders for this users",
+          message: "No orders for this user",
         });
       }
     }
@@ -1684,14 +1682,25 @@ export const getAllOrders = async (req, res) => {
         trackingId: true,
         isHomeSample: true,
         source: true,
+
+        // ✅ patient
         patient: {
           select: { id: true, fullName: true, email: true, contactNo: true },
         },
+
+        // ✅ vendor/slot/address
         vendor: { select: { id: true, name: true, email: true } },
         slot: { select: { id: true, name: true, startTime: true, endTime: true } },
         address: { select: { id: true, address: true, pincode: true, city: true } },
+
+        // ✅ OLD center (keep if you still want)
         center: {
           select: { id: true, name: true, contactName: true, address: true, mobile: true },
+        },
+
+        // ✅ NEW: diagnostic center data
+        diagnosticCenter: {
+          select: { id: true, name: true, address: true, pincode: true, cityId: true },
         },
       },
     });
@@ -1717,6 +1726,7 @@ export const getAllOrders = async (req, res) => {
     });
   }
 };
+
 
 
 export const getOrderById = async (req, res) => {

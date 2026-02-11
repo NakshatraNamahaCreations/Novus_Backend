@@ -30,11 +30,12 @@ CENTER_CONFIRMATION: {
   templateId: process.env.WABRIDGE_CENTER_CONFIRMATION, // 886962327286528
   message:
     "Dear {{1}},\n\n" +
-    "A patient has booked an appointment at your facility.\n" +
+    "A patient appointment has been scheduled at your facility.\n\n" +
     "Patient Name: {{2}}\n" +
-    "Test : {{3}}\n" +
-    "Date & Time: {{4}}\n" +
-    "Please confirm slot availability at the earliest.\n\n" +
+    "Test: {{3}}\n" +
+    "Date & Time: {{4}}\n\n" +
+    "Please confirm the slot availability.\n\n" +
+    "Regards,\n" +
     "Novus Health Labs",
   mapVariables: ({ centerName, patientName, tests, dateTime }) => [
     centerName,
@@ -43,6 +44,7 @@ CENTER_CONFIRMATION: {
     dateTime,
   ],
 },
+
 
 
 

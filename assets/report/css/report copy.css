@@ -2,9 +2,9 @@
    ROOT & GLOBAL VARIABLES
    =============================== */
 :root {
-  --header-h: 85px;
+  --header-h: 80px;
   --footer-h: 50px;
-  --patient-strip-h: 140px; /* ✅ Reduced from 130px */
+  --patient-strip-h: 130px; /* ✅ Reduced from 130px */
   --pad-x: 14mm;
   
   /* Clean Professional Colors */
@@ -30,19 +30,12 @@
   
   @top {
     content: element(header-content);
-    vertical-align: top;   /* ✅ this removes the top gap */
-    padding: 0;
   }
-
+  
   @bottom {
     content: element(footer-content);
-    vertical-align: bottom;
-    padding: 0;
   }
 }
-
-
-
 
 /* ===============================
    PAGE SETUP - FULL IMAGE PAGES
@@ -74,7 +67,10 @@ p {
 /* ===============================
    RUNNING ELEMENTS
    =============================== */
-.header-with-patient { position: running(header-content); margin: 0; padding: 0; }
+.header-with-patient {
+  position: running(header-content);
+  
+}
 
 .page-footer {
   position: running(footer-content);
@@ -87,7 +83,7 @@ p {
 .hdr {
   height: var(--header-h);
   width: 100%;
- margin: 0; padding: 0;
+ 
 }
 
 .hf-img {
@@ -328,13 +324,12 @@ p {
    PATIENT STRIP - IMPROVED SPACING
    =============================== */
 .patient-strip {
-  border: 1.5px solid var(--primary-blue);
+  border: 1px solid var(--primary-blue);
   border-radius: 4px;
   padding: 8px 12px; /* ✅ Reduced from 10px 14px */
-  margin: 0;
+  margin: 6px 0 10px 0; /* ✅ Reduced from 8px 0 12px 0 */
   background: var(--bg-white);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  padding-top: 10px;
 }
 
 .ps-title {
@@ -463,7 +458,7 @@ p {
 
 /* ✅ Only add border when table has trends */
 .tbl.with-trends {
-  /* border: 1px solid var(--border-light); */
+  border: 1px solid var(--border-light);
 }
 
 .mt {
@@ -482,7 +477,7 @@ p {
   color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.4px;
-  /* border-bottom: 2px solid var(--border-light); */
+  border-bottom: 2px solid var(--border-light);
 }
 
 /* ✅ IMPROVED 3-column layout with better proportions */

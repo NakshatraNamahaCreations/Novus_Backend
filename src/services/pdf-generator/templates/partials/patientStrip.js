@@ -9,35 +9,56 @@ function esc(s) {
 }
 
 function fmtDate(d) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  if (Number.isNaN(dt.getTime())) return "—";
-  
-  // Format: DD/MM/YYYY HH:MM
-  const day = String(dt.getDate()).padStart(2, '0');
-  const month = String(dt.getMonth() + 1).padStart(2, '0');
-  const year = dt.getFullYear();
-  const hours = String(dt.getHours()).padStart(2, '0');
-  const minutes = String(dt.getMinutes()).padStart(2, '0');
-  
-  return `${day}/${month}/${year} ${hours}:${minutes}`;
+  try {
+    if (!d) return "—";
+
+    const dt = new Date(d);
+    if (Number.isNaN(dt.getTime())) return "—";
+
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,          // ✅ 12-hour format
+    }).formatToParts(dt);
+
+    const get = (type) => parts.find((p) => p.type === type)?.value || "";
+
+    // hour might come as "03", day/month already "11" etc.
+    const dateStr = `${get("day")}/${get("month")}/${get("year")}`;
+
+    // Some locales return dayPeriod as "pm"/"am" → make it "PM"/"AM"
+    const ampm = (get("dayPeriod") || "").toUpperCase();
+
+    return `${dateStr} ${get("hour")}:${get("minute")} ${ampm}`;
+  } catch (e) {
+    return "—";
+  }
 }
 
+
 export function patientStripHtml({ order, patient, derived }) {
+
   const name = safeTrim(patient?.fullName) || "—";
   const age = patient?.age ?? "—";
   const gender = safeTrim(patient?.gender) || "—";
-  const contact = safeTrim(patient?.contactNo) || "—";
 
-  const pid = derived?.patientIdentifier || "—";
-  const refId = derived?.reportRefId || "—";
+
+  const pid = patient?.id || "—";
+  const refId = order?.id || "—";
   const doctor = derived?.refDoctorInfo || "—";
-  const partner = derived?.partnerInfo || "—";
+
 
   const dates = derived?.orderDates || {};
+
+ 
   const collectedAt = fmtDate(dates.collectedAt);
   const receivedAt = fmtDate(dates.receivedAt);
   const reportedAt = fmtDate(dates.reportedAt);
+
 
   return `
     <div class="patient-strip">
@@ -48,7 +69,7 @@ export function patientStripHtml({ order, patient, derived }) {
         <div><b>Age/Gender:</b> ${esc(age)} / ${esc(gender)}</div>
         <div><b>Patient ID:</b> ${esc(pid)}</div>
 
-        <div><b>Report Ref:</b> ${esc(refId)}</div>
+        <div><b>Report Ref:</b>ORD-${esc(refId)}</div>
         <div><b>Referred By:</b> ${esc(doctor)}</div>
         <div><b>Center:</b> ${esc(order?.center?.name || "—")}</div>
 

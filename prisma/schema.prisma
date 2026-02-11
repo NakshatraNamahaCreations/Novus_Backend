@@ -183,6 +183,8 @@ model DiagnosticCenter {
   city   City @relation(fields: [cityId], references: [id])
 
   orders Order[] // ⭐ ADD THIS LINE
+  assignedUsers UserDiagnosticCenter[]
+    payments Payment[] 
 
   createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
@@ -238,7 +240,7 @@ model User {
   createdNotifications             Notification[]
   createdTestParameters            TestParameter[]
   collectionPrices                 CollectionPrice[]
-    assignedCenters UserCenter[]
+   assignedDiagnosticCenters UserDiagnosticCenter[]
   createdCenterCategoryCommissions CenterCategoryCommission[] @relation("CenterCategoryCommissionCreatedBy")
 
   // Payment relations FIXED
@@ -267,21 +269,24 @@ model User {
 }
 
 
-model UserCenter {
+
+
+model UserDiagnosticCenter {
   id Int @id @default(autoincrement())
 
-  userId   Int
-  centerId Int
+  userId             Int
+  diagnosticCenterId Int
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  center Center @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  diagnosticCenter DiagnosticCenter @relation(fields: [diagnosticCenterId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
-  @@unique([userId, centerId])
+  @@unique([userId, diagnosticCenterId])
   @@index([userId])
-  @@index([centerId])
+  @@index([diagnosticCenterId])
 }
+
 
 model Patient {
   id       Int       @id @default(autoincrement())
@@ -707,7 +712,7 @@ model Center {
   categories                CenterCategory[]
   collectionPrices          CollectionPrice[]
   centerCategoryCommissions CenterCategoryCommission[]
-  assignedUsers UserCenter[]
+  
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1049,6 +1054,8 @@ model Payment {
   userId          Int?
   centerId        Int?
   vendorId        Int?
+   diagnosticCenterId Int?
+  
   paymentId       String        @unique
   paymentMethod   PaymentMethod
   paymentMode     PaymentMode?
@@ -1082,6 +1089,7 @@ model Payment {
   patient Patient? @relation(fields: [patientId], references: [id])
   vendor  Vendor?  @relation(fields: [vendorId], references: [id])
   center  Center?  @relation(fields: [centerId], references: [id])
+  diagnosticCenter   DiagnosticCenter? @relation(fields: [diagnosticCenterId], references: [id])
 
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
