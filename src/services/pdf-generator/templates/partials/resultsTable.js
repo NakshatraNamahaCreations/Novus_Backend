@@ -97,7 +97,11 @@ export function resultsTableHtml({ results, trendMap }) {
       }
 
       // Get current date for result column
-      const currentDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit" });
+      const currentDate = new Date().toLocaleDateString("en-GB", { 
+        day: "2-digit", 
+        month: "2-digit", 
+        year: "2-digit" 
+      });
 
       const sectionClass = paramResults.length > 20 ? "section pathology" : "section pathology keep-together";
 
@@ -121,11 +125,20 @@ export function resultsTableHtml({ results, trendMap }) {
             trend3 = trends[2]?.value || "—";
           }
 
-          // Check if value is abnormal
+          // Check if value is abnormal and determine direction
           const flag = pr?.flag;
-          const isAbnormal = flag && (flag === 'H' || flag === 'L' || flag === 'HH' || flag === 'LL');
-          const valueClass = isAbnormal ? 'abnormal-value' : '';
-          const indicator = isAbnormal ? '▲ ' : '';
+     
+          const isAbnormal = flag && (flag === 'HIGH' || flag === 'L' || flag === 'HH' || flag === 'LL');
+          const isHigh = flag && (flag === 'HIGH' || flag === 'HH');
+          const isLow = flag && (flag === 'LOW' || flag === 'LL');
+          
+          
+          let valueClass = '';
+          if (isHigh) {
+            valueClass = 'abnormal-value high';
+          } else if (isLow) {
+            valueClass = 'abnormal-value low';
+          }
 
           return `
             <tr>
@@ -133,7 +146,7 @@ export function resultsTableHtml({ results, trendMap }) {
                 <div class="param-name">${esc(pname)}</div>
                 ${method ? `<div class="param-method">${esc(method)}</div>` : ''}
               </td>
-              <td class="${valueClass}">${indicator}${esc(value)}${unit ? ' ' + esc(unit) : ''}</td>
+              <td class="${valueClass}">${esc(value)}${unit ? ' ' + esc(unit) : ''}</td>
               <td class="ref-range">${esc(ref)}</td>
               ${hasTrends ? `
                 <td class="trend-value">${esc(trend1)}</td>
@@ -149,15 +162,15 @@ export function resultsTableHtml({ results, trendMap }) {
         <div class="${sectionClass}">
           <div class="test-title-row">
             <div class="test-name-left">${esc(testName)}</div>
-            ${hasTrends ? '<div class="trends-label-right">Trends (For last three tests)</div>' : ''}
+            ${hasTrends ? '<div class="trends-label-right">Historical Trends</div>' : ''}
           </div>
 
           <table class="tbl">
             <thead>
               <tr>
                 <th class="test-name-header">Test Name</th>
-                <th class="result-header">Result, ${currentDate}</th>
-                <th class="bio-ref-header">Bio. Ref. Interval</th>
+                <th class="result-header">Result (${currentDate})</th>
+                <th class="bio-ref-header"> Biological Reference</th>
                 ${hasTrends ? `
                   <th class="trend-header">${trendDates[0] || '—'}</th>
                   <th class="trend-header">${trendDates[1] || '—'}</th>
@@ -166,7 +179,7 @@ export function resultsTableHtml({ results, trendMap }) {
               </tr>
             </thead>
             <tbody>
-              ${rows || `<tr><td colspan="${hasTrends ? '6' : '3'}" class="muted">No parameters</td></tr>`}
+              ${rows || `<tr><td colspan="${hasTrends ? '6' : '3'}" class="muted text-center">No parameters available</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -177,9 +190,10 @@ export function resultsTableHtml({ results, trendMap }) {
   if (!radiologyHtml && !pathologyHtml) {
     return `
       <div class="section">
+        <div class="section-title">Laboratory Results</div>
         <table class="tbl">
           <tbody>
-            <tr><td class="muted">No results available</td></tr>
+            <tr><td class="muted text-center">No results available</td></tr>
           </tbody>
         </table>
       </div>

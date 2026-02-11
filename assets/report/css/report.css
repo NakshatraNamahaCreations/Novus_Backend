@@ -1,20 +1,29 @@
 /* ===============================
-   ROOT & GLOBAL
+   ROOT & GLOBAL VARIABLES
    =============================== */
 :root {
   --header-h: 80px;
-  --footer-h: 40px;
-  --patient-strip-h: 140px;
+  --footer-h: 50px;
+  --patient-strip-h: 130px;  /* Increased from 110px to 130px */
   --pad-x: 14mm;
+  
+  /* Clean Professional Colors */
+  --primary-blue: #2c5f8d;
+  --accent-orange: #ff6b35;
+  --text-dark: #1a1a1a;
+  --text-gray: #666666;
+  --border-light: #e0e0e0;
+  --bg-white: #ffffff;
+  --bg-light: #f8f8f8;
 }
 
 /* ===============================
-   DEFAULT (letterhead + full)
+   PAGE SETUP - DEFAULT (letterhead + full + plain)
    =============================== */
 @page {
   size: A4;
-  margin-top: calc(var(--header-h) + var(--patient-strip-h) + 10px);
-  margin-bottom: calc(var(--footer-h) + 10px);
+  margin-top: calc(var(--header-h) + var(--patient-strip-h) + 8px);
+  margin-bottom: calc(var(--footer-h) + 8px);
   margin-left: var(--pad-x);
   margin-right: var(--pad-x);
   
@@ -28,32 +37,16 @@
 }
 
 /* ===============================
-   PLAIN - No header/footer, but still has patient strip
-   =============================== */
-@page plain {
-  size: A4;
-  margin-top: calc(var(--patient-strip-h) + 10px);
-  margin-bottom: 10px;
-  margin-left: var(--pad-x);
-  margin-right: var(--pad-x);
-  
-  @top {
-    content: element(patient-strip-content);
-  }
-  
-  @bottom {
-    content: none;
-  }
-}
-
-/* ===============================
-   FULL IMAGE PAGES
+   PAGE SETUP - FULL IMAGE PAGES
    =============================== */
 @page imgpage {
   size: A4;
   margin: 0;
 }
 
+/* ===============================
+   BASE STYLES
+   =============================== */
 * {
   box-sizing: border-box;
 }
@@ -61,11 +54,15 @@
 html, body {
   margin: 0;
   padding: 0;
-  font-family: Arial, sans-serif;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  color: var(--text-dark);
+  line-height: 1.4;
 }
-
+p{
+  font-size: 14px;
+}
 /* ===============================
-   RUNNING ELEMENTS - LETTERHEAD/FULL
+   RUNNING ELEMENTS
    =============================== */
 .header-with-patient {
   position: running(header-content);
@@ -76,18 +73,12 @@ html, body {
 }
 
 /* ===============================
-   RUNNING ELEMENTS - PLAIN (patient strip only)
-   =============================== */
-.patient-strip-only {
-  position: running(patient-strip-content);
-}
-
-/* ===============================
    HEADER STYLES
    =============================== */
 .hdr {
   height: var(--header-h);
   width: 100%;
+  background: var(--bg-white);
 }
 
 .hf-img {
@@ -98,15 +89,55 @@ html, body {
 }
 
 /* ===============================
-   PATIENT STRIP
+   PATIENT STRIP - IMPROVED LAYOUT
    =============================== */
 .patient-strip {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 6px 0 0 0;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  border: 1px solid var(--primary-blue);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 6px 0 8px 0;  /* Reduced margins: 6px top, 8px bottom */
+  background: var(--bg-white);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.ps-title {
+  font-weight: 700;
+  font-size: 11px;  /* Increased from 10px */
+  margin-bottom: 5px;
+  color: var(--primary-blue);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-light);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px 10px;
+  font-size: 9.5px;  /* Increased from 8.5px */
+  line-height: 1.4;
+}
+
+.ps-grid div {
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--border-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ps-grid div:last-child,
+.ps-grid div:nth-last-child(2),
+.ps-grid div:nth-last-child(3) {
+  border-bottom: none;
+}
+
+.ps-grid b {
+  color: var(--text-dark);
+  font-weight: 600;
+  display: inline-block;
+  min-width: 80px;  /* Increased from 75px */
 }
 
 /* ===============================
@@ -115,6 +146,7 @@ html, body {
 .page-footer {
   height: var(--footer-h);
   width: 100%;
+  background: var(--bg-white);
 }
 
 /* ===============================
@@ -124,127 +156,232 @@ html, body {
   /* Let content flow naturally */
 }
 
-.page.plain {
-  page: plain;
-}
-
 .content {
   /* Content starts immediately */
 }
 
 /* ===============================
-   PATIENT DETAILS SECTION
+   SECTION STYLING
    =============================== */
-.ps-title {
-  font-weight: 700;
-  font-size: 12px;
-  margin-bottom: 6px;
-  color: #2c3e50;
-  padding-bottom: 3px;
-  border-bottom: 0.5px solid #3498db;
-}
-
-.ps-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px 10px;
-  font-size: 10px;
-  line-height: 1.3;
-}
-
-.ps-grid div {
-  padding: 2px 0;
-  border-bottom: 1px dashed #eee;
-}
-
-.ps-grid b {
-  color: #2c3e50;
-  font-weight: 600;
-}
-
-/* ===============================
-   GENERATED INFO
-   =============================== */
-.generated-info {
-  text-align: right;
-  font-size: 8px;
-  color: #666;
-  margin-top: 3px;
-  font-style: italic;
-}
-
-/* ===============================
-   SECTIONS
-   =============================== */
-.block-title {
-  display: none;
-}
-
 .section {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+}
+
+/* Only apply keep-together for smaller sections */
+.section.keep-together {
   page-break-inside: avoid;
 }
 
-.section-title {
-  font-size: 12px;
-  font-weight: 700;
-  margin-bottom: 6px;
-  color: #2c3e50;
-  padding: 6px 10px;
-  background: #f8f9fa;
-  border-left: 3px solid #3498db;
-  page-break-after: avoid;
-  display: flex;
-  justify-content: space-between;
+/* Ensure title row stays with at least the table header */
+.test-title-row + .tbl,
+.section-title + .tbl,
+.section-title + .radio-html {
+  page-break-before: avoid;
 }
 
 /* ===============================
-   RADIOLOGY HTML
+   TEST TITLE ROW
    =============================== */
-.radio-html {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 10px;
+.test-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5;
+  padding: 8px 12px;  /* Increased from 7px 10px */
+  background: var(--bg-light);
+  border-left: 2px solid var(--accent-orange);
+  border-bottom: 1px solid var(--border-light);
+  page-break-after: avoid;
+  page-break-inside: avoid;
+}
+
+.test-name-left {
+  font-size: 12px;  /* Increased from 11px */
+  font-weight: 700;
+  color: var(--text-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.trends-label-right {
+  font-size: 12px; 
+  font-weight: 600;
+  color: var(--text-gray);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ===============================
+   TABLE STYLES - COMPACT PROFESSIONAL
+   =============================== */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;  /* Increased from 8.5px */
+  margin-top: 10px;
+  margin: 0;
+  border: 1px solid var(--border-light);
+}
+
+/* Table Headers */
+.tbl thead {
+  background: var(--bg-light);
+}
+
+.tbl th {
+  padding: 7px 6px;  /* Increased from 6px 5px */
+  text-align: left;
+  border: 1px solid var(--border-light);
+  font-weight: 700;
+  font-size: 12px;  
+  color: var(--text-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.tbl .test-name-header {
+  width: 30%;
+}
+
+.tbl .result-header {
+  width: 18%;
+}
+
+.tbl .bio-ref-header {
+  width: 18%;
+}
+
+.tbl .trend-header {
+  font-weight: 600;
+  text-align: center;
+  font-size: 12px;  /* Increased from 8px */
+  width: 11.33%;
+  background: var(--bg-white);
+}
+
+/* Table Body */
+.tbl tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.tbl td {
+  padding: 6px 6px;  /* Increased from 5px 5px */
+  border: 1px solid var(--border-light);
+  font-size: 12px;  
+  vertical-align: middle;
+  color: var(--text-dark);
+}
+
+/* Parameter Name Cell */
+.param-name-cell {
+  vertical-align: top;
+  padding: 7px 6px !important;  /* Increased from 6px 5px */
+}
+
+.param-name {
+  font-weight: 600;
+  color: var(--text-dark);
+  margin-bottom: 2px;
+  font-size: 12px; 
+}
+
+.param-method {
+  font-size: 7.5px;  /* Increased from 7px */
+  color: var(--text-gray);
+  font-style: italic;
+  margin-top: 1px;
+}
+
+/* Result Cell */
+.tbl tbody td:nth-child(2) {
+  font-weight: 600;
+  font-size:12px; 
+}
+
+/* Reference Range */
+.ref-range {
+  color: var(--text-gray);
+  font-size: 11px;  /* Increased from 7.5px */
+  font-style: italic;
+}
+
+/* Trend Values */
+.trend-value {
+  text-align: center;
+  font-size: 11px;  
+  color: var(--text-gray);
+  background: #fafafa;
+  padding: 6px 4px;  /* Increased from 5px 4px */
+}
+
+/* Abnormal Values with Arrows */
+.abnormal-value {
+  color: #c53030;
+  font-weight: 700;
+  position: relative;
+}
+
+.abnormal-value::before {
+  content: '';
+  display: inline-block;
+  margin-right: 4px;
+  font-weight: 700;
+  color: #c53030;
+}
+
+.abnormal-value.high::before {
+  content: '▲';  /* Up arrow for high values */
+}
+
+.abnormal-value.low::before {
+  content: '▼';  /* Down arrow for low values */
+}
+
+/* ===============================
+   RADIOLOGY SECTION
+   =============================== */
+.section-title {
   font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: var(--text-dark);
+  padding: 7px 10px;
+  background: var(--bg-light);
+  border-left: 3px solid var(--accent-orange);
+  border-bottom: 1px solid var(--border-light);
+  page-break-after: avoid;
+  page-break-inside: avoid;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.radio-html {
+  border: 1px solid var(--border-light);
+  padding: 10px;
+  font-size: 9px;
   line-height: 1.5;
-  background: #fff;
+  background: var(--bg-white);
 }
 
 .ql-scope p {
-  margin: 5px 0;
+  margin: 4px 0;
+  color: var(--text-dark);
 }
 
 .ql-scope .ql-align-center {
   text-align: center;
 }
-/* Add these styles to your existing report.css */
-
-
-/* Section styling */
-.section {
-  margin-bottom: 16px;
-  page-break-inside: avoid;
-}
-
-.section-title {
-  font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 8px;
-  color: #2c3e50;
-  padding: 8px 12px;
-  background: #fff5e6;
-  border-left: 4px solid #ff9800;
-  page-break-after: avoid;
-}
 
 /* ===============================
-   SIGNATURES
+   SIGNATURES - COMPACT DESIGN
    =============================== */
 .sig-wrap {
   display: flex;
   gap: 12px;
-  margin-top: 20px;
+  margin-top: 16px;
+  padding: 12px 0;
   page-break-inside: avoid;
+  border-top: 1px solid var(--border-light);
 }
 
 .sig-card {
@@ -262,26 +399,76 @@ html, body {
 }
 
 .sig-img {
-  max-height: 55px;
+  max-height: 50px;
   width: auto;
   display: block;
-  margin: 0 auto 6px;
+  margin: 0 auto 5px;
 }
 
 .sig-name {
   font-weight: 700;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
   margin-top: 2px;
+  font-size: 9px;
+  color: var(--text-dark);
 }
 
 .sig-sub {
-  font-size: 11px;
-  opacity: 0.75;
+  font-size: 8px;
+  color: var(--text-gray);
+  margin-top: 1px;
 }
 
 .sig-card .muted {
-  color: #999;
+  color: var(--text-gray);
   font-style: italic;
+  font-size: 8px;
+}
+
+/* ===============================
+   CONDITIONS SECTION - COMPACT
+   =============================== */
+.conditions-section {
+  margin-top: 20px;
+  padding: 12px;
+  background: var(--bg-white);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  page-break-inside: avoid;
+}
+
+.conditions-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-dark);
+  text-align: center;
+  margin-bottom: 10px;
+  padding-bottom: 5px;
+  border-bottom: 2px solid var(--primary-blue);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.conditions-content {
+  font-size: 7.5px;
+  line-height: 1.5;
+  color: var(--text-gray);
+}
+
+.conditions-content p {
+  margin: 5px 0;
+  text-align: justify;
+  padding-left: 9px;
+  position: relative;
+}
+
+.conditions-content p::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--accent-orange);
+  font-weight: 700;
+  font-size: 9px;
 }
 
 /* ===============================
@@ -313,196 +500,32 @@ html, body {
   page-break-after: always;
 }
 
-
-/* Add/update these styles in your report.css */
-
 /* ===============================
-   NOVUS BRAND COLORS
+   UTILITY CLASSES
    =============================== */
-:root {
-  --novus-blue: #2c5f8d;
-  --novus-orange: #ff6b35;
-  --novus-light-blue: #e8f4f8;
-  --novus-cream: #fff9f0;
-}
-
-/* ===============================
-   TEST TITLE ROW (Test Name + Trends Label)
-   =============================== */
-.test-title-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  padding: 8px 12px;
-  background: var(--novus-cream);
-  border-left: 4px solid var(--novus-orange);
-  page-break-after: avoid;
-}
-
-.test-name-left {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--novus-blue);
-}
-
-.trends-label-right {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--novus-blue);
-  background: var(--novus-light-blue);
-  padding: 4px 12px;
-  border-radius: 4px;
-}
-
-/* ===============================
-   ENHANCED TABLE STYLES
-   =============================== */
-
-/* Table headers */
-.tbl .test-name-header {
-  background: var(--novus-cream);
-  font-weight: 700;
-  width: 28%;
-  vertical-align: top;
-  color: var(--novus-blue);
-
-}
-
-.tbl .result-header {
-  background: var(--novus-cream);
-  font-weight: 700;
-  width: 16%;
-  vertical-align: top;
-  color: var(--novus-blue);
-}
-
-.tbl .bio-ref-header {
-  background: var(--novus-cream);
-  font-weight: 700;
-  width: 16%;
-  vertical-align: top;
-  color: var(--novus-blue);
-}
-
-.tbl .trend-header {
-  background: var(--novus-light-blue);
-  font-weight: 600;
-  text-align: center;
-  font-size: 9px;
-  width: 13.33%;
-  vertical-align: top;
-  padding: 7px 5px;
-  color: var(--novus-blue);
-}
-
-/* Parameter name cell with method */
-.param-name-cell {
-  vertical-align: top;
-  padding: 8px 5px !important;
-
-  background: #fafafa;
-}
-
-.param-name {
-  font-weight: 600;
-  color: var(--novus-blue);
-  margin-bottom: 2px;
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.param-method {
-  font-size: 8px;
-  color: #666;
+.muted {
+  color: var(--text-gray);
   font-style: italic;
-  margin-top: 2px;
-  text-transform: lowercase;
 }
 
-/* Result and Ref Range cells */
-.tbl tbody td:nth-child(2) {
-  border-right: none;
-}
-
-
-
-/* Trend values */
-.trend-value {
+.text-center {
   text-align: center;
-  font-size: 9px;
-  color: #555;
-  background: var(--novus-light-blue);
-  padding: 6px 4px;
 }
 
-/* Reference range */
-.ref-range {
-  color: #666;
-  font-size: 9px;
-  padding: 6px 5px;
+.text-right {
+  text-align: right;
 }
 
-/* Abnormal values */
-.abnormal-value {
-  color: #d32f2f;
-  font-weight: 700;
-}
-
-/* Adjust existing table styles */
-.tbl {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 10px;
-  margin: 6px 0;
-  border: 1px solid #dee2e6;
-}
-
-.tbl th {
-  padding: 7px 5px;
-  text-align: left;
-  border: 1px solid #dee2e6;
-  font-weight: 600;
-  font-size: 10px;
-}
-
-.tbl td {
-  padding: 6px 5px;
-  border: 1px solid #dee2e6;
-  font-size: 10px;
-  vertical-align: middle;
-}
-
-.tbl tbody tr:hover {
-  background: #f8f9fa;
-}
-
-/* Section styling */
-.section {
-  margin-bottom: 16px;
-  page-break-inside: avoid;
-}
-
-/* Remove old section-title since we're using test-title-row now */
-.section-title {
-  display: none;
-}
-
-/* Patient strip with brand colors */
-.patient-strip {
-  border: 2px solid var(--novus-blue);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 6px 0 0 0;
-  background: #fff;
-  box-shadow: 0 2px 4px rgba(44, 95, 141, 0.1);
-}
-
-.ps-title {
-  font-weight: 700;
-  font-size: 12px;
-  margin-bottom: 6px;
-  color: var(--novus-blue);
-  padding-bottom: 3px;
-
+/* ===============================
+   PRINT OPTIMIZATIONS
+   =============================== */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  
+  .keep-together {
+    page-break-inside: avoid !important;
+  }
 }

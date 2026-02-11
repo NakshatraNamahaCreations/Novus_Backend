@@ -12,7 +12,15 @@ function fmtDate(d) {
   if (!d) return "—";
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return "—";
-  return dt.toLocaleString("en-IN");
+  
+  // Format: DD/MM/YYYY HH:MM
+  const day = String(dt.getDate()).padStart(2, '0');
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const year = dt.getFullYear();
+  const hours = String(dt.getHours()).padStart(2, '0');
+  const minutes = String(dt.getMinutes()).padStart(2, '0');
+  
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
 export function patientStripHtml({ order, patient, derived }) {
@@ -42,17 +50,12 @@ export function patientStripHtml({ order, patient, derived }) {
 
         <div><b>Report Ref:</b> ${esc(refId)}</div>
         <div><b>Referred By:</b> ${esc(doctor)}</div>
-
-
         <div><b>Center:</b> ${esc(order?.center?.name || "—")}</div>
-    
 
         <div><b>Collected:</b> ${esc(collectedAt)}</div>
         <div><b>Received:</b> ${esc(receivedAt)}</div>
         <div><b>Reported:</b> ${esc(reportedAt)}</div>
       </div>
-      
-     
     </div>
   `;
 }
