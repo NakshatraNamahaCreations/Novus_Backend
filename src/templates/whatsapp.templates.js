@@ -48,29 +48,23 @@ CENTER_CONFIRMATION: {
 
 
 
-  PAYMENT_CONFIRMED: {
-    templateId: process.env.WABRIDGE_PAYMENT_TEMPLATE_ID,
-    message: `Dear *{{1}},*
+PAYMENT_CONFIRMED: {
+  templateId: process.env.WABRIDGE_PAYMENT_TEMPLATE_ID,
+  message:
+    "Dear {{1}},\n\n" +
+    "Your payment with Novus Health Labs has been successfully received.\n\n" +
+    "You can download your invoice using the link below:\n" +
+    "{{2}}\n\n" +
+    "For any assistance, please contact us at {{3}}.\n\n" +
+    "Regards,\n" +
+    "Novus Health Labs",
+  mapVariables: ({ customerName, invoiceUrl, supportNumber }) => [
+    customerName,
+    invoiceUrl,
+    supportNumber,
+  ],
+},
 
-We have received your payment successfully.
-
-*Payment Details:*
-• Amount Paid: ₹*{{2}}*
-• Payment Mode: *{{3}}*
-• Transaction ID: *{{4}}*
-• Date: *{{5}}*
-
-Thank you for trusting *Novus Health Labs.*
-
-Wishing you good health.`,
-    mapVariables: ({
-      customerName,
-      amount,
-      paymentMode,
-      transactionId,
-      date,
-    }) => [customerName, amount, paymentMode, transactionId, date],
-  },
 
   SAMPLE_COLLECTED: {
     templateId: process.env.WABRIDGE_SAMPLE_COLLECTED_TEMPLATE_ID,

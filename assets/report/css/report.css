@@ -4,7 +4,7 @@
 :root {
   --header-h: 85px;
   --footer-h: 50px;
-  --patient-strip-h: 140px; /* ✅ Reduced from 130px */
+  --patient-strip-h: 140px;
   --pad-x: 14mm;
   
   /* Clean Professional Colors */
@@ -30,7 +30,7 @@
   
   @top {
     content: element(header-content);
-    vertical-align: top;   /* ✅ this removes the top gap */
+    vertical-align: top;
     padding: 0;
   }
 
@@ -40,9 +40,6 @@
     padding: 0;
   }
 }
-
-
-
 
 /* ===============================
    PAGE SETUP - FULL IMAGE PAGES
@@ -74,11 +71,14 @@ p {
 /* ===============================
    RUNNING ELEMENTS
    =============================== */
-.header-with-patient { position: running(header-content); margin: 0; padding: 0; }
+.header-with-patient { 
+  position: running(header-content); 
+  margin: 0; 
+  padding: 0; 
+}
 
 .page-footer {
   position: running(footer-content);
-
 }
 
 /* ===============================
@@ -87,7 +87,8 @@ p {
 .hdr {
   height: var(--header-h);
   width: 100%;
- margin: 0; padding: 0;
+  margin: 0; 
+  padding: 0;
 }
 
 .hf-img {
@@ -95,7 +96,6 @@ p {
   height: 100%;
   object-fit: cover;
   display: block;
-  background: rgb(37, 218, 13);
 }
 
 /* ===============================
@@ -330,7 +330,7 @@ p {
 .patient-strip {
   border: 1.5px solid var(--primary-blue);
   border-radius: 4px;
-  padding: 8px 12px; /* ✅ Reduced from 10px 14px */
+  padding: 8px 12px; 
   margin: 0;
   background: var(--bg-white);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -340,9 +340,9 @@ p {
 .ps-title {
   font-weight: 700;
   font-size: 11px;
-  margin-bottom: 6px; /* ✅ Reduced from 8px */
+  margin-bottom: 6px; 
   color: var(--primary-blue);
-  padding-bottom: 5px; /* ✅ Reduced from 6px */
+  padding-bottom: 5px; 
   border-bottom: 1px solid var(--border-light);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -351,9 +351,9 @@ p {
 .ps-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px 12px; /* ✅ Reduced vertical gap from 8px to 6px */
+  gap: 6px 12px; 
   font-size: 12px;
-  line-height: 1.4; /* ✅ Reduced from 1.5 */
+  line-height: 1.4;
 }
 
 .ps-grid div {
@@ -384,8 +384,8 @@ p {
   height: var(--footer-h);
   width: 100%;
   background: var(--bg-white);
-  margin: 0; /* ✅ Remove margin */
-  padding: 0; /* ✅ Remove padding */
+  margin: 0; 
+  padding: 0; 
 }
 
 /* ===============================
@@ -441,16 +441,8 @@ p {
   letter-spacing: 0.5px;
 }
 
-.trends-label-right {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--primary-blue);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
 /* ===============================
-   MAIN RESULTS TABLE - NO BORDER BY DEFAULT
+   MAIN RESULTS TABLE
    =============================== */
 .tbl {
   width: 100%;
@@ -458,12 +450,7 @@ p {
   font-size: 12px;
   margin: 0;
   background: var(--bg-white);
-  border: none; /* ✅ No border by default */
-}
 
-/* ✅ Only add border when table has trends */
-.tbl.with-trends {
-  /* border: 1px solid var(--border-light); */
 }
 
 .mt {
@@ -482,10 +469,10 @@ p {
   color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.4px;
-  /* border-bottom: 2px solid var(--border-light); */
+ 
 }
 
-/* ✅ IMPROVED 3-column layout with better proportions */
+/* 3-column layout */
 .tbl .test-name-header {
   width: 42%;
   padding-left: 14px;
@@ -501,37 +488,12 @@ p {
   text-align: left;
 }
 
-/* ✅ Trend headers alignment */
-.tbl .trend-header {
-  text-align: center;
-  width: auto;
-  min-width: 80px;
-  position: relative;
+.tbl tbody tr {
+ 
 }
 
-/* ✅ Add vertical line before first trend column */
-.tbl th.trend-header-group,
-.tbl th.trend-header-first,
-.tbl td.trend-value-first {
-  border-left: 3px solid var(--bg-white); /* ✅ Vertical separator */
-}
-
-/* ✅ Historical Trends label above trend dates */
-.tbl .trend-header-group {
-  text-align: center;
-  padding: 8px 12px;
-  background: var(--bg-light);
-
-  font-weight: 700;
-  font-size: 10px;
-  color: var(--primary-blue);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.tbl thead tr.trend-dates-row th {
-  padding: 8px 10px;
-  font-size: 10px;
+.tbl tbody tr:last-child {
+  border-bottom: none;
 }
 
 .tbl tbody tr:nth-child(even) {
@@ -547,25 +509,19 @@ p {
   font-size: 12px;
   vertical-align: middle;
   color: var(--text-dark);
-  
 }
 
-/* ✅ Better alignment for all columns */
 .tbl tbody td:nth-child(1) {
   padding-left: 14px;
 }
 
 .tbl tbody td:nth-child(2) {
   text-align: left;
+  font-weight: 600;
 }
 
 .tbl tbody td:nth-child(3) {
   text-align: left;
-}
-
-/* Trend value columns should be centered */
-.tbl tbody td.trend-value {
-  text-align: center;
 }
 
 /* Parameter Name Cell */
@@ -587,12 +543,6 @@ p {
   color: var(--text-gray);
   font-style: italic;
   margin-top: 3px;
-}
-
-/* Result Cell */
-.tbl tbody td:nth-child(2) {
-  font-weight: 600;
-  font-size: 12px;
 }
 
 /* Reference Range */
@@ -626,10 +576,10 @@ p {
 }
 
 /* ===============================
-   TRENDS SECTION - SEPARATE CLEAN TABLE
+   TRENDS SECTION - AT THE END
    =============================== */
 .trends-section {
-  margin-top: 18px;
+  margin-top: 28px;
   margin-bottom: 22px;
   page-break-inside: avoid;
 }
@@ -638,14 +588,14 @@ p {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 14px;
+  padding: 12px 14px;
   background: linear-gradient(135deg, #2c5f8d 0%, #3a7bb8 100%);
   border-radius: 6px 6px 0 0;
   margin-bottom: 0;
 }
 
 .trends-title {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: #ffffff;
   text-transform: uppercase;
@@ -657,17 +607,17 @@ p {
 
 .trends-title::before {
   content: "📊";
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .trends-subtitle {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.85);
   font-weight: 500;
 }
 
 .trends-table-wrapper {
- 
+  border: 1px solid var(--border-light);
   border-top: none;
   border-radius: 0 0 6px 6px;
   overflow: hidden;
@@ -686,9 +636,9 @@ p {
 }
 
 .trends-table th {
-  padding: 9px 12px;
+  padding: 10px 12px;
   text-align: left;
- 
+  
   font-weight: 700;
   font-size: 10px;
   color: var(--primary-blue);
@@ -705,16 +655,34 @@ p {
   width: 20%;
 }
 
+/* ✅ NEW: Test header rows in trends table */
+.trends-table tbody tr.trend-test-header {
+  background: var(--bg-light);
+  border-top: 2px solid var(--primary-blue);
+}
+
+.trends-table tbody tr.trend-test-header td {
+  padding: 8px 12px;
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--primary-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.trends-table tbody tr {
+
+}
 
 .trends-table tbody tr:last-child {
   border-bottom: none;
 }
 
-.trends-table tbody tr:nth-child(even) {
+.trends-table tbody tr:nth-child(even):not(.trend-test-header) {
   background: #fafafa;
 }
 
-.trends-table tbody tr:hover {
+.trends-table tbody tr:hover:not(.trend-test-header) {
   background: #f0f7ff;
 }
 
@@ -781,56 +749,78 @@ p {
 }
 
 /* ===============================
-   SIGNATURES - COMPACT DESIGN
+   SIGNATURES - PER TEST (3-COLUMN LAYOUT)
    =============================== */
 .sig-wrap {
-  display: flex;
-  gap: 12px;
-  margin-top: 24px;
-  padding: 16px 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 16px 12px;
   page-break-inside: avoid;
   border-top: 2px solid var(--border-light);
+  background: var(--bg-white);
+}
+
+.sig-col {
+  display: flex;
+  align-items: flex-start;
+}
+
+.sig-col.sig-left {
+  justify-content: flex-start;
+}
+
+.sig-col.sig-center {
+  justify-content: center;
+}
+
+.sig-col.sig-right {
+  justify-content: flex-end;
 }
 
 .sig-card {
-  flex: 1;
-  border: none !important;
-  border-radius: 0 !important;
-  padding: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  flex: 0 0 auto;
+  min-width: 120px;
+  max-width: 180px;
   text-align: center;
+  padding: 8px;
 }
 
-.sig-title {
-  display: none !important;
+.sig-card.sig-empty {
+  visibility: hidden;
 }
 
 .sig-img {
-  max-height: 50px;
+  max-height: 55px;
+  max-width: 150px;
   width: auto;
+  height: auto;
   display: block;
-  margin: 0 auto 6px;
+  margin: 0 auto 8px;
+  object-fit: contain;
 }
 
 .sig-name {
   font-weight: 700;
-  letter-spacing: 0.3px;
-  margin-top: 3px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dark);
+  letter-spacing: 0.3px;
+  margin-top: 4px;
+  text-transform: uppercase;
 }
 
 .sig-sub {
   font-size: 9px;
   color: var(--text-gray);
   margin-top: 2px;
+  font-style: italic;
 }
 
 .sig-card .muted {
   color: var(--text-gray);
   font-style: italic;
-  font-size: 8px;
+  font-size: 9px;
 }
 
 /* ===============================

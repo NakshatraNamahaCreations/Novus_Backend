@@ -1,7 +1,6 @@
 // templates/buildHtml.js
 import { patientStripHtml } from "./partials/patientStrip.js";
 import { resultsTableHtml } from "./partials/resultsTable.js";
-import { signaturesHtml } from "./partials/signatures.js";
 
 function esc(s) {
   return String(s ?? "")
@@ -23,8 +22,6 @@ function buildIndexPage({ patient, order, indexItems }) {
 
   return `
     <div class="report-index-page break-after">
-      
-
       <div class="idx-title">Report Index</div>
       <div class="idx-hint">Click on any test name to navigate directly to that section</div>
 
@@ -77,12 +74,11 @@ function buildIndexPage({ patient, order, indexItems }) {
 }
 
 export function buildHtml({ reportData, variant = "letterhead" }) {
-  const { order, patient, layout, results, signatures, derived, trendMap } =
-    reportData;
+  const { order, patient, layout, results, derived, trendMap } = reportData;
 
   const patientStripContent = patientStripHtml({ order, patient, derived });
 
-  const sigContent = signaturesHtml({ signatures });
+  // ✅ REMOVED: Global signatures section (now each test has its own)
 
   const conditionsSection = `
     <div class="conditions-section keep-together">
@@ -145,12 +141,11 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
     <img class="hf-img" src="images/_footer.png" alt="Footer" />
   </div>
 
-  <!-- ✅ Index Page must be the first content page after front image -->
+  <!-- ✅ Index Page + Results (each test now has its own signatures) -->
   <div class="page">
     <div class="content">
       ${indexPage}
       ${resultsContent}
-      ${sigContent}
       ${conditionsSection}
     </div>
   </div>
@@ -171,7 +166,7 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
     `;
   }
 
-  // unchanged: letterhead/plain can keep your current return
+  // ✅ letterhead/plain variants - each test now has signatures
   const resultsContent = resultsTableHtml({ results, trendMap });
 
   if (variant === "letterhead") {
@@ -196,7 +191,6 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
   <div class="page">
     <div class="content">
       ${resultsContent}
-      ${sigContent}
       ${conditionsSection}
     </div>
   </div>
@@ -228,7 +222,6 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
   <div class="page">
     <div class="content">
       ${resultsContent}
-      ${sigContent}
       ${conditionsSection}
     </div>
   </div>

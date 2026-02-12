@@ -91,6 +91,13 @@ function buildOrderReportWhere(query) {
     const d = dayjs(date).startOf("day");
     where.date = { gte: d.toDate(), lt: d.add(1, "day").toDate() };
   }
+  if (query.orderId && String(query.orderId).trim()) {
+  const idNum = Number(String(query.orderId).replace(/\D/g, ""));
+  if (!Number.isNaN(idNum) && idNum > 0) {
+    where.id = idNum;
+  }
+}
+
 
   if (fromDate && toDate && fromDate !== "" && toDate !== "") {
     where.date = {
@@ -1586,15 +1593,22 @@ export const getAllOrders = async (req, res) => {
       paymentStatus = "",
       fromDate,
       toDate,
+
+      // ✅ NEW FILTERS
+      refCenterId = "",
+      diagnosticCenterId = "",
+      centerId = "",
+      source = "",
     } = req.query;
+
+   
 
     page = Number(page);
     limit = Number(limit);
     const skip = (page - 1) * limit;
 
     const user = req.user;
-
-    let where = {};
+    const where = {};
 
     // ✅ ROLE BASED FILTER (diagnosticCenter restriction for admin)
     if (user?.role === "admin") {
@@ -1603,7 +1617,6 @@ export const getAllOrders = async (req, res) => {
         : [];
 
       if (diagnosticCenterIds.length > 0) {
-        // ✅ filter orders by diagnosticCenterId
         where.diagnosticCenterId = { in: diagnosticCenterIds };
       } else {
         return res.status(200).json({
@@ -1613,14 +1626,14 @@ export const getAllOrders = async (req, res) => {
       }
     }
 
-    // ✅ Default = TODAY ONLY (if not passed)
+    // ✅ Default TODAY ONLY if not passed
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     if (!fromDate) fromDate = today.toISOString().split("T")[0];
     if (!toDate) toDate = today.toISOString().split("T")[0];
 
-    // ✅ Search filter
+    // ✅ Search
     if (search) {
       const s = String(search).trim();
       const asNumber = Number(s);
@@ -1636,12 +1649,12 @@ export const getAllOrders = async (req, res) => {
       ];
     }
 
-    // ✅ Order status filter
+    // ✅ Status
     if (status && status !== "all") {
       where.status = status;
     }
 
-    // ✅ Payment status filter
+    // ✅ Payment status
     if (paymentStatus === "pending") {
       where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED"] };
     }
@@ -1649,7 +1662,7 @@ export const getAllOrders = async (req, res) => {
       where.paymentStatus = { in: ["CAPTURED", "COMPLETED", "paid"] };
     }
 
-    // ✅ Date range filter (Order date)
+    // ✅ Date range filter
     if (fromDate && toDate) {
       const startDate = new Date(fromDate);
       startDate.setHours(0, 0, 0, 0);
@@ -1658,6 +1671,29 @@ export const getAllOrders = async (req, res) => {
       endDate.setHours(23, 59, 59, 999);
 
       where.date = { gte: startDate, lte: endDate };
+    }
+
+    // ✅ NEW: Ref Center filter
+    if (refCenterId && refCenterId !== "all") {
+      const id = Number(refCenterId);
+      if (Number.isFinite(id)) where.refCenterId = id;
+    }
+
+    // ✅ NEW: Venue filter (diagnostic center)
+    if (diagnosticCenterId && diagnosticCenterId !== "all") {
+      const id = Number(diagnosticCenterId);
+      if (Number.isFinite(id)) where.diagnosticCenterId = id;
+    }
+
+    // ✅ NEW: B2B Center filter (center)
+    if (centerId && centerId !== "all") {
+      const id = Number(centerId);
+      if (Number.isFinite(id)) where.centerId = id;
+    }
+
+    // ✅ NEW: Source filter
+    if (source && source !== "all") {
+      where.source = { contains: String(source), mode: "insensitive" };
     }
 
     const orders = await prisma.order.findMany({
@@ -1683,22 +1719,24 @@ export const getAllOrders = async (req, res) => {
         isHomeSample: true,
         source: true,
 
+        // ✅ Ref Center
+        refCenter: { select: { id: true, name: true } },
+
         // ✅ patient
         patient: {
           select: { id: true, fullName: true, email: true, contactNo: true },
         },
 
-        // ✅ vendor/slot/address
         vendor: { select: { id: true, name: true, email: true } },
         slot: { select: { id: true, name: true, startTime: true, endTime: true } },
         address: { select: { id: true, address: true, pincode: true, city: true } },
 
-        // ✅ OLD center (keep if you still want)
+        // ✅ B2B center
         center: {
           select: { id: true, name: true, contactName: true, address: true, mobile: true },
         },
 
-        // ✅ NEW: diagnostic center data
+        // ✅ venue (diagnostic center)
         diagnosticCenter: {
           select: { id: true, name: true, address: true, pincode: true, cityId: true },
         },
@@ -2585,6 +2623,7 @@ export const addOrderPayment = async (req, res) => {
       referenceId,
       gatewayResponse,
       capturedAmount,
+      diagnosticCenterId,
       ipAddress,
     } = req.body;
 
@@ -2652,6 +2691,7 @@ export const addOrderPayment = async (req, res) => {
         vendorId: order.vendorId,
         centerId: order.centerId,
         paymentId,
+        diagnosticCenterId,
         paymentMethod: paymentMode?.toUpperCase(), // Prisma ENUM
 
         paymentStatus: "COMPLETED",
@@ -2889,6 +2929,7 @@ export const getOrderReports = async (req, res) => {
       diagnosticCenterId,
       status,
       source,
+      orderId,
       city, // ✅ NEW
       pincode, // ✅ NEW
       page = 1,
@@ -2908,6 +2949,13 @@ export const getOrderReports = async (req, res) => {
         lt: d.add(1, "day").toDate(),
       };
     }
+// ✅ ORDER ID FILTER
+if (orderId && String(orderId).trim()) {
+  const idNum = Number(String(orderId).replace(/\D/g, ""));
+  if (!Number.isNaN(idNum) && idNum > 0) {
+    where.id = idNum; // ✅ Prisma order.id
+  }
+}
 
     if (fromDate && toDate && fromDate !== "" && toDate !== "") {
       where.date = {

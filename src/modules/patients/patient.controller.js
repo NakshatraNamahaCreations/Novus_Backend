@@ -364,6 +364,21 @@ export const addFamilyMember = async (req, res) => {
     const { primaryId } = req.params;
     const { fullName, dob, gender, email, bloodType, relationship, contactNo } =
       req.body;
+
+       // (Optional) quick friendly check BEFORE create (gives nicer message)
+    const existing = await prisma.patient.findUnique({
+      where: { contactNo: String(contactNo) },
+      select: { id: true,  contactNo: true },
+    });
+
+    if (existing) {
+      
+      return res.status(409).json({
+        success: false,
+        message: "This number is already used",
+        data: existing, // optional: remove if you don't want to send info
+      });
+    }
  
     const data = {
       fullName,

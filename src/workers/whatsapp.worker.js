@@ -28,9 +28,7 @@ const extractTestNames = (order) => {
       }
     }
 
-    return names.size > 0
-      ? Array.from(names).join(", ")
-      : "As per prescription";
+    return names.size > 0 ? Array.from(names).join(", ") : "As per prescription";
   } catch {
     return "As per prescription";
   }
@@ -61,8 +59,6 @@ const extractTestNamesForPatient = (order, patientId) => {
 
 const formatOrderDateTime = (order) => {
   const dateStr = order?.date ? dayjs(order.date).format("DD MMM YYYY") : "-";
-
-  // Prefer centerSlot for center visit (if available), else fallback to slot
   const s = order?.centerSlot || order?.slot;
 
   if (s?.startTime && s?.endTime) {
@@ -90,7 +86,7 @@ const fetchOrder = async (orderId) => {
         centerSlot: true,
         orderMembers: {
           include: {
-            patient: true, // ✅ important for patient-wise send
+            patient: true,
             orderMemberPackages: {
               include: {
                 test: { select: { name: true } },
@@ -109,14 +105,9 @@ const fetchOrder = async (orderId) => {
 };
 
 /* ----------------------------------
-   Fetch patient-wise report URL (based on your model)
-   pdfType: "plain" | "letterhead" | "full"
+   Fetch patient-wise report URL
 ---------------------------------- */
-const fetchPatientReportUrl = async ({
-  orderId,
-  patientId,
-  pdfType = "full",
-}) => {
+const fetchPatientReportUrl = async ({ orderId, patientId, pdfType = "full" }) => {
   const row = await prisma.patientReportPdf.findUnique({
     where: {
       orderId_patientId: {
@@ -139,246 +130,275 @@ const fetchPatientReportUrl = async ({
    Send REPORT message (ORDER-level reportUrl)
 ---------------------------------- */
 const handleSendReport = async (order) => {
-  const reportLink = order.reportUrl;
-  if (!reportLink) throw new Error("Report URL not found yet on order");
+  try {
+    const reportLink = order.reportUrl;
+    if (!reportLink) throw new Error("Report URL not found yet on order");
 
-  const testsStr = extractTestNames(order);
-  const tpl = WHATSAPP_TEMPLATES.REPORT_SHARED_NOVUS;
+    const testsStr = extractTestNames(order);
+    const tpl = WHATSAPP_TEMPLATES.REPORT_SHARED_NOVUS;
 
-  const variables = tpl.mapVariables({
-    customerName: safe(order.patient?.fullName, "Customer"),
-    tests: safe(testsStr, "As per prescription"),
-    reportDate: dayjs().format("DD MMM YYYY"),
-    reportLink,
-  });
+    const variables = tpl.mapVariables({
+      customerName: safe(order.patient?.fullName, "Customer"),
+      tests: safe(testsStr, "As per prescription"),
+      reportDate: dayjs().format("DD MMM YYYY"),
+      reportLink,
+    });
 
-  await WhatsAppMessage({
-    phone: `${order?.patient?.contactNo}`,
-    templateId: tpl.templateId,
-    message: tpl.message,
-    variables,
-  });
+    await WhatsAppMessage({
+      phone: `${order?.patient?.contactNo}`,
+      templateId: tpl.templateId,
+      message: tpl.message,
+      variables,
+    });
 
-  return { success: true, type: "order-report" };
+    return { success: true, type: "order-report" };
+  } catch (err) {
+    console.error("handleSendReport error:", err);
+    throw err;
+  }
 };
 
 const handleSendCenterConfirmation = async (order) => {
+  try {
+    // Only for center visit orders
+    if (order?.isHomeSample) return { skipped: true, reason: "home-sample" };
+    if (!order?.centerId) return { skipped: true, reason: "no-centerId" };
 
-  console.log("order?.isHomeSample",order?.isHomeSample)
-  console.log("!order?.centerId",!order?.centerId,order?.centerId)
+    const centerPhone = order?.center?.mobile;
+    if (!centerPhone) return { skipped: true, reason: "center mobile missing" };
 
-  // Only for center visit orders
-  if (order?.isHomeSample) return { skipped: true, reason: "home-sample" };
-  if (!order?.centerId) return { skipped: true, reason: "no-centerId" };
+    const tpl = WHATSAPP_TEMPLATES.CENTER_CONFIRMATION;
+    const testsStr = extractTestNames(order);
+    const dateTime = formatOrderDateTime(order);
 
-  const centerPhone = order?.center?.mobile;
+    const variables = tpl.mapVariables({
+      centerName: safe(order.center?.contactName || order.center?.name, "Center"),
+      patientName: safe(order.patient?.fullName, "Patient"),
+      tests: safe(testsStr, "As per prescription"),
+      dateTime: safe(dateTime, "-"),
+    });
 
-  console.log("centerPhone",centerPhone)
-  if (!centerPhone) {
-    return { skipped: true, reason: "center mobile missing" };
+    await WhatsAppMessage({
+      phone: `${centerPhone}`,
+      templateId: tpl.templateId,
+      message: tpl.message,
+      variables,
+    });
+
+    return { success: true, type: "center-confirmation" };
+  } catch (err) {
+    console.error("handleSendCenterConfirmation error:", err);
+    throw err;
   }
-
-  const tpl = WHATSAPP_TEMPLATES.CENTER_CONFIRMATION;
-
-  const testsStr = extractTestNames(order);
-  const dateTime = formatOrderDateTime(order);
-
-  const variables = tpl.mapVariables({
-    centerName: safe(order.center?.contactName || order.center?.name, "Center"),
-    patientName: safe(order.patient?.fullName, "Patient"),
-    tests: safe(testsStr, "As per prescription"),
-    dateTime: safe(dateTime, "-"),
-  });
-
-  console.log("variables",variables)
-  await WhatsAppMessage({
-    phone: `${centerPhone}`,
-    templateId: tpl.templateId,
-    message: tpl.message,
-    variables,
-  });
-
-  return { success: true, type: "center-confirmation" };
 };
 
 /* ----------------------------------
    Send PATIENT-wise report
 ---------------------------------- */
-const handleSendPatientReport = async (
-  order,
-  { patientId, pdfType = "full" },
-) => {
-  if (!patientId) throw new Error("Missing patientId");
+const handleSendPatientReport = async (order, { patientId, pdfType = "full" }) => {
+  try {
+    if (!patientId) throw new Error("Missing patientId");
 
-  const member = (order.orderMembers || []).find(
-    (m) => Number(m.patientId) === Number(patientId),
-  );
-
-  const patient = member?.patient || order.patient;
-  if (!patient?.contactNo) throw new Error("Patient phone not found");
-
-  const reportLink = await fetchPatientReportUrl({
-    orderId: order.id,
-    patientId,
-    pdfType,
-  });
-
-  if (!reportLink) {
-    throw new Error(
-      `Patient report not ready (orderId=${order.id}, patientId=${patientId}, pdfType=${pdfType})`,
+    const member = (order.orderMembers || []).find(
+      (m) => Number(m.patientId) === Number(patientId),
     );
+
+    const patient = member?.patient || order.patient;
+    if (!patient?.contactNo) throw new Error("Patient phone not found");
+
+    const reportLink = await fetchPatientReportUrl({
+      orderId: order.id,
+      patientId,
+      pdfType,
+    });
+
+    if (!reportLink) {
+      throw new Error(
+        `Patient report not ready (orderId=${order.id}, patientId=${patientId}, pdfType=${pdfType})`,
+      );
+    }
+
+    const testsStr = extractTestNamesForPatient(order, patientId);
+    const tpl = WHATSAPP_TEMPLATES.REPORT_SHARED_NOVUS;
+
+    const variables = tpl.mapVariables({
+      customerName: safe(patient?.fullName, "Customer"),
+      tests: safe(testsStr, "As per prescription"),
+      reportDate: dayjs().format("DD MMM YYYY"),
+      reportLink,
+    });
+
+    await WhatsAppMessage({
+      phone: `${patient.contactNo}`,
+      templateId: tpl.templateId,
+      message: tpl.message,
+      variables,
+    });
+
+    return { success: true, type: "patient-report", pdfType };
+  } catch (err) {
+    console.error("handleSendPatientReport error:", err);
+    throw err;
   }
-
-  const testsStr = extractTestNamesForPatient(order, patientId);
-  const tpl = WHATSAPP_TEMPLATES.REPORT_SHARED_NOVUS;
-
-  const variables = tpl.mapVariables({
-    customerName: safe(patient?.fullName, "Customer"),
-    tests: safe(testsStr, "As per prescription"),
-    reportDate: dayjs().format("DD MMM YYYY"),
-    reportLink,
-  });
-
-  await WhatsAppMessage({
-    phone: `${patient.contactNo}`,
-    templateId: tpl.templateId,
-    message: tpl.message,
-    variables,
-  });
-
-  return { success: true, type: "patient-report", pdfType };
 };
 
 /* ----------------------------------
    Welcome new patient (no orderId needed)
 ---------------------------------- */
 const handleWelcomeNewPatient = async ({ contactNo, patientName }) => {
-  const tpl = WHATSAPP_TEMPLATES.WELCOME_NEW_PATIENT;
+  try {
+    const tpl = WHATSAPP_TEMPLATES.WELCOME_NEW_PATIENT;
 
-  const variables = tpl.mapVariables({
-    customerName: safe(patientName, "Customer"),
-    supportNumber: process.env.SUPPORT_PHONE || "8050065924",
-  });
-
-  await WhatsAppMessage({
-    phone: `${contactNo}`,
-    templateId: tpl.templateId,
-    message: tpl.message,
-    variables,
-  });
-
-  return { success: true, type: "welcome-new-patient" };
-};
-
-/* ----------------------------------
-   ✅ NEW: Send only ORDER CONFIRMED
-   job.name: "whatsapp.sendOrderConfirmed"
----------------------------------- */
-const handleSendOrderConfirmed = async (order) => {
-  const testsStr = extractTestNames(order);
-
-  const tpl = order?.isHomeSample
-    ? WHATSAPP_TEMPLATES.ORDER_CONFIRMED
-    : WHATSAPP_TEMPLATES.CENTER_VISIT;
-
-  let variables = [];
-
-  if (order?.isHomeSample) {
-    variables = tpl.mapVariables({
-      customerName: safe(order.patient?.fullName, "Customer"),
-      bookingId: safe(order.id),
-      tests: safe(testsStr),
-      collectionDate: order?.date
-        ? dayjs(order.date).format("DD MMM YYYY")
-        : "-",
-      timeSlot: order?.slot
-        ? `${dayjs(order.slot.startTime).format("hh:mm A")} - ${dayjs(
-            order.slot.endTime,
-          ).format(
-            "hh:mm A",
-          )}${order.slot?.name ? ` (${order.slot.name})` : ""}`
-        : "-",
-      address: [
-        order.address?.address,
-        order.address?.landmark,
-        order.address?.city?.name || order.address?.city,
-        order.address?.state,
-        order.address?.pincode,
-      ]
-        .filter(Boolean)
-        .join(", "),
+    const variables = tpl.mapVariables({
+      customerName: safe(patientName, "Customer"),
       supportNumber: process.env.SUPPORT_PHONE || "8050065924",
     });
-  } else {
-    const centerAddress = [
-      order.center?.address,
-      order.center?.city?.name || order.center?.city,
-      order.center?.pincode,
-    ]
-      .filter(Boolean)
-      .join(", ");
 
-    variables = tpl.mapVariables({
-      customerName: safe(order.patient?.fullName, "Customer"),
-      tests: safe(testsStr, "As per prescription"),
-      centerName: safe(
-        order.center?.name || order.address?.centerName,
-        "Novus Health Labs",
-      ),
-      centerAddress: safe(centerAddress, "N/A"),
+    await WhatsAppMessage({
+      phone: `${contactNo}`,
+      templateId: tpl.templateId,
+      message: tpl.message,
+      variables,
     });
+
+    return { success: true, type: "welcome-new-patient" };
+  } catch (err) {
+    console.error("handleWelcomeNewPatient error:", err);
+    throw err;
   }
-
-  // ✅ 1) Send to customer
-  await WhatsAppMessage({
-    phone: order.patient?.contactNo,
-    templateId: tpl.templateId,
-    message: tpl.message,
-    variables,
-  });
-
-  // ✅ 2) ALSO send to center (only if isHomeSample=false and centerId exists)
-  await handleSendCenterConfirmation(order);
-
-  return {
-    success: true,
-    type: order?.isHomeSample ? "order-confirmed" : "center-visit",
-  };
 };
 
 /* ----------------------------------
-   ✅ NEW: Send only PAYMENT CONFIRMED
+   Send ORDER CONFIRMED
+---------------------------------- */
+const handleSendOrderConfirmed = async (order) => {
+  try {
+    const testsStr = extractTestNames(order);
+
+    const tpl = order?.isHomeSample
+      ? WHATSAPP_TEMPLATES.ORDER_CONFIRMED
+      : WHATSAPP_TEMPLATES.CENTER_VISIT;
+
+    let variables = [];
+
+    if (order?.isHomeSample) {
+      variables = tpl.mapVariables({
+        customerName: safe(order.patient?.fullName, "Customer"),
+        bookingId: safe(order.id),
+        tests: safe(testsStr),
+        collectionDate: order?.date ? dayjs(order.date).format("DD MMM YYYY") : "-",
+        timeSlot: order?.slot
+          ? `${dayjs(order.slot.startTime).format("hh:mm A")} - ${dayjs(
+              order.slot.endTime,
+            ).format("hh:mm A")}${order.slot?.name ? ` (${order.slot.name})` : ""}`
+          : "-",
+        address: [
+          order.address?.address,
+          order.address?.landmark,
+          order.address?.city?.name || order.address?.city,
+          order.address?.state,
+          order.address?.pincode,
+        ]
+          .filter(Boolean)
+          .join(", "),
+        supportNumber: process.env.SUPPORT_PHONE || "8050065924",
+      });
+    } else {
+      const centerAddress = [
+        order.center?.address,
+        order.center?.city?.name || order.center?.city,
+        order.center?.pincode,
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      variables = tpl.mapVariables({
+        customerName: safe(order.patient?.fullName, "Customer"),
+        tests: safe(testsStr, "As per prescription"),
+        centerName: safe(
+          order.center?.name || order.address?.centerName,
+          "Novus Health Labs",
+        ),
+        centerAddress: safe(centerAddress, "N/A"),
+      });
+    }
+
+    // ✅ Send to customer
+    await WhatsAppMessage({
+      phone: order.patient?.contactNo,
+      templateId: tpl.templateId,
+      message: tpl.message,
+      variables,
+    });
+
+    // ✅ Send to center if needed
+    await handleSendCenterConfirmation(order);
+
+    return { success: true, type: order?.isHomeSample ? "order-confirmed" : "center-visit" };
+  } catch (err) {
+    console.error("handleSendOrderConfirmed error:", err);
+    throw err;
+  }
+};
+
+/* ----------------------------------
+   ✅ PAYMENT CONFIRMED (uses Payment.invoiceUrl)
    job.name: "whatsapp.sendPaymentConfirmed"
 ---------------------------------- */
-const handleSendPaymentConfirmed = async (order) => {
-  const tpl = WHATSAPP_TEMPLATES.PAYMENT_CONFIRMED;
+const handleSendPaymentConfirmed = async ({ paymentId }) => {
+  try {
+    const payment = await prisma.payment.findUnique({
+      where: { paymentId },
+      select: {
+        invoiceUrl: true,
+        patient: {
+          select: {
+            fullName: true,
+            contactNo: true,
+          },
+        },
+      },
+    });
 
-  const variables = tpl.mapVariables({
-    customerName: safe(order.patient?.fullName, "Customer"),
-    amount: safe(order.finalAmount),
-    paymentMode: safe(order.paymentMode, "Online"),
-    transactionId: safe(order.merchantOrderId, order.id),
-    date: dayjs(order.createdAt || new Date()).format("DD MMM YYYY"),
-  });
+    if (!payment) throw new Error(`Payment not found for paymentId: ${paymentId}`);
+    if (!payment.invoiceUrl) throw new Error("Invoice URL not ready yet");
 
-  await WhatsAppMessage({
-    phone: order.patient?.contactNo,
-    templateId: tpl.templateId,
-    message: tpl.message,
-    variables,
-  });
+    const tpl = WHATSAPP_TEMPLATES.PAYMENT_CONFIRMED;
 
-  return { success: true, type: "payment-confirmed" };
+    const variables = tpl.mapVariables({
+      customerName: safe(payment.patient?.fullName, "Customer"),
+      invoiceUrl: safe(payment.invoiceUrl, "-"),
+      supportNumber: process.env.SUPPORT_PHONE || "8050065924",
+    });
+
+    await WhatsAppMessage({
+      phone: `${payment.patient?.contactNo}`,
+      templateId: tpl.templateId,
+      message: tpl.message,
+      variables,
+    });
+
+    return { success: true, type: "payment-confirmed" };
+  } catch (err) {
+    console.error("handleSendPaymentConfirmed error:", err);
+    throw err;
+  }
 };
 
+
 /* ----------------------------------
-   Existing: Send ORDER + PAYMENT (now uses the 2 new handlers)
-   job.name: "whatsapp.sendOrderAndPayment"
+   Existing: Send ORDER + PAYMENT
 ---------------------------------- */
 const handleSendOrderAndPayment = async (order) => {
-  await handleSendOrderConfirmed(order);
-  await handleSendPaymentConfirmed(order);
-  return { success: true, type: "order+payment" };
+  try {
+    await handleSendOrderConfirmed(order);
+    // If you still want payment from order-level, keep it separate;
+    // BUT for invoiceUrl-based payment, use paymentId job instead.
+    return { success: true, type: "order+payment" };
+  } catch (err) {
+    console.error("handleSendOrderAndPayment error:", err);
+    throw err;
+  }
 };
 
 /* ----------------------------------
@@ -411,7 +431,7 @@ new Worker(
             patientName: job.data.patientName,
           });
 
-        // ✅ NEW: separate messages
+        // ✅ separate order confirmed
         case "whatsapp.sendOrderConfirmed": {
           const { orderId } = job.data || {};
           if (!orderId) throw new Error("Missing orderId");
@@ -420,15 +440,14 @@ new Worker(
           return await handleSendOrderConfirmed(order);
         }
 
+        // ✅ PAYMENT CONFIRMED after invoiceUrl (uses paymentId)
         case "whatsapp.sendPaymentConfirmed": {
-          const { orderId } = job.data || {};
-          if (!orderId) throw new Error("Missing orderId");
-          const order = await fetchOrder(orderId);
-          if (!order) throw new Error("Order not found");
-          return await handleSendPaymentConfirmed(order);
+          const { paymentId } = job.data || {};
+          if (!paymentId) throw new Error("Missing paymentId");
+          return await handleSendPaymentConfirmed({ paymentId });
         }
 
-        // ✅ existing jobs (need orderId)
+        // ✅ existing jobs that need orderId
         case "whatsapp.sendReport":
         case "whatsapp.sendPatientReport":
         case "whatsapp.sendOrderAndPayment":
@@ -439,8 +458,7 @@ new Worker(
           const order = await fetchOrder(orderId);
           if (!order) throw new Error("Order not found");
 
-          if (job.name === "whatsapp.sendReport")
-            return await handleSendReport(order);
+          if (job.name === "whatsapp.sendReport") return await handleSendReport(order);
 
           if (job.name === "whatsapp.sendPatientReport") {
             return await handleSendPatientReport(order, {
@@ -449,7 +467,6 @@ new Worker(
             });
           }
 
-          // default (and whatsapp.sendOrderAndPayment)
           return await handleSendOrderAndPayment(order);
         }
       }

@@ -65,14 +65,161 @@ function slugify(s) {
     .replace(/(^-|-$)/g, "");
 }
 
-/**
- * ✅ Updated:
- * - Adds anchors for each test section (Radiology + Pathology)
- * - Collects indexItems for TOC/Index page
- * - Supports returnMeta to return { html, indexItems }
- * - ✅ Adds 'with-trends' class to table when trends exist
- */
+// ✅ Generate signature HTML for a single test
+function generateTestSignatures(result) {
+  const signatures = {
+    left: null,
+    center: null,
+    right: null
+  };
+  
+  // Map signatures to their positions
+  if (result.leftSignature) {
+    signatures.left = result.leftSignature;
+  }
+  
+  if (result.centerSignature) {
+    signatures.center = result.centerSignature;
+  }
+  
+  if (result.rightSignature) {
+    signatures.right = result.rightSignature;
+  }
+  
+  // Check if we have any signatures
+  if (!signatures.left && !signatures.center && !signatures.right) {
+    return '';
+  }
+  
+  const renderSignature = (sig) => {
+    if (!sig) {
+      return '<div class="sig-card sig-empty"></div>';
+    }
+    
+    return `
+      <div class="sig-card">
+        ${sig.signatureImg 
+          ? `<img class="sig-img" src="${esc(sig.signatureImg)}" alt="Signature" />`
+          : '<div class="muted">No signature</div>'
+        }
+        <div class="sig-name">${esc(sig.name)}</div>
+        ${sig.qualification ? `<div class="sig-sub">${esc(sig.qualification)}</div>` : ''}
+        ${sig.designation ? `<div class="sig-sub">${esc(sig.designation)}</div>` : ''}
+      </div>
+    `;
+  };
+  
+  return `
+    <div class="sig-wrap">
+      <div class="sig-col sig-left">
+        ${renderSignature(signatures.left)}
+      </div>
+      <div class="sig-col sig-center">
+        ${renderSignature(signatures.center)}
+      </div>
+      <div class="sig-col sig-right">
+        ${renderSignature(signatures.right)}
+      </div>
+    </div>
+  `;
+}
+
+// ✅ NEW: Generate ALL trends at the end
+function generateAllTrendsSection(pathologyResults, trendMap) {
+  if (!trendMap || pathologyResults.length === 0) return '';
+  
+  // Collect all tests that have trends
+  const testsWithTrends = [];
+  
+  pathologyResults.forEach(result => {
+    const testId = result?.testId ?? result?.test?.id;
+    const testName = result?.test?.name || "Lab Test";
+    const paramResults = result.parameterResults || [];
+    
+    // Check if this test has any trends
+    const hasTrends = paramResults.some((pr) => {
+      const trends = trendMap.get(`${testId}:${pr.parameterId}`) || [];
+      return trends.some((t) => t.value && t.value !== "—");
+    });
+    
+    if (hasTrends) {
+      testsWithTrends.push({
+        testName,
+        testId,
+        paramResults
+      });
+    }
+  });
+  
+  if (testsWithTrends.length === 0) return '';
+  
+  // Get trend dates from first test's first parameter
+  let trendDates = ["", "", ""];
+  if (testsWithTrends[0]) {
+    const firstParam = testsWithTrends[0].paramResults[0];
+    if (firstParam) {
+      const trends = trendMap.get(`${testsWithTrends[0].testId}:${firstParam.parameterId}`) || [];
+      trendDates = trends.map((t) => formatDate(t.date));
+    }
+  }
+  
+  // Generate rows for all tests
+  const allRows = testsWithTrends.map(test => {
+    const rows = test.paramResults.map((pr) => {
+      const pname = pr?.parameter?.name ?? pr?.parameterName ?? "";
+      const trends = trendMap.get(`${test.testId}:${pr.parameterId}`) || [];
+      
+      const trend1 = trends[0]?.value || "—";
+      const trend2 = trends[1]?.value || "—";
+      const trend3 = trends[2]?.value || "—";
+      
+      return `
+        <tr>
+          <td>${esc(pname)}</td>
+          <td class="trend-value-cell ${trend1 === '—' ? 'trend-no-data' : ''}">${esc(trend1)}</td>
+          <td class="trend-value-cell ${trend2 === '—' ? 'trend-no-data' : ''}">${esc(trend2)}</td>
+          <td class="trend-value-cell ${trend3 === '—' ? 'trend-no-data' : ''}">${esc(trend3)}</td>
+        </tr>
+      `;
+    }).join("");
+    
+    // Add test name header row
+    return `
+      <tr class="trend-test-header">
+        <td colspan="4">${esc(test.testName)}</td>
+      </tr>
+      ${rows}
+    `;
+  }).join("");
+  
+  return `
+    <div class="trends-section keep-together">
+      <div class="trends-header">
+        <div class="trends-title">Historical Trends</div>
+        <div class="trends-subtitle">Previous Results</div>
+      </div>
+      <div class="trends-table-wrapper">
+        <table class="trends-table">
+          <thead>
+            <tr>
+              <th>Parameter</th>
+              <th>${trendDates[0] || "—"}</th>
+              <th>${trendDates[1] || "—"}</th>
+              <th>${trendDates[2] || "—"}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${allRows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
+
+
   const all = Array.isArray(results) ? results : [];
   const radiology = all.filter(isRadiology);
   const pathology = all.filter(isPathology);
@@ -90,7 +237,6 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
 
       const id = `test-${seq}-${slugify(testName)}`;
 
-      // ✅ index meta
       indexItems.push({
         id,
         title: testName,
@@ -99,29 +245,30 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
         type: "Radiology",
       });
 
+      const signaturesHtml = generateTestSignatures(r);
+
       return `
         <div class="section radiology" id="${esc(id)}">
           <div class="section-title">${esc(testName)}</div>
           <div class="radio-html ql-scope">
             ${body || `<div class="muted">No content available</div>`}
           </div>
+          ${signaturesHtml}
         </div>
       `;
     })
     .join("");
 
-  // 2) Pathology section with trends
+  // 2) Pathology section - NO TRENDS, just results + signatures
   const pathologyHtml = pathology
     .map((r) => {
       seq += 1;
 
       const testName = r?.test?.name || "Lab Test";
       const paramResults = r.parameterResults || [];
-      const testId = r?.testId ?? r?.test?.id;
 
       const id = `test-${seq}-${slugify(testName)}`;
 
-      // ✅ index meta
       indexItems.push({
         id,
         title: testName,
@@ -130,25 +277,6 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
         type: "Pathology",
       });
 
-      // Check if we have any trends for this test
-      const hasTrends =
-        trendMap &&
-        paramResults.some((pr) => {
-          const trends = trendMap.get(`${testId}:${pr.parameterId}`) || [];
-          return trends.some((t) => t.value && t.value !== "—");
-        });
-
-      // Get trend dates (last 3 dates)
-      let trendDates = ["", "", ""];
-      if (hasTrends && trendMap) {
-        const firstParam = paramResults[0];
-        if (firstParam) {
-          const trends = trendMap.get(`${testId}:${firstParam.parameterId}`) || [];
-          trendDates = trends.map((t) => formatDate(t.date));
-        }
-      }
-
-      // Get current date for result column
       const currentDate = new Date().toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "2-digit",
@@ -160,9 +288,6 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
           ? "section pathology"
           : "section pathology keep-together";
 
-      // ✅ Add 'with-trends' class to table when trends exist
-      const tableClass = hasTrends ? "tbl with-trends" : "tbl";
-
       const rows = paramResults
         .map((pr) => {
           const pname = pr?.parameter?.name ?? pr?.parameterName ?? "";
@@ -171,20 +296,7 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
           const unit = formatUnit(pr);
           const ref = formatRef(pr);
 
-          // Get trend values for this parameter
-          let trend1 = "";
-          let trend2 = "";
-          let trend3 = "";
-
-          if (hasTrends && trendMap) {
-            const trends = trendMap.get(`${testId}:${pr.parameterId}`) || [];
-            trend1 = trends[0]?.value || "—";
-            trend2 = trends[1]?.value || "—";
-            trend3 = trends[2]?.value || "—";
-          }
-
           const flag = pr?.flag;
-
           const isHigh = flag && (flag === "HIGH" || flag === "HH");
           const isLow = flag && (flag === "LOW" || flag === "LL");
 
@@ -200,19 +312,12 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
               </td>
               <td class="${valueClass}">${esc(value)}${unit ? " " + esc(unit) : ""}</td>
               <td class="ref-range">${esc(ref)}</td>
-              ${
-                hasTrends
-                  ? `
-                <td class="trend-value trend-value-first">${esc(trend1)}</td>
-                <td class="trend-value">${esc(trend2)}</td>
-                <td class="trend-value">${esc(trend3)}</td>
-              `
-                  : ""
-              }
             </tr>
           `;
         })
         .join("");
+
+      const signaturesHtml = generateTestSignatures(r);
 
       return `
         <div class="${sectionClass}" id="${esc(id)}">
@@ -220,46 +325,27 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
             <div class="test-name-left">${esc(testName)}</div>
           </div>
 
-          <table class="${tableClass}">
+          <table class="tbl">
             <thead>
-              ${
-                hasTrends
-                  ? `
-              <tr>
-                <th class="test-name-header">Test Name</th>
-                <th class="result-header">Result (${currentDate})</th>
-                <th class="bio-ref-header">Biological Reference</th>
-                <th colspan="3" class="trend-header-group"> Historical Trends</th>
-              </tr>
-              <tr class="trend-dates-row">
-                <th></th>
-                <th></th>
-                <th></th>
-                <th class="trend-header trend-header-first">${trendDates[0] || "—"}</th>
-                <th class="trend-header">${trendDates[1] || "—"}</th>
-                <th class="trend-header">${trendDates[2] || "—"}</th>
-              </tr>
-              `
-                  : `
               <tr>
                 <th class="test-name-header">Test Name</th>
                 <th class="result-header">Result (${currentDate})</th>
                 <th class="bio-ref-header">Biological Reference</th>
               </tr>
-              `
-              }
             </thead>
             <tbody>
-              ${
-                rows ||
-                `<tr><td colspan="${hasTrends ? "6" : "3"}" class="muted text-center">No parameters available</td></tr>`
-              }
+              ${rows || `<tr><td colspan="3" class="muted text-center">No parameters available</td></tr>`}
             </tbody>
           </table>
+          
+          ${signaturesHtml}
         </div>
       `;
     })
     .join("");
+
+  // 3) ✅ Generate ALL trends section at the end
+  const allTrendsHtml = generateAllTrendsSection(pathology, trendMap);
 
   if (!radiologyHtml && !pathologyHtml) {
     const html = `
@@ -276,6 +362,6 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
     return returnMeta ? { html, indexItems: [] } : html;
   }
 
-  const html = radiologyHtml + pathologyHtml;
+  const html = radiologyHtml + pathologyHtml + allTrendsHtml;
   return returnMeta ? { html, indexItems } : html;
 }

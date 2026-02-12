@@ -27,6 +27,8 @@ export const createPayment = async (req, res) => {
       ipAddress,
     } = req.body;
 
+    console.log("diagnosticCenterId",diagnosticCenterId)
+
     const toInt = (v) => {
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
