@@ -562,8 +562,9 @@ export const updateTest = async (req, res) => {
       alsoKnowAs,
       features,
       sortOrder,
-        // ✅ NEW
       otherCategoryIds,
+      reportWithin,
+      reportUnit,
     } = req.body;
 
     const existing = await prisma.test.findUnique({
@@ -583,96 +584,114 @@ export const updateTest = async (req, res) => {
     }
 
     // --- PRICE CALCULATIONS ---
-    const actual = actualPrice ? parseFloat(actualPrice) : existing.actualPrice;
-    const finalDiscount = discount ? parseFloat(discount) : existing.discount;
+    const actual =
+      actualPrice !== undefined && actualPrice !== null && actualPrice !== ""
+        ? Number(actualPrice)
+        : existing.actualPrice;
 
+    const finalDiscount =
+      discount !== undefined && discount !== null && discount !== ""
+        ? Number(discount)
+        : existing.discount;
 
+    // Offer price fallback (avoid NaN)
+    const finalOfferPrice =
+      offerPrice !== undefined && offerPrice !== null && offerPrice !== ""
+        ? Number(offerPrice)
+        : existing.offerPrice;
 
     // --- CITY WISE PRICE ---
     let parsedCityWisePrice = existing.cityWisePrice;
-    if (cityWisePrice) {
+    if (cityWisePrice !== undefined && cityWisePrice !== null && cityWisePrice !== "") {
       parsedCityWisePrice =
-        typeof cityWisePrice === "string"
-          ? JSON.parse(cityWisePrice)
-          : cityWisePrice;
+        typeof cityWisePrice === "string" ? JSON.parse(cityWisePrice) : cityWisePrice;
     }
 
     // --- CATEGORY VALIDATION ---
     let finalCategoryId = existing.categoryId;
-    if (categoryId) {
+    if (categoryId !== undefined && categoryId !== null && categoryId !== "") {
       const category = await prisma.category.findUnique({
         where: { id: Number(categoryId) },
       });
-      if (!category)
-        return res.status(400).json({ error: "Invalid categoryId" });
+      if (!category) return res.status(400).json({ error: "Invalid categoryId" });
       finalCategoryId = category.id;
     }
 
     // --- SUBCATEGORY VALIDATION ---
     let finalSubCategoryId = existing.subCategoryId;
-    if (subCategoryId) {
+    if (subCategoryId !== undefined && subCategoryId !== null && subCategoryId !== "") {
       const subCategory = await prisma.subCategory.findUnique({
         where: { id: Number(subCategoryId) },
       });
-      if (!subCategory)
-        return res.status(400).json({ error: "Invalid subCategoryId" });
+      if (!subCategory) return res.status(400).json({ error: "Invalid subCategoryId" });
       finalSubCategoryId = subCategory.id;
     }
 
     // --- SPOTLIGHT NORMALIZATION ---
     let finalSpotlight = existing.spotlight;
-
     if (spotlight !== undefined) {
-      if (typeof spotlight === "boolean") {
-        finalSpotlight = spotlight;
-      } else if (typeof spotlight === "string") {
-        finalSpotlight = spotlight === "true";
-      }
+      if (typeof spotlight === "boolean") finalSpotlight = spotlight;
+      else if (typeof spotlight === "string") finalSpotlight = spotlight === "true";
     }
 
     // ✅ Parse otherCategoryIds (replace all)
-    const otherIds = parseIdsArray(otherCategoryIds)
-      .filter((cid) => cid !== Number(finalCategoryId));
+    const otherIds = parseIdsArray(otherCategoryIds).filter(
+      (cid) => cid !== Number(finalCategoryId)
+    );
 
-    // --- UPDATE TEST ---
+    // ✅ Build update payload WITHOUT undefined fields
+    const data = {
+      name: name ?? existing.name,
+      actualPrice: actual,
+      offerPrice: finalOfferPrice,
+      discount: finalDiscount,
+      cityWisePrice: parsedCityWisePrice,
+      gender: gender ?? existing.gender,
+      imgUrl,
+      description: description ?? existing.description,
+      contains: contains ?? existing.contains,
+      preparations: preparations ?? existing.preparations,
+      sampleRequired: sampleRequired ?? existing.sampleRequired,
+      testType: testType ?? existing.testType,
+      showIn: showIn ?? existing.showIn,
+      alsoKnowAs: alsoKnowAs ?? existing.alsoKnowAs,
+      spotlight: finalSpotlight,
+      categoryId: finalCategoryId,
+      subCategoryId: finalSubCategoryId,
+      sortOrder:
+        sortOrder !== undefined && sortOrder !== null && sortOrder !== ""
+          ? Number(sortOrder)
+          : (existing.sortOrder ?? 0),
+
+      // ✅ Replace other categories
+      otherCategories: {
+        deleteMany: {},
+        create: otherIds.map((cid) => ({ categoryId: Number(cid) })),
+      },
+    };
+
+    // ✅ Only set features if you really want to update it (avoid wiping accidentally)
+    if (features !== undefined) data.features = features;
+
+    // ✅ reportWithin is number
+    if (reportWithin !== undefined && reportWithin !== null && reportWithin !== "") {
+      data.reportWithin = Number(reportWithin);
+    }
+
+    // ✅ reportUnit is STRING (and required in schema, so never send undefined)
+    if (reportUnit !== undefined && reportUnit !== null && reportUnit !== "") {
+      data.reportUnit = String(reportUnit);
+    } else {
+      // keep existing (safe) — or omit, both are fine.
+      data.reportUnit = existing.reportUnit;
+    }
+
     const updated = await prisma.test.update({
       where: { id: Number(id) },
-      data: {
-        name: name || existing.name,
-        actualPrice: actual,
-        offerPrice: Number(offerPrice), // ← final rounded price
-        discount: finalDiscount,
-        cityWisePrice: parsedCityWisePrice,
-        gender: gender || existing.gender,
-        imgUrl,
-        description: description || existing.description,
-        contains: contains || existing.contains,
-
-        preparations: preparations || existing.preparations,
-        sampleRequired: sampleRequired || existing.sampleRequired,
-        testType: testType || existing.testType,
-        showIn: showIn || existing.showIn,
-        alsoKnowAs: alsoKnowAs || existing.alsoKnowAs,
-        spotlight: finalSpotlight,
-        features: features,
-
-        categoryId: finalCategoryId,
-        subCategoryId: finalSubCategoryId,
-        sortOrder:
-          sortOrder !== undefined
-            ? Number(sortOrder)
-            : (existing.sortOrder ?? 0), // ✅ NEW
-
-             // ✅ Replace other categories
-        otherCategories: {
-          deleteMany: {}, // remove old
-          create: otherIds.map((cid) => ({ categoryId: Number(cid) })),
-        },
-      },
+      data,
       include: {
         otherCategories: { select: { categoryId: true } },
       },
-     
     });
 
     res.json(updated);
@@ -681,6 +700,7 @@ export const updateTest = async (req, res) => {
     res.status(500).json({ error: "Failed to update test" });
   }
 };
+
 
 export const deleteTest = async (req, res) => {
   try {

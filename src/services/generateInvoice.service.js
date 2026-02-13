@@ -97,7 +97,7 @@ export const generateAndUploadInvoice = async ({ paymentId, patientName, orderId
       );
     }, 0);
 
-    const discount = order?.discountAmount || 0;
+    const discount = order?.discountAmount || order?.discount || 0;
     const finalAmount = Math.max(0, orderTotal - discount);
 
     const patientAddress = order?.address?.address || order?.patient?.address || "NA";

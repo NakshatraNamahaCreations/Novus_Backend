@@ -122,17 +122,30 @@ update: async (id, payload) => {
             ? ResultService.evaluateFlag(p.valueNumber, range)
             : "NA";
 
-        rows.push({
-          patientTestResultId: id,
-          parameterId: p.parameterId,
-          valueNumber: p.valueNumber ?? null,
-          valueText: p.valueText ?? null,
-          unit: p.unit ?? null,
-          flag,
-          normalRangeText:
-            range?.referenceRange ||
-            `${range?.lowerLimit ?? "-"} - ${range?.upperLimit ?? "-"}`,
-        });
+      const ref = (range?.referenceRange ?? "").trim();
+
+const hasLower = range?.lowerLimit !== null && range?.lowerLimit !== undefined;
+const hasUpper = range?.upperLimit !== null && range?.upperLimit !== undefined;
+
+const limitText = (hasLower || hasUpper)
+  ? `${hasLower ? range.lowerLimit : ""} - ${hasUpper ? range.upperLimit : ""}`.trim()
+  : "";
+
+const normalRangeText =
+  ref ||
+  limitText ||
+  (range?.normalValueHtml ?? null);
+
+rows.push({
+  patientTestResultId: id,
+  parameterId: p.parameterId,
+  valueNumber: p.valueNumber ?? null,
+  valueText: p.valueText ?? null,
+  unit: p.unit ?? null,
+  flag,
+  normalRangeText, // ✅ now normalValueHtml used only when ref & limits missing
+});
+
       }
 
       if (rows.length) {
@@ -240,22 +253,32 @@ createResult: async (payload) => {
   for (const p of payload.parameters) {
     const range = await ResultService.findRange(p.parameterId, patient);
 
+    console.log("range",range)
+
     const flag =
       p.valueNumber != null
         ? ResultService.evaluateFlag(p.valueNumber, range)
         : "NA";
 
-    paramInsert.push({
-      patientTestResultId: created.id,
-      parameterId: p.parameterId,
-      valueNumber: p.valueNumber ?? null,
-      valueText: p.valueText ?? null,
-      unit: p.unit ?? null,
-      flag,
-      normalRangeText:
-        range?.referenceRange ||
-        `${range?.lowerLimit ?? "-"} - ${range?.upperLimit ?? "-"}`,
-    });
+   const ref = (range?.referenceRange ?? "").trim();
+
+const hasLower = range?.lowerLimit !== null && range?.lowerLimit !== undefined;
+const hasUpper = range?.upperLimit !== null && range?.upperLimit !== undefined;
+
+const limitsText = (hasLower || hasUpper)
+  ? `${hasLower ? range.lowerLimit : "-"} - ${hasUpper ? range.upperLimit : "-"}`.trim()
+  : "";
+
+paramInsert.push({
+  patientTestResultId: created.id,
+  parameterId: p.parameterId,
+  valueNumber: p.valueNumber ?? null,
+  valueText: p.valueText ?? null,
+  unit: p.unit ?? null,
+  flag,
+  normalRangeText: ref || limitsText || (range?.normalValueHtml ?? null),
+});
+
   }
 
   if (paramInsert.length > 0) {

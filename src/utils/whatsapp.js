@@ -12,6 +12,7 @@ export const WhatsAppMessage = async ({
 }) => {
   try {
 
+
     const payload = {
       "app-key": process.env.WABRIDGE_APP_KEY,
       "auth-key": process.env.WABRIDGE_AUTH_KEY,

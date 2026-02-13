@@ -1,12 +1,48 @@
 import { Worker, QueueEvents } from "bullmq";
 import dayjs from "dayjs";
+
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
+import customParseFormat from "dayjs/plugin/customParseFormat.js";
+
 import { PrismaClient } from "@prisma/client";
 
 import { queueRedis } from "../config/redisQueue.js";
 import { WhatsAppMessage } from "../utils/whatsapp.js";
 import { WHATSAPP_TEMPLATES } from "../templates/whatsapp.templates.js";
 
+
+
 const prisma = new PrismaClient();
+
+
+
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+dayjs.extend(customParseFormat);
+
+const IST = "Asia/Kolkata";
+
+const toIST12Hr = (dt) => {
+  try {
+    if (!dt) return "-";
+    return dayjs.utc(dt).tz(IST).format("hh:mm A");
+  } catch {
+    return "-";
+  }
+};
+const to12HrFromHHmm = (t) => {
+  try {
+    if (!t) return "-";
+    // parses "22:00" properly
+    return dayjs(t, "HH:mm").format("hh:mm A");
+  } catch {
+    return "-";
+  }
+};
+
 
 /* -----------------------------
    Helpers
@@ -58,18 +94,25 @@ const extractTestNamesForPatient = (order, patientId) => {
 };
 
 const formatOrderDateTime = (order) => {
-  const dateStr = order?.date ? dayjs(order.date).format("DD MMM YYYY") : "-";
-  const s = order?.centerSlot || order?.slot;
+  try {
+    const dateStr = order?.date ? dayjs(order.date).format("DD MMM YYYY") : "-";
+    const s = order?.centerSlot || order?.slot;
 
-  if (s?.startTime && s?.endTime) {
-    const timeStr = `${dayjs(s.startTime).format("hh:mm A")} - ${dayjs(
-      s.endTime,
-    ).format("hh:mm A")}${s?.name ? ` (${s.name})` : ""}`;
 
-    return `${dateStr} ${timeStr}`;
+
+    if (s?.startTime && s?.endTime) {
+      const timeStr = `${to12HrFromHHmm(s.startTime)} - ${to12HrFromHHmm(s.endTime)}${
+        s?.name ? ` (${s.name})` : ""
+      }`;
+
+     
+      return `${dateStr} ${timeStr}`;
+    }
+
+    return dateStr;
+  } catch {
+    return "-";
   }
-
-  return dateStr;
 };
 
 /* ----------------------------------
@@ -170,6 +213,8 @@ const handleSendCenterConfirmation = async (order) => {
     const tpl = WHATSAPP_TEMPLATES.CENTER_CONFIRMATION;
     const testsStr = extractTestNames(order);
     const dateTime = formatOrderDateTime(order);
+
+    console.log("dateTime",dateTime)
 
     const variables = tpl.mapVariables({
       centerName: safe(order.center?.contactName || order.center?.name, "Center"),
@@ -288,10 +333,10 @@ const handleSendOrderConfirmed = async (order) => {
         tests: safe(testsStr),
         collectionDate: order?.date ? dayjs(order.date).format("DD MMM YYYY") : "-",
         timeSlot: order?.slot
-          ? `${dayjs(order.slot.startTime).format("hh:mm A")} - ${dayjs(
-              order.slot.endTime,
-            ).format("hh:mm A")}${order.slot?.name ? ` (${order.slot.name})` : ""}`
-          : "-",
+  ? `${toIST12Hr(order.slot.startTime)} - ${toIST12Hr(order.slot.endTime)}${
+      order.slot?.name ? ` (${order.slot.name})` : ""
+    }`
+  : "-",
         address: [
           order.address?.address,
           order.address?.landmark,

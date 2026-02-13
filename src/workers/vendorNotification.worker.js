@@ -10,6 +10,7 @@ export const vendorNotificationWorker = new Worker(
   async (job) => {
     const { orderId, latitude, longitude, testType, radiusKm } = job.data;
 
+    // console.log(" orderId, latitude, longitude, testType, radiusKm", orderId, latitude, longitude, testType, radiusKm)
     if (latitude == null || longitude == null) return;
 
     // ✅ Redis GEORADIUS returns vendorIds (members) as strings
@@ -53,7 +54,7 @@ export const vendorNotificationWorker = new Worker(
         await sendPushNotification({
           token: d.fcmToken,
           title: "New Job Available",
-          body: `New ${testType} order near you`,
+          body: `New ${testType} order near for you`,
           data: {
             orderId: String(orderId),
             type: "NEW_ORDER"

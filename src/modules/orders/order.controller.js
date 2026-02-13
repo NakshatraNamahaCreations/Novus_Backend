@@ -10,7 +10,12 @@ import { vendorNotificationQueue } from "../../queues/vendorNotification.queue.j
 import { broadcastNewOrder } from "../../services/location.service.js";
 import locationService from "../location/location.service.js";
 import { uploadToS3 } from "../../config/s3.js";
-import { istDateKey, isTodayIST, secondsToKeepForOrderDate, orderKeys } from "../../utils/orderRedis.js";
+import {
+  istDateKey,
+  isTodayIST,
+  secondsToKeepForOrderDate,
+  orderKeys,
+} from "../../utils/orderRedis.js";
 import ExcelJS from "exceljs";
 
 import { markOrderReportReady } from "./order.service.js";
@@ -18,22 +23,19 @@ import { markOrderReportReady } from "./order.service.js";
 const prisma = new PrismaClient();
 const formatTime = (date) => dayjs(date).format("hh:mm A");
 
-
 import utc from "dayjs/plugin/utc.js";
 import tz from "dayjs/plugin/timezone.js";
 
-
 dayjs.extend(utc);
 dayjs.extend(tz);
-
-
-
 
 /* ===========================
    ✅ HELPERS (paste once)
 =========================== */
 const normalizeUnit = (u = "") => {
-  const unit = String(u || "").toLowerCase().trim();
+  const unit = String(u || "")
+    .toLowerCase()
+    .trim();
   if (["min", "mins", "minute", "minutes"].includes(unit)) return "minutes";
   if (["hr", "hrs", "hour", "hours"].includes(unit)) return "hours";
   if (["day", "days"].includes(unit)) return "days";
@@ -65,9 +67,6 @@ const parseISTDateTime = (v) => {
   return dayjs.tz(withTime, "Asia/Kolkata").toDate();
 };
 
-
-
-
 // ✅ reuse same filter logic (keep it identical to getOrderReports)
 function buildOrderReportWhere(query) {
   let {
@@ -92,12 +91,11 @@ function buildOrderReportWhere(query) {
     where.date = { gte: d.toDate(), lt: d.add(1, "day").toDate() };
   }
   if (query.orderId && String(query.orderId).trim()) {
-  const idNum = Number(String(query.orderId).replace(/\D/g, ""));
-  if (!Number.isNaN(idNum) && idNum > 0) {
-    where.id = idNum;
+    const idNum = Number(String(query.orderId).replace(/\D/g, ""));
+    if (!Number.isNaN(idNum) && idNum > 0) {
+      where.id = idNum;
+    }
   }
-}
-
 
   if (fromDate && toDate && fromDate !== "" && toDate !== "") {
     where.date = {
@@ -172,16 +170,35 @@ export const exportOrderReportsExcel = async (req, res) => {
     const orders = await prisma.order.findMany({
       where,
       include: {
-        patient: { select: { id: true, fullName: true, contactNo: true, age: true, gender: true } }, // adjust if your patient has age/gender
-        address: { select: { city: true, state: true, pincode: true, address: true } },
-        center: { select: { name: true, mobile: true, pincode: true, city: { select: { name: true } } } },
+        patient: {
+          select: {
+            id: true,
+            fullName: true,
+            contactNo: true,
+            age: true,
+            gender: true,
+          },
+        }, // adjust if your patient has age/gender
+        address: {
+          select: { city: true, state: true, pincode: true, address: true },
+        },
+        center: {
+          select: {
+            name: true,
+            mobile: true,
+            pincode: true,
+            city: { select: { name: true } },
+          },
+        },
         refCenter: { select: { name: true } },
         doctor: { select: { name: true } },
 
         orderCheckups: { include: { checkup: { select: { name: true } } } },
         orderMembers: {
           include: {
-            orderMemberPackages: { include: { package: true, test: { select: { name: true } } } },
+            orderMemberPackages: {
+              include: { package: true, test: { select: { name: true } } },
+            },
           },
         },
       },
@@ -222,7 +239,8 @@ export const exportOrderReportsExcel = async (req, res) => {
     orders.forEach((o, idx) => {
       const amount = Number(o.finalAmount || 0);
       // If you have paidAmount/refundAmount in DB, use them. Else fallback:
-      const paidAmount = o.paymentStatus === "paid" ? amount : Number(o.paidAmount || 0);
+      const paidAmount =
+        o.paymentStatus === "paid" ? amount : Number(o.paidAmount || 0);
       const dueAmount = Math.max(0, amount - paidAmount);
       const discount = Number(o.discountAmount ?? o.discount ?? 0);
       const refund = Number(o.refundAmount || 0);
@@ -231,13 +249,13 @@ export const exportOrderReportsExcel = async (req, res) => {
         sl: idx + 1,
 
         // ✅ IMPORTANT: map based on what you actually store
-        reg: o.patientId ? String(o.patientId) : "",                  // change if you have "registrationNo"
-        labNo: o.orderNumber ? String(o.orderNumber) : "",            // change if you have "labNo"
-        ipop: o.merchantOrderId ? String(o.merchantOrderId) : "",     // change if you have "ipOpNo"
+        reg: o.patientId ? String(o.patientId) : "", // change if you have "registrationNo"
+        labNo: o.orderNumber ? String(o.orderNumber) : "", // change if you have "labNo"
+        ipop: o.merchantOrderId ? String(o.merchantOrderId) : "", // change if you have "ipOpNo"
         date: formatExcelDateTime(o.date),
 
         patientName: o.patient?.fullName || "",
-        age: o.patient?.age ? `${o.patient.age}` : "",               // if your age stored elsewhere, map it
+        age: o.patient?.age ? `${o.patient.age}` : "", // if your age stored elsewhere, map it
         gender: o.patient?.gender || "",
         mobile: o.patient?.contactNo || "",
 
@@ -247,7 +265,7 @@ export const exportOrderReportsExcel = async (req, res) => {
         refCenter: o.refCenter?.name || "",
 
         billNo: o.orderNumber ? String(o.orderNumber) : "",
-        billType: o.paymentMode || o.paymentMethod || "",            // map if you have billType
+        billType: o.paymentMode || o.paymentMethod || "", // map if you have billType
         paidDue: o.paymentStatus === "paid" ? "paid" : "due",
 
         amount,
@@ -255,13 +273,16 @@ export const exportOrderReportsExcel = async (req, res) => {
         paid: paidAmount,
         due: dueAmount,
         refund,
-        paymentType: o.paymentMethod || o.paymentMode || "",         // map if you store "paymentType"
+        paymentType: o.paymentMethod || o.paymentMode || "", // map if you store "paymentType"
       });
     });
 
     // ✅ send as file download
     const fileName = `order-report-${dayjs().format("YYYYMMDD-HHmm")}.xlsx`;
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
     await workbook.xlsx.write(res);
@@ -299,60 +320,75 @@ export const createOrder = async (req, res) => {
       centerSlotId,
     } = req.body;
 
-  
-
     if (!members?.length) {
       return res.status(400).json({ error: "Members required" });
     }
 
-const orderDate = parseISTDateTime(date);
-if (isNaN(orderDate.getTime())) {
-  return res.status(400).json({ error: "Invalid date" });
-}
-
-
-    // ✅ Validate booking inputs
+    const orderDate = parseISTDateTime(date);
+    if (isNaN(orderDate.getTime())) {
+      return res.status(400).json({ error: "Invalid date" });
+    }
+  
     if (isHomeSample) {
       if (!slotId) {
-        return res.status(400).json({ error: "slotId is required for home sample" });
+        return res
+          .status(400)
+          .json({ error: "slotId is required for home sample" });
       }
     } else {
-      if (!centerId) return res.status(400).json({ error: "centerId is required for center booking" });
-      if (!centerSlotId) return res.status(400).json({ error: "centerSlotId is required for center booking" });
+      if (!centerId)
+        return res
+          .status(400)
+          .json({ error: "centerId is required for center booking" });
+      if (!centerSlotId)
+        return res
+          .status(400)
+          .json({ error: "centerSlotId is required for center booking" });
     }
-
-  
-    const now = new Date();
 
     const testIds = [];
     const packageIds = [];
 
     for (const m of members) {
       if (Array.isArray(m?.tests)) testIds.push(...m.tests.map(Number));
-      if (Array.isArray(m?.packages)) packageIds.push(...m.packages.map(Number));
+      if (Array.isArray(m?.packages))
+        packageIds.push(...m.packages.map(Number));
     }
 
-    const uniqueTestIds = [...new Set(testIds)].filter((x) => Number.isFinite(x));
-    const uniquePackageIds = [...new Set(packageIds)].filter((x) => Number.isFinite(x));
+    const uniqueTestIds = [...new Set(testIds)].filter((x) =>
+      Number.isFinite(x),
+    );
+    const uniquePackageIds = [...new Set(packageIds)].filter((x) =>
+      Number.isFinite(x),
+    );
 
     const tests = uniqueTestIds.length
       ? await prisma.test.findMany({
           where: { id: { in: uniqueTestIds } },
-          select: { id: true, name: true, reportWithin: true, reportUnit: true },
+          select: {
+            id: true,
+            name: true,
+            reportWithin: true,
+            reportUnit: true,
+          },
         })
       : [];
 
     const packages = uniquePackageIds.length
       ? await prisma.healthPackage.findMany({
           where: { id: { in: uniquePackageIds } },
-          select: { id: true, name: true, reportWithin: true, reportUnit: true },
+          select: {
+            id: true,
+            name: true,
+            reportWithin: true,
+            reportUnit: true,
+          },
         })
       : [];
 
     const testMap = new Map(tests.map((t) => [t.id, t]));
     const pkgMap = new Map(packages.map((p) => [p.id, p]));
 
-   
     /* 🔐 LOCK KEY */
     const lockKey = isHomeSample
       ? `lock:slot:${slotId}:${dayjs(orderDate).format("YYYY-MM-DD")}`
@@ -427,7 +463,9 @@ if (isNaN(orderDate.getTime())) {
           const pkg = pkgMap.get(pkgId);
 
           const unit = pkg?.reportUnit ? normalizeUnit(pkg.reportUnit) : null;
-          const dueAt = pkg ? computeDueAt(orderDate, pkg.reportWithin, unit) : null;
+          const dueAt = pkg
+            ? computeDueAt(orderDate, pkg.reportWithin, unit)
+            : null;
 
           await prisma.orderMemberPackage.create({
             data: {
@@ -449,7 +487,9 @@ if (isNaN(orderDate.getTime())) {
           const t = testMap.get(testId);
 
           const unit = t?.reportUnit ? normalizeUnit(t.reportUnit) : null;
-          const dueAt = t ? computeDueAt(orderDate, t.reportWithin, unit) : null;
+          const dueAt = t
+            ? computeDueAt(orderDate, t.reportWithin, unit)
+            : null;
 
           await prisma.orderMemberPackage.create({
             data: {
@@ -465,116 +505,141 @@ if (isNaN(orderDate.getTime())) {
       }
     }
 
-    // ✅ For notifications/broadcast you can still use address lat/long
-    const address = await prisma.address.findUnique({ where: { id: addressId } });
-    if (!address) return res.status(400).json({ error: "Address not found" });
+    console.log("testType",testType)
+    const isRadiology = String(testType || "").toUpperCase() === "RADIOLOGY";
+const isPathology = String(testType || "").toUpperCase() === "PATHOLOGY";
 
-    const lat = Number(address.latitude);
-    const lng = Number(address.longitude);
-    const pincodeStr = String(address.pincode || "").trim();
 
-    // ✅ Slot label
-    let slotLabel = "";
-    if (isHomeSample) {
-      const slotData = await prisma.slot.findUnique({ where: { id: Number(slotId) } });
-      slotLabel = slotData
-        ? `${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`
-        : "";
-    } else {
-      const cs = await prisma.centerSlot.findUnique({ where: { id: Number(centerSlotId) } });
-      slotLabel = cs ? `${cs.startTime} - ${cs.endTime}` : "";
-    }
+console.log(isRadiology,isPathology)
+   if (!isRadiology) {
+  const address = await prisma.address.findUnique({
+    where: { id: addressId },
+  });
+ 
 
-    // ✅ Always enqueue vendor notification
-    await vendorNotificationQueue.add(
-      "notify-new-order",
-      {
-        orderId: order.id,
-        pincode: pincodeStr,
-        latitude: lat,
-        longitude: lng,
-        testType,
-        radiusKm: 5,
-      },
-      { jobId: `vendor-new-order-${order.id}` }
-    );
+  const lat = Number(address.latitude);
+  const lng = Number(address.longitude);
+  const pincodeStr = String(address.pincode || "").trim();
 
-    /* -----------------------------
-       ✅ REDIS: store until accepted/rejected
-       ✅ INDEX BY ORDER DATE (IST)
-    ------------------------------ */
-    const dateKey = istDateKey(orderDate);
-    const ttl = secondsToKeepForOrderDate(orderDate, 2);
+  // ✅ Slot label (keep as you already have)
+  let slotLabel = "";
+  if (isHomeSample) {
+    const slotData = await prisma.slot.findUnique({
+      where: { id: Number(slotId) },
+    });
+    slotLabel = slotData
+      ? `${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`
+      : "";
+  } else {
+    const cs = await prisma.centerSlot.findUnique({
+      where: { id: Number(centerSlotId) },
+    });
+    slotLabel = cs ? `${cs.startTime} - ${cs.endTime}` : "";
+  }
 
-    const { orderHash, pendingDateSet, pendingPincodeSet, orderGeo } = orderKeys({
+  // ✅ Notify vendors only for PATHOLOGY (or non-radiology)
+  await vendorNotificationQueue.add(
+    "vendor-notifications",
+    {
+      orderId: order.id,
+      pincode: pincodeStr,
+      latitude: lat,
+      longitude: lng,
+      testType,
+      radiusKm: 5,
+    },
+    { jobId: `vendor-new-order-${order.id}` },
+  );
+
+  // ✅ Redis indexing with pincode + geo
+  const dateKey = istDateKey(orderDate);
+  const ttl = secondsToKeepForOrderDate(orderDate, 2);
+
+  const { orderHash, pendingDateSet, pendingPincodeSet, orderGeo } =
+    orderKeys({
       orderId: order.id,
       dateKey,
       pincode: pincodeStr,
     });
 
-    await redis.hSet(orderHash, {
-      orderId: String(order.id),
-      date: orderDate.toISOString(),
-      dateKey: String(dateKey),
-      status: "pending",
-      pincode: pincodeStr,
-      latitude: String(lat),
-      longitude: String(lng),
-      testType: String(testType || ""),
-      slot: String(slotLabel || ""),
+  await redis.hSet(orderHash, {
+    orderId: String(order.id),
+    date: orderDate.toISOString(),
+    dateKey: String(dateKey),
+    status: "pending",
+    pincode: pincodeStr,
+    latitude: String(lat),
+    longitude: String(lng),
+    testType: String(testType || ""),
+    slot: String(slotLabel || ""),
 
-      isHomeSample: String(Boolean(isHomeSample)),
-      slotId: String(isHomeSample ? slotId : ""),
-      centerId: String(!isHomeSample ? centerId : ""),
-      centerSlotId: String(!isHomeSample ? centerSlotId : ""),
-      createdAt: String(Date.now()),
+    isHomeSample: String(Boolean(isHomeSample)),
+    slotId: String(isHomeSample ? slotId : ""),
+    centerId: String(!isHomeSample ? centerId : ""),
+    centerSlotId: String(!isHomeSample ? centerSlotId : ""),
+    createdAt: String(Date.now()),
+  });
+
+  await redis.sAdd(pendingDateSet, String(order.id));
+  await redis.sAdd(pendingPincodeSet, String(order.id));
+
+  if (Number.isFinite(lng) && Number.isFinite(lat)) {
+    await redis.sendCommand([
+      "GEOADD",
+      orderGeo,
+      String(lng),
+      String(lat),
+      String(order.id),
+    ]);
+  }
+
+  await redis.expire(orderHash, ttl);
+  await redis.expire(pendingDateSet, ttl);
+  await redis.expire(pendingPincodeSet, ttl);
+  await redis.expire(orderGeo, ttl);
+
+  // ✅ Live emit only for PATHOLOGY (your existing rule)
+  const io = req.app.get("io");
+  const shouldBroadcastNow = isTodayIST(orderDate);
+
+  if (io && shouldBroadcastNow && isPathology) {
+    await broadcastNewOrder(io, {
+      id: order.id,
+      date: orderDate,
+      testType,
+      radiusKm: 5,
+      slot: slotLabel,
+      address: {
+        pincode: pincodeStr,
+        latitude: lat,
+        longitude: lng,
+      },
     });
+  }
 
-    await redis.sAdd(pendingDateSet, String(order.id));
-    await redis.sAdd(pendingPincodeSet, String(order.id));
+  // ✅ response needs dateKey
+  return res.json({
+    success: true,
+    orderId: order.id,
+    orderNumber: order.orderNumber,
 
-    if (Number.isFinite(lng) && Number.isFinite(lat)) {
-      await redis.sendCommand(["GEOADD", orderGeo, String(lng), String(lat), String(order.id)]);
-    }
+   
+  });
+}
 
-    await redis.expire(orderHash, ttl);
-    await redis.expire(pendingDateSet, ttl);
-    await redis.expire(pendingPincodeSet, ttl);
-    await redis.expire(orderGeo, ttl);
-
-    /* -----------------------------
-       ✅ LIVE EMIT ONLY IF TODAY (IST)
-    ------------------------------ */
-    const io = req.app.get("io");
-    const shouldBroadcastNow = isTodayIST(orderDate);
-
-    if (io && shouldBroadcastNow) {
-      await broadcastNewOrder(io, {
-        id: order.id,
-        date: orderDate,
-        testType,
-        radiusKm: 5,
-        slot: slotLabel,
-        address: {
-          pincode: pincodeStr,
-          latitude: lat,
-          longitude: lng,
-        },
-      });
-    }
 
     res.json({
       success: true,
       orderId: order.id,
       orderNumber: order.orderNumber,
-      dateKey,
-      broadcasted: Boolean(shouldBroadcastNow),
+    
+
     });
 
     await whatsappQueue.add(
       "whatsapp.sendOrderAndPayment",
       { orderId: order.id },
-      { jobId: `whatsapp-orderpay-${order.id}`, removeOnComplete: true }
+      { jobId: `whatsapp-orderpay-${order.id}`, removeOnComplete: true },
     );
   } catch (err) {
     console.error("Create order error:", err);
@@ -621,7 +686,9 @@ export const createAdminOrder = async (req, res) => {
     } = req.body;
 
     const castInt = (v) =>
-      v === undefined || v === null || v === "" || Number.isNaN(Number(v)) ? null : Number(v);
+      v === undefined || v === null || v === "" || Number.isNaN(Number(v))
+        ? null
+        : Number(v);
 
     const toNumber = (v) => {
       const n = Number(v);
@@ -634,22 +701,35 @@ export const createAdminOrder = async (req, res) => {
       return "test";
     };
 
- 
-
-    if (!patientId || !Array.isArray(selectedTests) || selectedTests.length === 0) {
-      return res.status(400).json({ success: false, message: "Patient & items required" });
+    if (
+      !patientId ||
+      !Array.isArray(selectedTests) ||
+      selectedTests.length === 0
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Patient & items required" });
     }
-
-
-   
 
     // If home collection => address required + slotId required
     if (Boolean(homeCollection)) {
       const addr = castInt(addressId);
-      if (!addr) return res.status(400).json({ success: false, message: "addressId is required for home collection" });
+      if (!addr)
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: "addressId is required for home collection",
+          });
       const sId = castInt(slotId);
-      if (!sId) return res.status(400).json({ success: false, message: "slotId is required for home collection" });
-    } 
+      if (!sId)
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: "slotId is required for home collection",
+          });
+    }
 
     // order number
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -661,22 +741,27 @@ export const createAdminOrder = async (req, res) => {
     // totals
     const computedTotal = selectedTests.reduce(
       (sum, t) => sum + toNumber(t?.price ?? t?.amount ?? t?.total),
-      0
+      0,
     );
 
-    const total = bodyTotalAmount != null ? toNumber(bodyTotalAmount) : computedTotal;
+    const total =
+      bodyTotalAmount != null ? toNumber(bodyTotalAmount) : computedTotal;
 
     const discountAmt =
-      discountAmount != null ? toNumber(discountAmount) : discount != null ? toNumber(discount) : 0;
+      discountAmount != null
+        ? toNumber(discountAmount)
+        : discount != null
+          ? toNumber(discount)
+          : 0;
 
-    const finalAmt = bodyFinalAmount != null ? toNumber(bodyFinalAmount) : Math.max(0, total - discountAmt);
+    const finalAmt =
+      bodyFinalAmount != null
+        ? toNumber(bodyFinalAmount)
+        : Math.max(0, total - discountAmt);
 
     // date
     const pickedDate = date || homeCollectionDate || null;
-  const orderDate = parseISTDateTime(pickedDate);
-
-
-
+    const orderDate = parseISTDateTime(pickedDate);
 
     const testIds = selectedTests
       .filter((i) => normalizeType(i) === "test")
@@ -691,14 +776,24 @@ export const createAdminOrder = async (req, res) => {
     const tests = testIds.length
       ? await prisma.test.findMany({
           where: { id: { in: testIds } },
-          select: { id: true, name: true, reportWithin: true, reportUnit: true },
+          select: {
+            id: true,
+            name: true,
+            reportWithin: true,
+            reportUnit: true,
+          },
         })
       : [];
 
     const packages = packageIds.length
       ? await prisma.healthPackage.findMany({
           where: { id: { in: packageIds } },
-          select: { id: true, name: true, reportWithin: true, reportUnit: true },
+          select: {
+            id: true,
+            name: true,
+            reportWithin: true,
+            reportUnit: true,
+          },
         })
       : [];
 
@@ -711,22 +806,23 @@ export const createAdminOrder = async (req, res) => {
       patient: { connect: { id: castInt(patientId) } },
 
       orderType: registrationType ?? null,
-     ...(castInt(diagnosticCenterId)
-  ? { diagnosticCenter: { connect: { id: castInt(diagnosticCenterId) } } }
-  : {}),
+      ...(castInt(diagnosticCenterId)
+        ? { diagnosticCenter: { connect: { id: castInt(diagnosticCenterId) } } }
+        : {}),
 
       totalAmount: Number(total),
-      discount: discount != null ? Number(discount) : 0,
+      discount: Number(discountAmt) || 0,
       discountAmount: Number(discountAmt),
       finalAmount: Number(finalAmt),
-
 
       source: source ?? undefined,
 
       date: orderDate,
 
       isHomeSample: Boolean(homeCollection),
-      remarks: [provisionalDiagnosis, notes, remark].filter(Boolean).join(" | "),
+      remarks: [provisionalDiagnosis, notes, remark]
+        .filter(Boolean)
+        .join(" | "),
     };
 
     const sId = castInt(slotId);
@@ -739,9 +835,9 @@ export const createAdminOrder = async (req, res) => {
 
     if (!Boolean(homeCollection)) {
       const finalCenterId = castInt(centerId ?? collectionCenterId);
-    
-      if (finalCenterId) dataToCreate.center = { connect: { id: finalCenterId } };
-   
+
+      if (finalCenterId)
+        dataToCreate.center = { connect: { id: finalCenterId } };
     }
 
     const dId = castInt(doctorId);
@@ -764,8 +860,12 @@ export const createAdminOrder = async (req, res) => {
           const type = normalizeType(item);
 
           const sourceObj = type === "test" ? testMap.get(id) : pkgMap.get(id);
-          const unit = sourceObj?.reportUnit ? normalizeUnit(sourceObj.reportUnit) : null;
-          const dueAt = sourceObj ? computeDueAt(orderDate, sourceObj.reportWithin, unit) : null;
+          const unit = sourceObj?.reportUnit
+            ? normalizeUnit(sourceObj.reportUnit)
+            : null;
+          const dueAt = sourceObj
+            ? computeDueAt(orderDate, sourceObj.reportWithin, unit)
+            : null;
 
           return tx.orderMemberPackage.create({
             data: {
@@ -780,7 +880,7 @@ export const createAdminOrder = async (req, res) => {
               dispatchStatus: "NOT_READY",
             },
           });
-        })
+        }),
       );
 
       return { orderId: order.id };
@@ -801,7 +901,7 @@ export const createAdminOrder = async (req, res) => {
         doctor: true,
         refCenter: true,
         center: true,
-   
+
         slot: true,
       },
     });
@@ -815,7 +915,7 @@ export const createAdminOrder = async (req, res) => {
           backoff: { type: "exponential", delay: 2000 },
           removeOnComplete: true,
           removeOnFail: false,
-        }
+        },
       );
     } catch (e) {
       console.warn("WhatsApp queue failed:", e?.message);
@@ -835,8 +935,6 @@ export const createAdminOrder = async (req, res) => {
     });
   }
 };
-
-
 
 export const acceptOrderByVendor = async (req, res) => {
   try {
@@ -867,11 +965,15 @@ export const acceptOrderByVendor = async (req, res) => {
     });
 
     if (!orderDetails) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     if (orderDetails.vendorId) {
-      return res.status(400).json({ success: false, message: "Order already accepted" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Order already accepted" });
     }
 
     /* --------------------------------------------------------
@@ -990,12 +1092,16 @@ export const acceptOrderByVendor = async (req, res) => {
 
       // NEW indexes
       redis.sRem(pendingDateSet, idStr),
-      pendingPincodeSetNew ? redis.sRem(pendingPincodeSetNew, idStr) : Promise.resolve(0),
+      pendingPincodeSetNew
+        ? redis.sRem(pendingPincodeSetNew, idStr)
+        : Promise.resolve(0),
       redis.sendCommand(["ZREM", orderGeoNew, idStr]).catch(() => 0),
 
       // OLD indexes
       redis.sRem(pendingAllOld, idStr).catch(() => 0),
-      pendingPincodeSetOld ? redis.sRem(pendingPincodeSetOld, idStr).catch(() => 0) : Promise.resolve(0),
+      pendingPincodeSetOld
+        ? redis.sRem(pendingPincodeSetOld, idStr).catch(() => 0)
+        : Promise.resolve(0),
 
       // rejected set
       redis.del(`rejected:${idStr}`).catch(() => 0),
@@ -1010,16 +1116,22 @@ export const acceptOrderByVendor = async (req, res) => {
       sremOldAll,
       sremOldPin,
       delRejected,
-    ] = cleanupResults.map((r) => (r.status === "fulfilled" ? r.value : `ERR:${r.reason?.message}`));
+    ] = cleanupResults.map((r) =>
+      r.status === "fulfilled" ? r.value : `ERR:${r.reason?.message}`,
+    );
 
     // Verify (after cleanup)
     const verify = await Promise.allSettled([
       redis.exists(orderHash),
       redis.sIsMember(pendingDateSet, idStr),
-      pendingPincodeSetNew ? redis.sIsMember(pendingPincodeSetNew, idStr) : Promise.resolve(false),
+      pendingPincodeSetNew
+        ? redis.sIsMember(pendingPincodeSetNew, idStr)
+        : Promise.resolve(false),
       redis.sendCommand(["ZSCORE", orderGeoNew, idStr]).catch(() => null),
       redis.sIsMember(pendingAllOld, idStr).catch(() => false),
-      pendingPincodeSetOld ? redis.sIsMember(pendingPincodeSetOld, idStr).catch(() => false) : Promise.resolve(false),
+      pendingPincodeSetOld
+        ? redis.sIsMember(pendingPincodeSetOld, idStr).catch(() => false)
+        : Promise.resolve(false),
     ]);
 
     const [
@@ -1029,7 +1141,9 @@ export const acceptOrderByVendor = async (req, res) => {
       geoScore,
       stillInOldAll,
       stillInOldPin,
-    ] = verify.map((r) => (r.status === "fulfilled" ? r.value : `ERR:${r.reason?.message}`));
+    ] = verify.map((r) =>
+      r.status === "fulfilled" ? r.value : `ERR:${r.reason?.message}`,
+    );
 
     console.log("✅ Redis cleanup results:", {
       delHash,
@@ -1042,12 +1156,12 @@ export const acceptOrderByVendor = async (req, res) => {
     });
 
     console.log("🔎 Redis verify after cleanup:", {
-      hashExists,               // should be 0
-      stillInDateSet,           // should be false
-      stillInNewPinSet,         // should be false
-      geoScore,                 // should be null
-      stillInOldAll,            // should be false
-      stillInOldPin,            // should be false
+      hashExists, // should be 0
+      stillInDateSet, // should be false
+      stillInNewPinSet, // should be false
+      geoScore, // should be null
+      stillInOldAll, // should be false
+      stillInOldPin, // should be false
     });
 
     /* --------------------------------------------------------
@@ -1136,7 +1250,7 @@ export const vendorStartJob = async (req, res) => {
       order.id,
       order.vendorId,
       parseFloat(order?.address?.latitude),
-      parseFloat(order?.address?.longitude)
+      parseFloat(order?.address?.longitude),
     );
 
     // 3. Emit socket event
@@ -1302,7 +1416,7 @@ export const getOrdersByPatientId = async (req, res) => {
         },
         address: true,
         vendor: true,
- payments: {
+        payments: {
           select: {
             id: true,
             invoiceUrl: true,
@@ -1337,7 +1451,7 @@ export const getOrdersByPatientId = async (req, res) => {
             },
           },
         },
-        center:true
+        center: true,
       },
       orderBy: { createdAt: "desc" },
     });
@@ -1440,7 +1554,7 @@ export const getOrdersByPatientIdCompleted = async (req, res) => {
         },
         address: true,
         vendor: true,
-         payments: {
+        payments: {
           select: {
             id: true,
             invoiceUrl: true,
@@ -1493,8 +1607,8 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
       reportReady === "true"
         ? true
         : reportReady === "false"
-        ? false
-        : undefined; // no filter if not provided
+          ? false
+          : undefined; // no filter if not provided
     const orders = await prisma.order.findMany({
       where: { patientId, reportReady: reportReadyBool },
       select: {
@@ -1600,8 +1714,6 @@ export const getAllOrders = async (req, res) => {
       centerId = "",
       source = "",
     } = req.query;
-
-   
 
     page = Number(page);
     limit = Number(limit);
@@ -1728,17 +1840,36 @@ export const getAllOrders = async (req, res) => {
         },
 
         vendor: { select: { id: true, name: true, email: true } },
-        slot: { select: { id: true, name: true, startTime: true, endTime: true } },
-        address: { select: { id: true, address: true, pincode: true, city: true } },
+        slot: {
+          select: { id: true, name: true, startTime: true, endTime: true },
+        },
+        centerSlot:{
+      select: { id: true, name: true, startTime: true, endTime: true },
+        },
+        address: {
+          select: { id: true, address: true, pincode: true, city: true },
+        },
 
         // ✅ B2B center
         center: {
-          select: { id: true, name: true, contactName: true, address: true, mobile: true },
+          select: {
+            id: true,
+            name: true,
+            contactName: true,
+            address: true,
+            mobile: true,
+          },
         },
 
         // ✅ venue (diagnostic center)
         diagnosticCenter: {
-          select: { id: true, name: true, address: true, pincode: true, cityId: true },
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            pincode: true,
+            cityId: true,
+          },
         },
       },
     });
@@ -1764,8 +1895,6 @@ export const getAllOrders = async (req, res) => {
     });
   }
 };
-
-
 
 export const getOrderById = async (req, res) => {
   try {
@@ -1802,12 +1931,11 @@ export const getOrderById = async (req, res) => {
             exerciseFrequency: true,
           },
         },
-        payments:{
-          select:{
-            id:true,
-            invoiceUrl:true
-
-          }
+        payments: {
+          select: {
+            id: true,
+            invoiceUrl: true,
+          },
         },
         address: {
           select: {
@@ -2086,7 +2214,7 @@ export const getOrderResultsById = async (req, res) => {
         /* -------- INDIVIDUAL TEST -------- */
         if (omp.testId && omp.test) {
           const result = resultMap.get(
-            `${orderId}_${member.patientId}_${omp.testId}`
+            `${orderId}_${member.patientId}_${omp.testId}`,
           );
 
           return {
@@ -2117,7 +2245,7 @@ export const getOrderResultsById = async (req, res) => {
 
           const packageTests = omp.package.checkupPackages.map((cp) => {
             const result = resultMap.get(
-              `${orderId}_${member.patientId}_${cp.test.id}`
+              `${orderId}_${member.patientId}_${cp.test.id}`,
             );
 
             if (result) completed++;
@@ -2188,8 +2316,9 @@ export const getOrderResultsById = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, paymentStatus, sampleCollected, reportReady, reportUrl } = req.body;
-    console.log( status, paymentStatus, sampleCollected, reportReady, reportUrl )
+    const { status, paymentStatus, sampleCollected, reportReady, reportUrl } =
+      req.body;
+    console.log(status, paymentStatus, sampleCollected, reportReady, reportUrl);
 
     const order = await prisma.order.update({
       where: { id: Number(id) },
@@ -2197,7 +2326,8 @@ export const updateOrderStatus = async (req, res) => {
         ...(status && { status }),
         ...(paymentStatus && { paymentStatus }),
         ...(sampleCollected !== undefined && {
-          sampleCollected: sampleCollected === "true" || sampleCollected === true,
+          sampleCollected:
+            sampleCollected === "true" || sampleCollected === true,
         }),
         ...(reportReady !== undefined && {
           reportReady: reportReady === "true" || reportReady === true,
@@ -2219,7 +2349,6 @@ export const updateOrderStatus = async (req, res) => {
     });
   }
 };
-
 
 export const updateAssignvendor = async (req, res) => {
   try {
@@ -2722,8 +2851,8 @@ export const addOrderPayment = async (req, res) => {
       newTotalPaid >= order.finalAmount
         ? "paid"
         : newTotalPaid > 0
-        ? "partially_paid"
-        : "pending";
+          ? "partially_paid"
+          : "pending";
 
     // Update order payment status
     const updatedOrder = await prisma.order.update({
@@ -2848,11 +2977,11 @@ export const getOrderPaymentSummary = async (req, res) => {
     // Calculate summary
     const totalPaid = payments.reduce(
       (sum, payment) => sum + payment.amount,
-      0
+      0,
     );
     const totalRefunded = payments.reduce(
       (sum, payment) => sum + (payment.refundAmount || 0),
-      0
+      0,
     );
     const netPaid = totalPaid - totalRefunded;
     const balance = order.finalAmount - netPaid;
@@ -2949,13 +3078,13 @@ export const getOrderReports = async (req, res) => {
         lt: d.add(1, "day").toDate(),
       };
     }
-// ✅ ORDER ID FILTER
-if (orderId && String(orderId).trim()) {
-  const idNum = Number(String(orderId).replace(/\D/g, ""));
-  if (!Number.isNaN(idNum) && idNum > 0) {
-    where.id = idNum; // ✅ Prisma order.id
-  }
-}
+    // ✅ ORDER ID FILTER
+    if (orderId && String(orderId).trim()) {
+      const idNum = Number(String(orderId).replace(/\D/g, ""));
+      if (!Number.isNaN(idNum) && idNum > 0) {
+        where.id = idNum; // ✅ Prisma order.id
+      }
+    }
 
     if (fromDate && toDate && fromDate !== "" && toDate !== "") {
       where.date = {
@@ -3028,6 +3157,8 @@ if (orderId && String(orderId).trim()) {
             city: { select: { id: true, name: true } }, // ✅ IMPORTANT for city filter
           },
         },
+ slot: { select: { id: true, startTime: true , endTime:true } },
+ centerSlot: { select: { id: true, startTime: true , endTime:true } },
 
         refCenter: { select: { id: true, name: true } },
         doctor: { select: { id: true, name: true } },
@@ -3138,7 +3269,7 @@ export const getOrdersExpiringSoon = async (req, res) => {
         if (slotStart) {
           slotDateTime = dayjs(
             `${dayjs(order.date).format("YYYY-MM-DD")} ${slotStart}`,
-            "YYYY-MM-DD hh:mm A"
+            "YYYY-MM-DD hh:mm A",
           );
           minsLeft = slotDateTime.diff(now, "minute");
         }
@@ -3152,7 +3283,7 @@ export const getOrdersExpiringSoon = async (req, res) => {
       // ✅ Optional: only those expiring within next 30 mins (and not negative)
       .filter(
         (o) =>
-          typeof o.minsLeft === "number" && o.minsLeft >= 0 && o.minsLeft <= 30
+          typeof o.minsLeft === "number" && o.minsLeft >= 0 && o.minsLeft <= 30,
       );
 
     res.json({
@@ -3173,7 +3304,6 @@ export const getOrdersExpiringSoon = async (req, res) => {
     });
   }
 };
-
 
 const OPEN_STATUSES = ["NOT_READY", "READY"];
 
@@ -3287,7 +3417,9 @@ export const fetchReportDue = async (req, res) => {
       window: {
         beforeMin,
         soonEndUTC: soonEnd.toISOString(),
-        soonEndIST: dayjs(soonEnd).tz("Asia/Kolkata").format("YYYY-MM-DD hh:mm A"),
+        soonEndIST: dayjs(soonEnd)
+          .tz("Asia/Kolkata")
+          .format("YYYY-MM-DD hh:mm A"),
       },
       totals: {
         overdue: totalOverdue,
@@ -3310,19 +3442,21 @@ export const fetchReportDue = async (req, res) => {
   }
 };
 
-
-
 export const rescheduleOrder = async (req, res) => {
   try {
     const orderId = Number(req.params.orderId);
     const { date, slotId, centerSlotId } = req.body;
 
     if (!Number.isFinite(orderId) || orderId <= 0) {
-      return res.status(400).json({ success: false, message: "Valid orderId required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Valid orderId required" });
     }
 
     if (!date) {
-      return res.status(400).json({ success: false, message: "date is required (YYYY-MM-DD)" });
+      return res
+        .status(400)
+        .json({ success: false, message: "date is required (YYYY-MM-DD)" });
     }
 
     const newDate = new Date(date);
@@ -3344,30 +3478,53 @@ export const rescheduleOrder = async (req, res) => {
       },
     });
 
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+    if (!order)
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
 
     // Optional: block reschedule for cancelled/completed
-    if (["cancelled", "completed"].includes(String(order.status).toLowerCase())) {
-      return res.status(400).json({ success: false, message: "Order cannot be rescheduled" });
+    if (
+      ["cancelled", "completed"].includes(String(order.status).toLowerCase())
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Order cannot be rescheduled" });
     }
 
     // ✅ Decide mode based on payload
-    const wantsHomeSlot = slotId !== undefined && slotId !== null && slotId !== "";
-    const wantsCenterSlot = centerSlotId !== undefined && centerSlotId !== null && centerSlotId !== "";
+    const wantsHomeSlot =
+      slotId !== undefined && slotId !== null && slotId !== "";
+    const wantsCenterSlot =
+      centerSlotId !== undefined &&
+      centerSlotId !== null &&
+      centerSlotId !== "";
 
     if (wantsHomeSlot && wantsCenterSlot) {
-      return res.status(400).json({ success: false, message: "Send either slotId or centerSlotId" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Send either slotId or centerSlotId",
+        });
     }
 
     if (!wantsHomeSlot && !wantsCenterSlot) {
-      return res.status(400).json({ success: false, message: "Send slotId (home) or centerSlotId (center)" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Send slotId (home) or centerSlotId (center)",
+        });
     }
 
     // ✅ If centerSlotId, check capacity for that date
     if (wantsCenterSlot) {
       const csId = Number(centerSlotId);
       if (!Number.isFinite(csId) || csId <= 0) {
-        return res.status(400).json({ success: false, message: "Valid centerSlotId required" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Valid centerSlotId required" });
       }
 
       const slot = await prisma.centerSlot.findUnique({
@@ -3376,7 +3533,9 @@ export const rescheduleOrder = async (req, res) => {
       });
 
       if (!slot || slot.isActive === false) {
-        return res.status(400).json({ success: false, message: "Center slot not available" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Center slot not available" });
       }
 
       // Normalize date to day range
@@ -3434,14 +3593,20 @@ export const rescheduleOrder = async (req, res) => {
         return ord;
       });
 
-      return res.json({ success: true, message: "Order rescheduled", data: updated });
+      return res.json({
+        success: true,
+        message: "Order rescheduled",
+        data: updated,
+      });
     }
 
     // ✅ Home slot flow (simple)
     if (wantsHomeSlot) {
       const sId = Number(slotId);
       if (!Number.isFinite(sId) || sId <= 0) {
-        return res.status(400).json({ success: false, message: "Valid slotId required" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Valid slotId required" });
       }
 
       const updated = await prisma.order.update({
@@ -3460,7 +3625,11 @@ export const rescheduleOrder = async (req, res) => {
         },
       });
 
-      return res.json({ success: true, message: "Order rescheduled", data: updated });
+      return res.json({
+        success: true,
+        message: "Order rescheduled",
+        data: updated,
+      });
     }
   } catch (err) {
     console.error("RESCHEDULE ORDER ERROR:", err);
