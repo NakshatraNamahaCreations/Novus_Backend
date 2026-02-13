@@ -1416,6 +1416,8 @@ export const getOrdersByPatientId = async (req, res) => {
         },
         address: true,
         vendor: true,
+          slot:{select:{id:true,startTime:true,endTime:true}},
+        centerSlot:{select:{id:true,startTime:true,endTime:true}},
         payments: {
           select: {
             id: true,
@@ -1620,6 +1622,9 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
         isHomeSample: true,
         sampleCollected: true,
         reportUrl: true,
+        slot:{select:{id:true,startTime:true,endTime:true}},
+        centerSlot:{select:{id:true,startTime:true,endTime:true}},
+
         patient: {
           select: {
             id: true,
