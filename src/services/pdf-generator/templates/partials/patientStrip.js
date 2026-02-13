@@ -73,9 +73,9 @@ export function patientStripHtml({ order, patient, derived }) {
         <div><b>Referred By:</b> ${esc(doctor)}</div>
         <div><b>Center:</b> ${esc(order?.center?.name || "—")}</div>
 
-        <div><b>Collected:</b> ${esc(collectedAt)}</div>
-        <div><b>Received:</b> ${esc(receivedAt)}</div>
-        <div><b>Reported:</b> ${esc(reportedAt)}</div>
+        <div><b>Collected:</b>${esc(collectedAt)}</div>
+        <div><b>Received:</b>${esc(receivedAt)}</div>
+        <div><b>Reported:</b>${esc(reportedAt)}</div>
       </div>
     </div>
   `;

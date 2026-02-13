@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 export const ParameterService = {
+   // ✅ CREATE
   create: async (testId, data) => {
     const { ranges, resultOpts, createdById, ...parameterData } = data;
 
@@ -11,17 +12,37 @@ export const ParameterService = {
         testId: Number(testId),
         createdById: createdById ?? null,
 
-        ranges: ranges?.length
+        // ✅ create ranges (no filtering here; but we still normalize numbers/nulls)
+        ranges: Array.isArray(ranges) && ranges.length
           ? {
               create: ranges.map((r) => ({
-                ...r,
+                lowerLimit:
+                  r?.lowerLimit !== null && r?.lowerLimit !== "" && r?.lowerLimit !== undefined
+                    ? Number(r.lowerLimit)
+                    : null,
+                upperLimit:
+                  r?.upperLimit !== null && r?.upperLimit !== "" && r?.upperLimit !== undefined
+                    ? Number(r.upperLimit)
+                    : null,
+                criticalLow:
+                  r?.criticalLow !== null && r?.criticalLow !== "" && r?.criticalLow !== undefined
+                    ? Number(r.criticalLow)
+                    : null,
+                criticalHigh:
+                  r?.criticalHigh !== null && r?.criticalHigh !== "" && r?.criticalHigh !== undefined
+                    ? Number(r.criticalHigh)
+                    : null,
+                referenceRange: r?.referenceRange?.trim?.() || null,
+                gender: r?.gender || "Both",
+                normalValueHtml: r?.normalValueHtml?.trim?.() || null,
+                specialConditionHtml: r?.specialConditionHtml?.trim?.() || null,
                 createdById: createdById ?? null,
               })),
             }
           : undefined,
 
         // ✅ store Positive/Negative/Nil in ResultOption table
-        resultOpts: resultOpts?.length
+        resultOpts: Array.isArray(resultOpts) && resultOpts.length
           ? {
               create: resultOpts
                 .filter((o) => (o?.label || o?.value)?.toString().trim())
@@ -39,8 +60,11 @@ export const ParameterService = {
       },
     });
   },
-  // parameter.service.js - Updated update function
+
+  // ✅ UPDATE (delete + recreate ranges + resultOpts)
   update: async (parameterId, data) => {
+
+
     const { ranges, resultOpts, createdById, ...parameterData } = data;
 
     return prisma.$transaction(async (tx) => {
@@ -57,39 +81,51 @@ export const ParameterService = {
         });
 
         if (Array.isArray(ranges) && ranges.length > 0) {
-          const validRanges = ranges.filter(
-            (r) =>
-              r.lowerLimit !== null ||
-              r.upperLimit !== null ||
-              r.criticalLow !== null ||
-              r.criticalHigh !== null ||
-              (r.referenceRange && r.referenceRange.trim())
-          );
+          // ✅ FIX: consider normalValueHtml/specialConditionHtml as valid content
+          const validRanges = ranges.filter((r) => {
+            const hasNumbers =
+              (r?.lowerLimit !== null && r?.lowerLimit !== "" && r?.lowerLimit !== undefined) ||
+              (r?.upperLimit !== null && r?.upperLimit !== "" && r?.upperLimit !== undefined) ||
+              (r?.criticalLow !== null && r?.criticalLow !== "" && r?.criticalLow !== undefined) ||
+              (r?.criticalHigh !== null && r?.criticalHigh !== "" && r?.criticalHigh !== undefined);
+
+            const hasRef = (r?.referenceRange || "").trim().length > 0;
+            const hasNormalHtml = (r?.normalValueHtml || "").trim().length > 0;
+            const hasSpecialHtml = (r?.specialConditionHtml || "").trim().length > 0;
+
+            return hasNumbers || hasRef || hasNormalHtml || hasSpecialHtml;
+          });
 
           if (validRanges.length > 0) {
             await tx.parameterRange.createMany({
               data: validRanges.map((r) => ({
                 parameterId: Number(parameterId),
+
                 lowerLimit:
-                  r.lowerLimit !== null && r.lowerLimit !== ""
+                  r?.lowerLimit !== null && r?.lowerLimit !== "" && r?.lowerLimit !== undefined
                     ? Number(r.lowerLimit)
                     : null,
+
                 upperLimit:
-                  r.upperLimit !== null && r.upperLimit !== ""
+                  r?.upperLimit !== null && r?.upperLimit !== "" && r?.upperLimit !== undefined
                     ? Number(r.upperLimit)
                     : null,
+
                 criticalLow:
-                  r.criticalLow !== null && r.criticalLow !== ""
+                  r?.criticalLow !== null && r?.criticalLow !== "" && r?.criticalLow !== undefined
                     ? Number(r.criticalLow)
                     : null,
+
                 criticalHigh:
-                  r.criticalHigh !== null && r.criticalHigh !== ""
+                  r?.criticalHigh !== null && r?.criticalHigh !== "" && r?.criticalHigh !== undefined
                     ? Number(r.criticalHigh)
                     : null,
-                referenceRange: r.referenceRange?.trim() || null,
-                gender: r.gender || "Both",
-                normalValueHtml: r.normalValueHtml || null,
-                specialConditionHtml: r.specialConditionHtml || null,
+
+                referenceRange: r?.referenceRange?.trim?.() || null,
+                gender: r?.gender || "Both",
+                normalValueHtml: r?.normalValueHtml?.trim?.() || null,
+                specialConditionHtml: r?.specialConditionHtml?.trim?.() || null,
+
                 createdById: createdById ?? null,
               })),
             });
@@ -97,7 +133,7 @@ export const ParameterService = {
         }
       }
 
-      // ✅ 3) Update result options (delete + recreate)
+      // 3) Update result options (delete + recreate)
       if (resultOpts !== undefined) {
         await tx.resultOption.deleteMany({
           where: { parameterId: Number(parameterId) },

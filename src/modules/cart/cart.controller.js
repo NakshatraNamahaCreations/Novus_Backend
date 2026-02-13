@@ -157,6 +157,13 @@ export const getCart = async (req, res) => {
         cartItems: {
           include: {
             test: true, // single test cart item
+            patient:{
+              select:{
+              
+                fullName:true,
+                age:true
+              }
+            },
             package: {
               include: {
                 checkupPackages: {
