@@ -96,14 +96,17 @@ export const getEnquiries = async (req, res) => {
       limit = "20",
       sortBy = "createdAt",
       order = "desc",
+
+      // ✅ NEW
+      datePreset = "today", // today | yesterday | last7 | all
+      fromDate,
+      toDate,
     } = req.query;
 
-    // ✅ pagination (frontend expects pages/total/items)
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
-    // ✅ sorting (frontend sends sortBy=createdAt|updatedAt and order=asc|desc)
     const sortField = ["createdAt", "updatedAt"].includes(sortBy)
       ? sortBy
       : "createdAt";
@@ -115,21 +118,66 @@ export const getEnquiries = async (req, res) => {
     if (status) {
       const st = String(status);
       if (!ALLOWED_STATUS.has(st)) {
-        return bad(
-          res,
-          `Invalid status. Allowed: ${Array.from(ALLOWED_STATUS).join(", ")}`
-        );
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Allowed: ${Array.from(ALLOWED_STATUS).join(", ")}`,
+        });
       }
       where.status = st;
     }
 
-    // ✅ search filter (name or number)
+    // ✅ search filter
     if (search && String(search).trim()) {
       const s = String(search).trim();
       where.OR = [
         { name: { contains: s, mode: "insensitive" } },
         { number: { contains: s, mode: "insensitive" } },
       ];
+    }
+
+    // ✅ DATE FILTER (createdAt)
+    const makeStartEnd = (start, end) => {
+      const s = new Date(start);
+      s.setHours(0, 0, 0, 0);
+      const e = new Date(end);
+      e.setHours(23, 59, 59, 999);
+      return { s, e };
+    };
+
+    // If custom range passed, use it
+    if (fromDate && toDate) {
+      const { s, e } = makeStartEnd(fromDate, toDate);
+      where.createdAt = { gte: s, lte: e };
+    } else {
+      // Otherwise use preset (DEFAULT = today)
+      const now = new Date();
+      const today = new Date(now);
+      today.setHours(0, 0, 0, 0);
+
+      if (datePreset === "today") {
+        const end = new Date(now);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt = { gte: today, lte: end };
+      } else if (datePreset === "yesterday") {
+        const y = new Date(today);
+        y.setDate(y.getDate() - 1);
+        const yEnd = new Date(y);
+        yEnd.setHours(23, 59, 59, 999);
+        where.createdAt = { gte: y, lte: yEnd };
+      } else if (datePreset === "last7") {
+        const start = new Date(today);
+        start.setDate(start.getDate() - 6);
+        const end = new Date(now);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt = { gte: start, lte: end };
+      } else if (datePreset === "all") {
+        // no createdAt filter
+      } else {
+        // unknown preset -> default today
+        const end = new Date(now);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt = { gte: today, lte: end };
+      }
     }
 
     const [total, items] = await Promise.all([
@@ -140,30 +188,32 @@ export const getEnquiries = async (req, res) => {
         take: limitNum,
         orderBy: { [sortField]: sortOrder },
         include: {
-          updatedBy: {
-            select: { id: true, name: true, email: true },
-          },
+          updatedBy: { select: { id: true, name: true, email: true } },
         },
       }),
     ]);
 
     const pages = Math.max(1, Math.ceil(total / limitNum));
 
-    // ✅ exact shape your frontend uses
-    return ok(res, "Enquiries fetched", {
-      items,
-      total,
-      pages,
-      page: pageNum,
-      limit: limitNum,
-      sortBy: sortField,
-      order: sortOrder,
+    return res.json({
+      success: true,
+      message: "Enquiries fetched",
+      data: {
+        items,
+        total,
+        pages,
+        page: pageNum,
+        limit: limitNum,
+        sortBy: sortField,
+        order: sortOrder,
+      },
     });
   } catch (err) {
     console.error("getEnquiries error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
-}
+};
+
 
 /**
  * ✅ GET /enquiry/:id

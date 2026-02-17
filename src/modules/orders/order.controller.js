@@ -505,12 +505,12 @@ export const createOrder = async (req, res) => {
       }
     }
 
-    console.log("testType",testType)
+
     const isRadiology = String(testType || "").toUpperCase() === "RADIOLOGY";
 const isPathology = String(testType || "").toUpperCase() === "PATHOLOGY";
 
 
-console.log(isRadiology,isPathology)
+
    if (!isRadiology) {
   const address = await prisma.address.findUnique({
     where: { id: addressId },
@@ -521,7 +521,7 @@ console.log(isRadiology,isPathology)
   const lng = Number(address.longitude);
   const pincodeStr = String(address.pincode || "").trim();
 
-  // ✅ Slot label (keep as you already have)
+ 
   let slotLabel = "";
   if (isHomeSample) {
     const slotData = await prisma.slot.findUnique({
@@ -1713,7 +1713,7 @@ export const getAllOrders = async (req, res) => {
       fromDate,
       toDate,
 
-      // ✅ NEW FILTERS
+      // ✅ FILTERS
       refCenterId = "",
       diagnosticCenterId = "",
       centerId = "",
@@ -1779,7 +1779,7 @@ export const getAllOrders = async (req, res) => {
       where.paymentStatus = { in: ["CAPTURED", "COMPLETED", "paid"] };
     }
 
-    // ✅ Date range filter
+    // ✅ TODAY FILTER based on createdAt
     if (fromDate && toDate) {
       const startDate = new Date(fromDate);
       startDate.setHours(0, 0, 0, 0);
@@ -1787,28 +1787,28 @@ export const getAllOrders = async (req, res) => {
       const endDate = new Date(toDate);
       endDate.setHours(23, 59, 59, 999);
 
-      where.date = { gte: startDate, lte: endDate };
+      where.createdAt = { gte: startDate, lte: endDate }; // ✅ changed
     }
 
-    // ✅ NEW: Ref Center filter
+    // ✅ Ref Center filter
     if (refCenterId && refCenterId !== "all") {
       const id = Number(refCenterId);
       if (Number.isFinite(id)) where.refCenterId = id;
     }
 
-    // ✅ NEW: Venue filter (diagnostic center)
+    // ✅ Venue filter (diagnostic center)
     if (diagnosticCenterId && diagnosticCenterId !== "all") {
       const id = Number(diagnosticCenterId);
       if (Number.isFinite(id)) where.diagnosticCenterId = id;
     }
 
-    // ✅ NEW: B2B Center filter (center)
+    // ✅ B2B Center filter (center)
     if (centerId && centerId !== "all") {
       const id = Number(centerId);
       if (Number.isFinite(id)) where.centerId = id;
     }
 
-    // ✅ NEW: Source filter
+    // ✅ Source filter
     if (source && source !== "all") {
       where.source = { contains: String(source), mode: "insensitive" };
     }
@@ -1836,26 +1836,26 @@ export const getAllOrders = async (req, res) => {
         isHomeSample: true,
         source: true,
 
-        // ✅ Ref Center
         refCenter: { select: { id: true, name: true } },
 
-        // ✅ patient
         patient: {
           select: { id: true, fullName: true, email: true, contactNo: true },
         },
 
         vendor: { select: { id: true, name: true, email: true } },
+
         slot: {
           select: { id: true, name: true, startTime: true, endTime: true },
         },
-        centerSlot:{
-      select: { id: true, name: true, startTime: true, endTime: true },
+
+        centerSlot: {
+          select: { id: true, name: true, startTime: true, endTime: true },
         },
+
         address: {
           select: { id: true, address: true, pincode: true, city: true },
         },
 
-        // ✅ B2B center
         center: {
           select: {
             id: true,
@@ -1866,7 +1866,6 @@ export const getAllOrders = async (req, res) => {
           },
         },
 
-        // ✅ venue (diagnostic center)
         diagnosticCenter: {
           select: {
             id: true,

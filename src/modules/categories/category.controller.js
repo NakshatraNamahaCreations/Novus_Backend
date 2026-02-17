@@ -3,10 +3,28 @@ import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 
 const prisma = new PrismaClient();
 
+/**
+ * ✅ Changes done:
+ * 1) Category now requires departmentItemId (DepartmentItem relation)
+ * 2) Category "type" is optional and should NOT be PATHOLOGY/RADIOLOGY (comes from department)
+ * 3) All list APIs support departmentItemId filter
+ * 4) Popular filters corrected (use isPopular, not bannerUrl)
+ * 5) include departmentItem in responses for UI
+ * 6) try/catch everywhere ✅
+ */
+
 // ✅ CREATE
 export const addCategory = async (req, res) => {
   try {
-    const { name, type, order, isPopular } = req.body;
+    const { name, type, order, isPopular, departmentItemId } = req.body;
+
+    if (!name?.trim()) {
+      return res.status(400).json({ error: "Category name is required" });
+    }
+    if (!departmentItemId) {
+      return res.status(400).json({ error: "departmentItemId is required" });
+    }
+
 
     let imgUrl = null;
     let bannerUrl = null;
@@ -15,46 +33,63 @@ export const addCategory = async (req, res) => {
     const bannerFile = req.files?.banner?.[0];
 
     if (imageFile) imgUrl = await uploadToS3(imageFile, "categories");
-    if (bannerFile)
-      bannerUrl = await uploadToS3(bannerFile, "category-banners");
+    if (bannerFile) bannerUrl = await uploadToS3(bannerFile, "category-banners");
 
     const category = await prisma.category.create({
       data: {
-        name,
-        type,
-        order: order ? Number(order) : null,
-        isPopular: isPopular === "true" || isPopular === true, // ✅ handle form-data string
+        name: name.trim(),
+        type: type || null,
+        order: order !== undefined && order !== null && order !== ""
+          ? Number(order)
+          : null,
+        isPopular: isPopular === "true" || isPopular === true,
         imgUrl,
         bannerUrl,
+        departmentItemId: Number(departmentItemId), // ✅ NEW
+      },
+      include: {
+        departmentItem: true, // ✅ for frontend display
       },
     });
 
-    res.status(201).json(category);
+    return res.status(201).json(category);
   } catch (error) {
     console.error("Error creating category:", error);
-    res.status(500).json({ error: "Failed to create category" });
+
+    // unique constraint
+    if (error?.code === "P2002") {
+      return res.status(409).json({ error: "Category with this name already exists" });
+    }
+
+    return res.status(500).json({ error: "Failed to create category" });
   }
 };
 
 // ✅ READ ALL (with optional filters + limit)
 export const getAllCategories = async (req, res) => {
   try {
-    const { type, limit, popular } = req.query;
+    const { type, limit, popular, departmentItemId } = req.query;
 
     const where = {};
+
+    // ✅ optional filters
+    if (departmentItemId) where.departmentItemId = Number(departmentItemId);
     if (type) where.type = type;
-    if (popular === "true") where.bannerUrl = { not: null };
+
+    // ✅ if popular=true => isPopular true
+    if (popular === "true") where.isPopular = true;
 
     const categories = await prisma.category.findMany({
       where,
+      include: { departmentItem: true },
       orderBy: [{ order: "asc" }, { createdAt: "desc" }],
       take: limit ? Number(limit) : undefined,
     });
 
-    res.json(categories);
+    return res.json(categories);
   } catch (error) {
     console.error("Error fetching categories:", error);
-    res.status(500).json({ error: "Failed to fetch categories" });
+    return res.status(500).json({ error: "Failed to fetch categories" });
   }
 };
 
@@ -63,14 +98,14 @@ export const getCategoryById = async (req, res) => {
   try {
     const category = await prisma.category.findUnique({
       where: { id: Number(req.params.id) },
-      include: { subCategories: true },
+      include: { subCategories: true, departmentItem: true },
     });
 
     if (!category) return res.status(404).json({ error: "Category not found" });
-    res.json(category);
+    return res.json(category);
   } catch (error) {
     console.error("Error fetching category:", error);
-    res.status(500).json({ error: "Failed to fetch category" });
+    return res.status(500).json({ error: "Failed to fetch category" });
   }
 };
 
@@ -78,15 +113,25 @@ export const getCategoryById = async (req, res) => {
 export const updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, type, order, isPopular, removeBanner, removeImage } =
-      req.body;
+    const {
+      name,
+      type,
+      order,
+      isPopular,
+      removeBanner,
+      removeImage,
+      departmentItemId,
+    } = req.body;
 
     const existingCategory = await prisma.category.findUnique({
       where: { id: Number(id) },
     });
 
-    if (!existingCategory)
+    if (!existingCategory) {
       return res.status(404).json({ error: "Category not found" });
+    }
+
+
 
     let imgUrl = existingCategory.imgUrl;
     let bannerUrl = existingCategory.bannerUrl;
@@ -99,58 +144,99 @@ export const updateCategory = async (req, res) => {
 
     // ✅ remove banner (only if no new banner uploaded)
     if (shouldRemoveBanner && !bannerFile) {
-      if (existingCategory.bannerUrl)
-        await deleteFromS3(existingCategory.bannerUrl);
+      if (existingCategory.bannerUrl) {
+        try {
+          await deleteFromS3(existingCategory.bannerUrl);
+        } catch (e) {
+          console.error("delete banner s3 failed:", e);
+        }
+      }
       bannerUrl = null;
     }
 
     // ✅ remove image (only if no new image uploaded)
     if (shouldRemoveImage && !imageFile) {
-      if (existingCategory.imgUrl) await deleteFromS3(existingCategory.imgUrl);
+      if (existingCategory.imgUrl) {
+        try {
+          await deleteFromS3(existingCategory.imgUrl);
+        } catch (e) {
+          console.error("delete image s3 failed:", e);
+        }
+      }
       imgUrl = null;
     }
 
     // ✅ replace category image
     if (imageFile) {
-      if (existingCategory.imgUrl) await deleteFromS3(existingCategory.imgUrl);
+      if (existingCategory.imgUrl) {
+        try {
+          await deleteFromS3(existingCategory.imgUrl);
+        } catch (e) {
+          console.error("replace image delete old failed:", e);
+        }
+      }
       imgUrl = await uploadToS3(imageFile, "categories");
     }
 
     // ✅ replace banner image
     if (bannerFile) {
-      if (existingCategory.bannerUrl)
-        await deleteFromS3(existingCategory.bannerUrl);
+      if (existingCategory.bannerUrl) {
+        try {
+          await deleteFromS3(existingCategory.bannerUrl);
+        } catch (e) {
+          console.error("replace banner delete old failed:", e);
+        }
+      }
       bannerUrl = await uploadToS3(bannerFile, "category-banners");
     }
 
     const updatedCategory = await prisma.category.update({
       where: { id: Number(id) },
       data: {
-        name: name ?? existingCategory.name,
-        type: type ?? existingCategory.type,
-        order: order !== undefined ? Number(order) : existingCategory.order,
+        name: name !== undefined ? String(name).trim() : existingCategory.name,
+        type: type !== undefined ? (type || null) : existingCategory.type,
+
+        // order: keep same if not provided
+        order:
+          order !== undefined && order !== null && order !== ""
+            ? Number(order)
+            : order === "" // if they explicitly send empty string => set null
+              ? null
+              : existingCategory.order,
+
         isPopular:
           isPopular !== undefined
             ? isPopular === "true" || isPopular === true
             : existingCategory.isPopular,
+
         imgUrl,
         bannerUrl,
+
+        // ✅ NEW
+        departmentItemId:
+          departmentItemId !== undefined && departmentItemId !== null && departmentItemId !== ""
+            ? Number(departmentItemId)
+            : existingCategory.departmentItemId,
       },
+      include: { departmentItem: true },
     });
 
-    res.json(updatedCategory);
+    return res.json(updatedCategory);
   } catch (error) {
     console.error("Error updating category:", error);
-    res.status(500).json({ error: "Failed to update category" });
+
+    if (error?.code === "P2002") {
+      return res.status(409).json({ error: "Category with this name already exists" });
+    }
+
+    return res.status(500).json({ error: "Failed to update category" });
   }
 };
 
-// ✅ DELETE
 // ✅ DELETE (safe + user-friendly)
 export const deleteCategory = async (req, res) => {
   try {
     const id = Number(req.params.id);
-    console.log("id", id);
 
     if (!Number.isFinite(id)) {
       return res
@@ -158,7 +244,6 @@ export const deleteCategory = async (req, res) => {
         .json({ success: false, message: "Invalid category id" });
     }
 
-    // 1) find category + usage counts
     const existingCategory = await prisma.category.findUnique({
       where: { id },
       select: {
@@ -208,7 +293,6 @@ export const deleteCategory = async (req, res) => {
       },
     ].filter((x) => x.count > 0);
 
-    // 2) block delete if used anywhere
     if (usage.length > 0) {
       const details = usage.map((u) => `${u.label} (${u.count})`).join(", ");
       return res.status(409).json({
@@ -219,15 +303,12 @@ export const deleteCategory = async (req, res) => {
       });
     }
 
-    // 3) delete DB first (prevents deleting S3 when FK fails)
     await prisma.category.delete({ where: { id } });
-    console.log("db deleted");
 
-    // 4) delete S3 images best-effort (don’t fail delete if S3 fails)
+    // best-effort S3 cleanup
     try {
       if (existingCategory.imgUrl) await deleteFromS3(existingCategory.imgUrl);
-      if (existingCategory.bannerUrl)
-        await deleteFromS3(existingCategory.bannerUrl);
+      if (existingCategory.bannerUrl) await deleteFromS3(existingCategory.bannerUrl);
     } catch (s3Err) {
       console.error("S3 delete failed (ignored):", s3Err);
     }
@@ -239,7 +320,6 @@ export const deleteCategory = async (req, res) => {
   } catch (error) {
     console.error("Error deleting category:", error);
 
-    // If something else still references it (fallback)
     if (error?.code === "P2003") {
       return res.status(409).json({
         success: false,
@@ -258,44 +338,48 @@ export const deleteCategory = async (req, res) => {
 
 export const getPopularCategories = async (req, res) => {
   try {
-    const { limit = 6, type } = req.query;
+    const { limit = 6, type, departmentItemId } = req.query;
 
     const where = { isPopular: true };
     if (type) where.type = type;
+    if (departmentItemId) where.departmentItemId = Number(departmentItemId);
 
     const categories = await prisma.category.findMany({
       where,
+      include: { departmentItem: true },
       orderBy: [{ order: "asc" }, { createdAt: "desc" }],
       take: Number(limit),
     });
 
-    res.json(categories);
+    return res.json(categories);
   } catch (e) {
     console.error("getPopularCategories error:", e);
-    res.status(500).json({ error: "Failed to fetch popular categories" });
+    return res.status(500).json({ error: "Failed to fetch popular categories" });
   }
 };
 
 export const getBasedOnTestType = async (req, res) => {
   try {
-    const { type, limit = 50 } = req.query;
+    const { type, limit = 50, departmentItemId } = req.query;
 
     const where = {};
+    if (departmentItemId) where.departmentItemId = Number(departmentItemId);
 
+    // ✅ IMPORTANT:
+    // You said "remove pathology/radiology from category type".
+    // So DON'T rely on type=PATHOLOGY/RADIOLOGY here.
+    // If you still want "CHECKUP" behavior, keep it based on category.type (CURATED_CHECKUP / PROFILE etc.)
     if (type) {
-      // ✅ Special case: if type=CHECKUP, return both PATHOLOGY + CURATED_CHECKUP
       if (String(type).toUpperCase() === "CHECKUP") {
-        where.OR = [
-          { type: "PATHOLOGY" },
-          { type: "CURATED_CHECKUP" },
-        ];
+        where.OR = [{ type: "CURATED_CHECKUP" }, { type: "PROFILE" }];
       } else {
-        where.type = type; // normal filter
+        where.type = type;
       }
     }
 
     const categories = await prisma.category.findMany({
       where,
+      include: { departmentItem: true },
       orderBy: [{ order: "asc" }, { createdAt: "desc" }],
       take: Number(limit) || 50,
     });

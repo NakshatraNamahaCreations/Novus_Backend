@@ -5,12 +5,14 @@ import { Readable } from "stream";
 
 const prisma = new PrismaClient();
 
+/* --------------------------
+  helpers
+-------------------------- */
 const parseIdsArray = (value) => {
   if (!value) return [];
   if (Array.isArray(value)) return value.map((x) => Number(x)).filter(Boolean);
 
   if (typeof value === "string") {
-    // "1,2,3"
     if (value.includes(",")) {
       return value
         .split(",")
@@ -18,13 +20,11 @@ const parseIdsArray = (value) => {
         .filter(Boolean);
     }
 
-    // "[1,2,3]"
     try {
       const parsed = JSON.parse(value);
       if (Array.isArray(parsed)) return parsed.map(Number).filter(Boolean);
     } catch {}
 
-    // "1"
     const n = Number(value);
     return Number.isFinite(n) ? [n] : [];
   }
@@ -32,7 +32,114 @@ const parseIdsArray = (value) => {
   return [];
 };
 
+const parseBoolean = (val, fallback = false) => {
+  if (val === undefined || val === null) return fallback;
+  if (typeof val === "boolean") return val;
+  if (typeof val === "string") return val === "true";
+  return fallback;
+};
 
+const parseJsonIfString = (v) => {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v === "string") {
+    try {
+      return JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  return v;
+};
+
+/* =========================
+   helpers (same as yours)
+========================= */
+const clamp = (n, min, max) => Math.min(Math.max(n, min), max);
+const round2 = (n) => +Number(n || 0).toFixed(2);
+
+const parseDiscountInput = (raw) => {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+
+  if (text.endsWith("%")) {
+    const num = Number(text.slice(0, -1).trim());
+    if (!Number.isFinite(num)) return null;
+    return { mode: "PERCENT", value: num };
+  }
+
+  const num = Number(text);
+  if (!Number.isFinite(num)) return null;
+  return { mode: "AMOUNT", value: num };
+};
+
+const computeDiscountFields = (actualPrice, discountInput) => {
+  const actual = Number(actualPrice || 0);
+  if (!Number.isFinite(actual) || actual <= 0) {
+    return { discount: 0, offerPrice: round2(actual) };
+  }
+
+  const parsed = parseDiscountInput(discountInput);
+  if (!parsed) {
+    return { discount: 0, offerPrice: round2(actual) };
+  }
+
+  let discountAmount = 0;
+  let percent = 0;
+
+  if (parsed.mode === "PERCENT") {
+    percent = clamp(parsed.value, 0, 100);
+    discountAmount = round2(actual * (percent / 100));
+  } else {
+    discountAmount = clamp(round2(parsed.value), 0, round2(actual));
+    percent = round2((discountAmount / actual) * 100);
+  }
+
+  return {
+    discount: percent,
+    offerPrice: round2(actual - discountAmount),
+  };
+};
+
+
+/**
+ * ✅ Resolve departmentItemId for a test
+ * Priority:
+ *  1) req.body.departmentItemId (if provided)
+ *  2) Category.departmentItemId (auto)
+ */
+const resolveDepartmentItemId = async ({ departmentItemId, categoryId }) => {
+  // 1) manual override
+  if (departmentItemId !== undefined && departmentItemId !== null && departmentItemId !== "") {
+    const depId = Number(departmentItemId);
+    if (!depId) throw new Error("Invalid departmentItemId");
+
+    const dep = await prisma.departmentItem.findUnique({
+      where: { id: depId },
+      select: { id: true, isActive: true },
+    });
+
+    if (!dep) throw new Error("Invalid departmentItemId");
+    if (dep.isActive === false) throw new Error("Department is inactive");
+
+    return dep.id;
+  }
+
+  // 2) auto from category
+  if (!categoryId) return null;
+
+  const cat = await prisma.category.findUnique({
+    where: { id: Number(categoryId) },
+    select: { id: true, departmentItemId: true },
+  });
+
+  if (!cat) throw new Error("Invalid categoryId");
+
+  return cat.departmentItemId ? Number(cat.departmentItemId) : null;
+};
+
+/* =========================================================
+   ADD TEST  ✅ now stores departmentItemId
+========================================================= */
 export const addTest = async (req, res) => {
   try {
     const {
@@ -44,7 +151,6 @@ export const addTest = async (req, res) => {
       gender,
       description,
       contains,
-
       preparations,
       sampleRequired,
       testType,
@@ -57,109 +163,132 @@ export const addTest = async (req, res) => {
       spotlight,
       features,
       sortOrder,
-            // ✅ NEW (multi-category)
-      otherCategoryIds, 
+
+      // ✅ NEW
+      departmentItemId, // optional, else auto from category
+
+      // ✅ existing (multi-category)
+      otherCategoryIds,
     } = req.body;
+
+    if (!name?.trim()) return res.status(400).json({ error: "Name is required" });
+    if (!categoryId) return res.status(400).json({ error: "categoryId is required" });
+    if (!testType) return res.status(400).json({ error: "testType is required" });
+    if (reportWithin === undefined || reportWithin === null || reportWithin === "")
+      return res.status(400).json({ error: "reportWithin is required" });
+    if (!reportUnit) return res.status(400).json({ error: "reportUnit is required" });
 
     // Upload image (optional)
     let imgUrl = null;
-    if (req.file) {
-      imgUrl = await uploadToS3(req.file, "tests");
-    }
+    if (req.file) imgUrl = await uploadToS3(req.file, "tests");
 
     // Parse numeric values
-    const actual = parseFloat(actualPrice);
-    const finalDiscount = discount ? parseFloat(discount) : 0;
+    const actual = Number(actualPrice);
+    if (!Number.isFinite(actual)) return res.status(400).json({ error: "Invalid actualPrice" });
 
+    const finalOffer = offerPrice !== undefined && offerPrice !== null && offerPrice !== ""
+      ? Number(offerPrice)
+      : null;
 
+    const finalDiscount = discount !== undefined && discount !== null && discount !== ""
+      ? Number(discount)
+      : 0;
 
-    // Parse cityWisePrice (optional)
-    let parsedCityWisePrice = null;
-    if (cityWisePrice) {
-      parsedCityWisePrice =
-        typeof cityWisePrice === "string"
-          ? JSON.parse(cityWisePrice)
-          : cityWisePrice;
-    }
+    const parsedCityWisePrice = parseJsonIfString(cityWisePrice);
+    const finalSpotlight = parseBoolean(spotlight, false);
 
     // Validate category
     const category = await prisma.category.findUnique({
       where: { id: Number(categoryId) },
+      select: { id: true },
     });
     if (!category) return res.status(400).json({ error: "Invalid categoryId" });
 
-    // Validate subcategory
+    // Validate subcategory (optional)
     let subCategory = null;
     if (subCategoryId) {
       subCategory = await prisma.subCategory.findUnique({
         where: { id: Number(subCategoryId) },
+        select: { id: true },
       });
-      if (!subCategory) {
-        return res.status(400).json({ error: "Invalid subCategoryId" });
-      }
+      if (!subCategory) return res.status(400).json({ error: "Invalid subCategoryId" });
     }
 
-    // --- SPOTLIGHT NORMALIZATION ---
-    let finalSpotlight = false; // default
-
-    if (spotlight !== undefined) {
-      if (typeof spotlight === "boolean") {
-        finalSpotlight = spotlight;
-      } else if (typeof spotlight === "string") {
-        finalSpotlight = spotlight === "true";
-      }
+    // ✅ Resolve departmentItemId
+    let finalDepartmentItemId = null;
+    try {
+      finalDepartmentItemId = await resolveDepartmentItemId({
+        departmentItemId,
+        categoryId: category.id,
+      });
+    } catch (e) {
+      return res.status(400).json({ error: e.message || "Invalid department" });
     }
-      // ✅ Parse otherCategoryIds
-    const otherIds = parseIdsArray(otherCategoryIds)
-      .filter((id) => id !== Number(categoryId)); // avoid duplicate with primary
 
-    // Create Test
+    // ✅ Parse other categories
+    const otherIds = parseIdsArray(otherCategoryIds).filter(
+      (id) => id !== Number(category.id)
+    );
+
     const test = await prisma.test.create({
       data: {
-        name,
-        createdById: req.user.id,
+        name: name.trim(),
+        createdById: req.user?.id ?? null,
+
         actualPrice: actual,
-        offerPrice: Number(offerPrice), // 👈 FINAL PRICE AFTER ROUNDING
+        offerPrice: finalOffer,
         discount: finalDiscount,
         cityWisePrice: parsedCityWisePrice,
-        gender,
-        imgUrl,
-        description,
-        contains,
 
-        preparations,
-        sampleRequired,
+        gender: gender ?? null,
+        imgUrl,
+        description: description ?? null,
+        contains: contains ?? null,
+        preparations: preparations ?? null,
+        sampleRequired: sampleRequired ?? null,
+
         testType,
         categoryId: category.id,
         subCategoryId: subCategory ? subCategory.id : null,
+
+        // ✅ NEW
+        departmentItemId: finalDepartmentItemId,
+
         reportWithin: Number(reportWithin),
-        reportUnit,
-        showIn,
-        alsoKnowAs,
+        reportUnit: String(reportUnit),
+        showIn: showIn ?? null,
+        alsoKnowAs: alsoKnowAs ?? null,
         spotlight: finalSpotlight,
-        features,
-        sortOrder: sortOrder !== undefined ? Number(sortOrder) : 0, 
-         // ✅ connect other categories
+        features: features ?? null,
+
+        sortOrder: sortOrder !== undefined && sortOrder !== null && sortOrder !== ""
+          ? Number(sortOrder)
+          : 0,
+
         otherCategories: otherIds.length
           ? {
-              create: otherIds.map((cid) => ({
-                categoryId: Number(cid),
-              })),
+              create: otherIds.map((cid) => ({ categoryId: Number(cid) })),
             }
           : undefined,
       },
       include: {
+        category: { select: { id: true, name: true, type: true } },
+        subCategory: true,
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
         otherCategories: { select: { categoryId: true } },
       },
     });
 
-    res.status(201).json(test);
+    return res.status(201).json(test);
   } catch (error) {
     console.error("Error creating test:", error);
-    res.status(500).json({ error: "Failed to create test" });
+    return res.status(500).json({ error: "Failed to create test" });
   }
 };
 
+/* =========================================================
+   GET ALL TESTS  ✅ include department
+========================================================= */
 export const getAllTests = async (req, res) => {
   try {
     let {
@@ -169,6 +298,7 @@ export const getAllTests = async (req, res) => {
       categoryId,
       subCategoryId,
       testType,
+      departmentItemId, // ✅ NEW filter
     } = req.query;
 
     page = Number(page);
@@ -185,7 +315,8 @@ export const getAllTests = async (req, res) => {
 
     if (categoryId) where.categoryId = Number(categoryId);
     if (subCategoryId) where.subCategoryId = Number(subCategoryId);
-    if (testType) where.testType = testType;
+    if (testType) where.testType = String(testType);
+    if (departmentItemId) where.departmentItemId = Number(departmentItemId);
 
     const total = await prisma.test.count({ where });
 
@@ -194,21 +325,16 @@ export const getAllTests = async (req, res) => {
       include: {
         category: { select: { id: true, name: true, type: true } },
         subCategory: true,
-        otherCategories:true,
-        parameters: {
-          select: { id: true, name: true },
-        
-        },
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
+        otherCategories: true,
+        parameters: { select: { id: true, name: true } },
         _count: { select: { parameters: true } },
       },
       skip: (page - 1) * limit,
       take: limit,
-      orderBy: [
-        { createdAt: "desc" }, 
-      ],
+      orderBy: [{ createdAt: "desc" }],
     });
 
- 
     const data = tests.map((t) => ({
       ...t,
       parameterCount: t._count?.parameters ?? 0,
@@ -237,22 +363,21 @@ export const getAllTestsnames = async (req, res) => {
         name: true,
         offerPrice: true,
         actualPrice: true,
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
       },
-      orderBy: [
-        { sortOrder: "asc" }, // ✅ MAIN
-        { createdAt: "desc" }, // ✅ tie-breaker
-      ],
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
 
-    return res.json({
-      data: tests,
-    });
+    return res.json({ data: tests });
   } catch (error) {
     console.error("Error fetching tests:", error);
     return res.status(500).json({ error: "Failed to fetch tests" });
   }
 };
 
+/* =========================================================
+   GET SPOTLIGHT TESTS ✅ include department
+========================================================= */
 export const getSpotlightTests = async (req, res) => {
   try {
     let {
@@ -262,66 +387,38 @@ export const getSpotlightTests = async (req, res) => {
       categoryId,
       subCategoryId,
       testType,
+      departmentItemId, // ✅ NEW filter
     } = req.query;
 
     page = Number(page);
     limit = Number(limit);
 
-    /* -------------------------------------------
-       BUILD FILTER (SPOTLIGHT ONLY)
-    -------------------------------------------- */
-    const filter = {
-      spotlight: true, // ⭐ IMPORTANT
-    };
+    const filter = { spotlight: true };
 
     if (search.trim() !== "") {
-      filter.name = {
-        contains: search,
-        mode: "insensitive",
-      };
+      filter.name = { contains: search, mode: "insensitive" };
     }
 
     if (categoryId) filter.categoryId = Number(categoryId);
     if (subCategoryId) filter.subCategoryId = Number(subCategoryId);
-    if (testType) filter.testType = testType;
+    if (testType) filter.testType = String(testType);
+    if (departmentItemId) filter.departmentItemId = Number(departmentItemId);
 
-    /* -------------------------------------------
-       TOTAL COUNT
-    -------------------------------------------- */
-    const total = await prisma.test.count({
-      where: filter,
-    });
+    const total = await prisma.test.count({ where: filter });
 
-    /* -------------------------------------------
-       FETCH DATA
-    -------------------------------------------- */
     const tests = await prisma.test.findMany({
       where: filter,
       include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
+        category: { select: { id: true, name: true, type: true } },
         subCategory: true,
-        _count: {
-          select: {
-            parameters: true,
-          },
-        },
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
+        _count: { select: { parameters: true } },
       },
       skip: (page - 1) * limit,
       take: limit,
-      orderBy: {
-        createdAt: "desc",
-      },
+      orderBy: { createdAt: "desc" },
     });
 
-    /* -------------------------------------------
-       RESPONSE
-    -------------------------------------------- */
     return res.json({
       success: true,
       page,
@@ -336,19 +433,16 @@ export const getSpotlightTests = async (req, res) => {
   }
 };
 
+/* =========================================================
+   SEARCH GROUPED (by category) ✅ unchanged but safe
+========================================================= */
 export const searchTestsGrouped = async (req, res) => {
   try {
     const { search } = req.query;
 
-    // Fetch tests (filtered if search provided)
     const tests = await prisma.test.findMany({
       where: search
-        ? {
-            name: {
-              contains: search.trim(),
-              mode: "insensitive",
-            },
-          }
+        ? { name: { contains: String(search).trim(), mode: "insensitive" } }
         : {},
       select: {
         id: true,
@@ -356,16 +450,10 @@ export const searchTestsGrouped = async (req, res) => {
         actualPrice: true,
         discount: true,
         offerPrice: true,
-        category: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
+        category: { select: { id: true, name: true } },
       },
     });
 
-    // Format tests
     const formattedTests = tests.map((t) => ({
       id: t.id,
       name: t.name,
@@ -375,11 +463,8 @@ export const searchTestsGrouped = async (req, res) => {
       categoryName: t.category?.name || "Uncategorized",
     }));
 
-    // Group by category using reduce()
     const grouped = formattedTests.reduce((acc, test) => {
-      if (!acc[test.categoryName]) {
-        acc[test.categoryName] = [];
-      }
+      if (!acc[test.categoryName]) acc[test.categoryName] = [];
       acc[test.categoryName].push({
         id: test.id,
         name: test.name,
@@ -390,19 +475,16 @@ export const searchTestsGrouped = async (req, res) => {
       return acc;
     }, {});
 
-    return res.json({
-      success: true,
-      data: grouped,
-    });
+    return res.json({ success: true, data: grouped });
   } catch (error) {
     console.error("Error grouping tests:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to group tests",
-    });
+    return res.status(500).json({ success: false, message: "Failed to group tests" });
   }
 };
 
+/* =========================================================
+   SEARCH TESTS + CHECKUPS ✅ include department for tests
+========================================================= */
 export const searchTestsAndCheckups = async (req, res) => {
   try {
     const search = String(req.query.search || "").trim();
@@ -427,6 +509,7 @@ export const searchTestsAndCheckups = async (req, res) => {
           offerPrice: true,
           discount: true,
           category: { select: { name: true } },
+          departmentItem: { select: { id: true, name: true, type: true } }, // ✅
         },
         take: 25,
         orderBy: { createdAt: "desc" },
@@ -453,7 +536,6 @@ export const searchTestsAndCheckups = async (req, res) => {
       }),
     ]);
 
-    // ✅ unify “finalPrice” concept
     const normalizedTests = tests.map((t) => ({
       ...t,
       finalPrice: Number(t.offerPrice ?? t.actualPrice ?? 0),
@@ -470,10 +552,7 @@ export const searchTestsAndCheckups = async (req, res) => {
 
     return res.json({
       success: true,
-      data: {
-        tests: normalizedTests,
-        checkups: normalizedCheckups,
-      },
+      data: { tests: normalizedTests, checkups: normalizedCheckups },
     });
   } catch (err) {
     console.error("SEARCH TESTS+CHECKUPS ERROR:", err);
@@ -481,26 +560,20 @@ export const searchTestsAndCheckups = async (req, res) => {
   }
 };
 
+/* =========================================================
+   GET TEST BY ID ✅ include department
+========================================================= */
 export const getTestById = async (req, res) => {
   try {
     const { id } = req.params;
-
-    if (!id) {
-      return res.status(400).json({ error: "Test ID is required" });
-    }
+    if (!id) return res.status(400).json({ error: "Test ID is required" });
 
     const test = await prisma.test.findUnique({
       where: { id: Number(id) },
-
       include: {
-        category: {
-          select: {
-            name: true,
-          },
-        },
+        category: { select: { name: true } },
         subCategory: true,
-
-        // ⭐ INCLUDE PARAMETERS
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
         parameters: {
           orderBy: { order: "asc" },
           include: {
@@ -511,7 +584,6 @@ export const getTestById = async (req, res) => {
                 upperLimit: true,
                 criticalLow: true,
                 criticalHigh: true,
-
                 referenceRange: true,
                 gender: true,
                 normalValueHtml: true,
@@ -520,25 +592,21 @@ export const getTestById = async (req, res) => {
             },
           },
         },
-        _count: {
-          select: {
-            parameters: true, // returns how many parameters the test has
-          },
-        },
+        _count: { select: { parameters: true } },
       },
     });
 
-    if (!test) {
-      return res.status(404).json({ error: "Test not found" });
-    }
-
-    res.json(test);
+    if (!test) return res.status(404).json({ error: "Test not found" });
+    return res.json(test);
   } catch (error) {
     console.error("Error fetching test:", error);
-    res.status(500).json({ error: "Failed to fetch test" });
+    return res.status(500).json({ error: "Failed to fetch test" });
   }
 };
 
+/* =========================================================
+   UPDATE TEST ✅ now updates departmentItemId (auto or manual)
+========================================================= */
 export const updateTest = async (req, res) => {
   try {
     const { id } = req.params;
@@ -565,25 +633,90 @@ export const updateTest = async (req, res) => {
       otherCategoryIds,
       reportWithin,
       reportUnit,
+
+      // ✅ NEW
+      departmentItemId, // optional override
     } = req.body;
 
     const existing = await prisma.test.findUnique({
       where: { id: Number(id) },
+      select: {
+        id: true,
+        imgUrl: true,
+        actualPrice: true,
+        offerPrice: true,
+        discount: true,
+        cityWisePrice: true,
+        gender: true,
+        description: true,
+        contains: true,
+        spotlight: true,
+        preparations: true,
+        sampleRequired: true,
+        testType: true,
+        categoryId: true,
+        subCategoryId: true,
+        showIn: true,
+        alsoKnowAs: true,
+        features: true,
+        sortOrder: true,
+        reportWithin: true,
+        reportUnit: true,
+        departmentItemId: true,
+        name: true,
+      },
     });
 
     if (!existing) return res.status(404).json({ error: "Test not found" });
 
-    // --- IMAGE HANDLING ---
+    // Image
     let imgUrl = existing.imgUrl;
-
     if (req.file) {
-      if (existing.imgUrl) {
-        await deleteFromS3(existing.imgUrl);
-      }
+      if (existing.imgUrl) await deleteFromS3(existing.imgUrl);
       imgUrl = await uploadToS3(req.file, "tests");
     }
 
-    // --- PRICE CALCULATIONS ---
+    // category validate + finalCategoryId
+    let finalCategoryId = existing.categoryId;
+    if (categoryId !== undefined && categoryId !== null && categoryId !== "") {
+      const category = await prisma.category.findUnique({
+        where: { id: Number(categoryId) },
+        select: { id: true },
+      });
+      if (!category) return res.status(400).json({ error: "Invalid categoryId" });
+      finalCategoryId = category.id;
+    }
+
+    // subcategory validate
+    let finalSubCategoryId = existing.subCategoryId;
+    if (subCategoryId !== undefined && subCategoryId !== null && subCategoryId !== "") {
+      const subCategory = await prisma.subCategory.findUnique({
+        where: { id: Number(subCategoryId) },
+        select: { id: true },
+      });
+      if (!subCategory) return res.status(400).json({ error: "Invalid subCategoryId" });
+      finalSubCategoryId = subCategory.id;
+    }
+
+    // ✅ resolve departmentItemId (manual OR auto from finalCategoryId)
+    let finalDepartmentItemId = existing.departmentItemId ?? null;
+    try {
+      // if user changed category or sent departmentItemId, re-resolve
+      const shouldResolve =
+        (departmentItemId !== undefined && departmentItemId !== null) ||
+        (categoryId !== undefined && categoryId !== null && categoryId !== "");
+
+      if (shouldResolve) {
+        finalDepartmentItemId = await resolveDepartmentItemId({
+          departmentItemId,
+          categoryId: finalCategoryId,
+        });
+      }
+    } catch (e) {
+      return res.status(400).json({ error: e.message || "Invalid department" });
+    }
+
+    // prices
     const actual =
       actualPrice !== undefined && actualPrice !== null && actualPrice !== ""
         ? Number(actualPrice)
@@ -594,52 +727,24 @@ export const updateTest = async (req, res) => {
         ? Number(discount)
         : existing.discount;
 
-    // Offer price fallback (avoid NaN)
     const finalOfferPrice =
       offerPrice !== undefined && offerPrice !== null && offerPrice !== ""
         ? Number(offerPrice)
         : existing.offerPrice;
 
-    // --- CITY WISE PRICE ---
-    let parsedCityWisePrice = existing.cityWisePrice;
-    if (cityWisePrice !== undefined && cityWisePrice !== null && cityWisePrice !== "") {
-      parsedCityWisePrice =
-        typeof cityWisePrice === "string" ? JSON.parse(cityWisePrice) : cityWisePrice;
-    }
+    const finalSpotlight = spotlight !== undefined ? parseBoolean(spotlight, existing.spotlight) : existing.spotlight;
 
-    // --- CATEGORY VALIDATION ---
-    let finalCategoryId = existing.categoryId;
-    if (categoryId !== undefined && categoryId !== null && categoryId !== "") {
-      const category = await prisma.category.findUnique({
-        where: { id: Number(categoryId) },
-      });
-      if (!category) return res.status(400).json({ error: "Invalid categoryId" });
-      finalCategoryId = category.id;
-    }
+    // cityWisePrice
+    const parsedCityWisePrice =
+      cityWisePrice !== undefined && cityWisePrice !== null && cityWisePrice !== ""
+        ? parseJsonIfString(cityWisePrice)
+        : existing.cityWisePrice;
 
-    // --- SUBCATEGORY VALIDATION ---
-    let finalSubCategoryId = existing.subCategoryId;
-    if (subCategoryId !== undefined && subCategoryId !== null && subCategoryId !== "") {
-      const subCategory = await prisma.subCategory.findUnique({
-        where: { id: Number(subCategoryId) },
-      });
-      if (!subCategory) return res.status(400).json({ error: "Invalid subCategoryId" });
-      finalSubCategoryId = subCategory.id;
-    }
-
-    // --- SPOTLIGHT NORMALIZATION ---
-    let finalSpotlight = existing.spotlight;
-    if (spotlight !== undefined) {
-      if (typeof spotlight === "boolean") finalSpotlight = spotlight;
-      else if (typeof spotlight === "string") finalSpotlight = spotlight === "true";
-    }
-
-    // ✅ Parse otherCategoryIds (replace all)
+    // other categories replace
     const otherIds = parseIdsArray(otherCategoryIds).filter(
       (cid) => cid !== Number(finalCategoryId)
     );
 
-    // ✅ Build update payload WITHOUT undefined fields
     const data = {
       name: name ?? existing.name,
       actualPrice: actual,
@@ -658,50 +763,54 @@ export const updateTest = async (req, res) => {
       spotlight: finalSpotlight,
       categoryId: finalCategoryId,
       subCategoryId: finalSubCategoryId,
+
+      // ✅ NEW
+      departmentItemId: finalDepartmentItemId,
+
       sortOrder:
         sortOrder !== undefined && sortOrder !== null && sortOrder !== ""
           ? Number(sortOrder)
           : (existing.sortOrder ?? 0),
 
-      // ✅ Replace other categories
       otherCategories: {
         deleteMany: {},
         create: otherIds.map((cid) => ({ categoryId: Number(cid) })),
       },
     };
 
-    // ✅ Only set features if you really want to update it (avoid wiping accidentally)
     if (features !== undefined) data.features = features;
 
-    // ✅ reportWithin is number
     if (reportWithin !== undefined && reportWithin !== null && reportWithin !== "") {
       data.reportWithin = Number(reportWithin);
     }
 
-    // ✅ reportUnit is STRING (and required in schema, so never send undefined)
     if (reportUnit !== undefined && reportUnit !== null && reportUnit !== "") {
       data.reportUnit = String(reportUnit);
     } else {
-      // keep existing (safe) — or omit, both are fine.
-      data.reportUnit = existing.reportUnit;
+      data.reportUnit = existing.reportUnit; // keep safe
     }
 
     const updated = await prisma.test.update({
       where: { id: Number(id) },
       data,
       include: {
+        category: { select: { id: true, name: true, type: true } },
+        subCategory: true,
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
         otherCategories: { select: { categoryId: true } },
       },
     });
 
-    res.json(updated);
+    return res.json(updated);
   } catch (error) {
     console.error("Error updating test:", error);
-    res.status(500).json({ error: "Failed to update test" });
+    return res.status(500).json({ error: "Failed to update test" });
   }
 };
 
-
+/* =========================================================
+   DELETE TEST (same)
+========================================================= */
 export const deleteTest = async (req, res) => {
   try {
     const { id } = req.params;
@@ -709,23 +818,18 @@ export const deleteTest = async (req, res) => {
 
     const existing = await prisma.test.findUnique({
       where: { id: testId },
-      select: { id: true, imgUrl: true }, // keep it small
+      select: { id: true, imgUrl: true },
     });
 
     if (!existing) return res.status(404).json({ error: "Test not found" });
 
-    // ✅ 1) Delete DB record first
-    await prisma.test.delete({
-      where: { id: testId },
-    });
+    await prisma.test.delete({ where: { id: testId } });
 
-    // ✅ 2) After DB delete success, delete S3 image (best-effort)
     if (existing.imgUrl) {
       try {
         await deleteFromS3(existing.imgUrl);
       } catch (e) {
         console.warn("S3 delete failed (ignored):", e?.message || e);
-        // optional: you could log this for later cleanup
       }
     }
 
@@ -733,17 +837,13 @@ export const deleteTest = async (req, res) => {
   } catch (error) {
     console.error("Error deleting test:", error);
 
-    // ✅ Friendly FK error
     if (error?.code === "P2003") {
-      // optional: check constraint
       if (error?.meta?.constraint === "PatientTestResult_testId_fkey") {
         return res.status(409).json({
-          error:
-            "You can’t delete this test because patient results are already created for it.",
+          error: "You can’t delete this test because patient results are already created for it.",
           code: "TEST_IN_USE",
         });
       }
-
       return res.status(409).json({
         error: "You can’t delete this test because it is used elsewhere.",
         code: "FK_CONSTRAINT",
@@ -754,7 +854,9 @@ export const deleteTest = async (req, res) => {
   }
 };
 
-
+/* =========================================================
+   GET TESTS BY CATEGORY ✅ include department
+========================================================= */
 export const getTestsByCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
@@ -770,10 +872,14 @@ export const getTestsByCategory = async (req, res) => {
 
     const rawTests = await prisma.test.findMany({
       where: {
-        OR: [{ categoryId: catId }, { otherCategories: { some: { categoryId: catId } } }],
+        OR: [
+          { categoryId: catId },
+          { otherCategories: { some: { categoryId: catId } } },
+        ],
       },
       include: {
         subCategory: true,
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
         otherCategories: {
           select: { categoryId: true, category: { select: { id: true, name: true } } },
         },
@@ -794,19 +900,26 @@ export const getTestsByCategory = async (req, res) => {
   }
 };
 
+/* =========================================================
+   GET TESTS BY SUBCATEGORY (optional add department)
+========================================================= */
 export const getTestsBySubCategory = async (req, res) => {
   try {
     const { subCategoryId } = req.params;
 
     const tests = await prisma.test.findMany({
       where: { subCategoryId: Number(subCategoryId) },
-      include: { category: true, subCategory: true },
+      include: {
+        category: true,
+        subCategory: true,
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
+      },
     });
 
-    res.json(tests);
+    return res.json(tests);
   } catch (error) {
     console.error("Error fetching tests by subcategory:", error);
-    res.status(500).json({ error: "Failed to fetch tests by subcategory" });
+    return res.status(500).json({ error: "Failed to fetch tests by subcategory" });
   }
 };
 
@@ -816,433 +929,17 @@ export const getTestsByTestType = async (req, res) => {
 
     const tests = await prisma.test.findMany({
       where: { testType: { equals: testType, mode: "insensitive" } },
-      include: { category: true, subCategory: true },
+      include: {
+        category: true,
+        subCategory: true,
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
+      },
     });
 
-    res.json(tests);
+    return res.json(tests);
   } catch (error) {
     console.error("Error fetching tests by testType:", error);
-    res.status(500).json({ error: "Failed to fetch tests by testType" });
-  }
-};
-
-// Download template
-export const downloadTemplate = async (req, res) => {
-  try {
-    // Create CSV template content
-    const templateData = `name,description,actualPrice,offerPrice,discount,reportWithin,reportUnit,testType,categoryId,subCategoryId,gender,sampleRequired,preparations,contains,title,subtitle,status,imgUrl
-Thyroid Function Test,Complete thyroid panel test,1200,1000,17,24,hours,Pathology,16,,both,Blood sample,Fasting not required,TSH, T3, T4,Thyroid Profile,Essential thyroid screening,active,
-Complete Blood Count,Complete blood count test,800,600,25,6,hours,Pathology,15,,both,Blood sample,No fasting required,25 parameters,CBC Test,Blood analysis,active,
-Liver Function Test,Liver function test panel,1500,1200,20,24,hours,Pathology,17,,both,Blood sample,Fasting required,10 parameters,Liver Profile,Liver health check,active,
-Kidney Function Test,Kidney function tests,1000,800,20,24,hours,Pathology,18,,both,Blood sample,Fasting required,8 parameters,Kidney Profile,Kidney health check,active,`;
-
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader(
-      "Content-Disposition",
-      "attachment; filename=test_bulk_upload_template.csv",
-    );
-    res.send(templateData);
-  } catch (error) {
-    console.error("Error generating template:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to generate template",
-      message: error.message,
-    });
-  }
-};
-
-// Bulk upload tests
-export const bulkUpload = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: "No file uploaded",
-      });
-    }
-
-    const results = [];
-    const errors = [];
-    let successCount = 0;
-    let failedCount = 0;
-
-    // Create readable stream from file buffer
-    const stream = Readable.from(req.file.buffer.toString());
-
-    await new Promise((resolve, reject) => {
-      stream
-        .pipe(csv())
-        .on("data", async (row) => {
-          try {
-            // Validate required fields
-            if (
-              !row.name ||
-              !row.actualPrice ||
-              !row.testType ||
-              !row.categoryId
-            ) {
-              errors.push({
-                row,
-                error:
-                  "Missing required fields: name, actualPrice, testType, or categoryId",
-              });
-              failedCount++;
-              return;
-            }
-
-            // Parse and validate data
-            const actualPrice = parseFloat(row.actualPrice);
-            if (isNaN(actualPrice) || actualPrice <= 0) {
-              errors.push({
-                row,
-                error: "Invalid actualPrice",
-              });
-              failedCount++;
-              return;
-            }
-
-            const categoryId = parseInt(row.categoryId);
-            if (isNaN(categoryId) || categoryId <= 0) {
-              errors.push({
-                row,
-                error: "Invalid categoryId",
-              });
-              failedCount++;
-              return;
-            }
-
-            // Check if category exists
-            const categoryExists = await prisma.category.findUnique({
-              where: { id: categoryId },
-            });
-
-            if (!categoryExists) {
-              errors.push({
-                row,
-                error: `Category with ID ${categoryId} does not exist`,
-              });
-              failedCount++;
-              return;
-            }
-
-            // Prepare test data
-            const testData = {
-              name: row.name.trim(),
-              description: row.description?.trim() || null,
-              actualPrice: actualPrice,
-              offerPrice: row.offerPrice ? parseFloat(row.offerPrice) : null,
-              discount: row.discount ? parseFloat(row.discount) : null,
-              reportWithin: parseInt(row.reportWithin) || 24,
-              reportUnit: row.reportUnit || "hours",
-              testType: row.testType,
-              categoryId: categoryId,
-              subCategoryId: row.subCategoryId
-                ? parseInt(row.subCategoryId)
-                : null,
-              gender: row.gender || "both",
-              sampleRequired: row.sampleRequired || null,
-              preparations: row.preparations || null,
-              contains: row.contains || null,
-              title: row.title || null,
-              subtitle: row.subtitle || null,
-              status: row.status || "active",
-              imgUrl: row.imgUrl || null,
-            };
-
-            // Check if test already exists by name and category
-            const existingTest = await prisma.test.findFirst({
-              where: {
-                name: testData.name,
-                categoryId: testData.categoryId,
-              },
-            });
-
-            let savedTest;
-            if (existingTest) {
-              // Update existing test
-              savedTest = await prisma.test.update({
-                where: { id: existingTest.id },
-                data: testData,
-              });
-              results.push({
-                id: savedTest.id,
-                name: savedTest.name,
-                action: "updated",
-                status: "success",
-              });
-            } else {
-              // Create new test
-              savedTest = await prisma.test.create({
-                data: testData,
-              });
-              results.push({
-                id: savedTest.id,
-                name: savedTest.name,
-                action: "created",
-                status: "success",
-              });
-            }
-            successCount++;
-          } catch (error) {
-            console.error("Error processing row:", error);
-            errors.push({
-              row,
-              error: error.message,
-            });
-            failedCount++;
-          }
-        })
-        .on("end", () => {
-          resolve();
-        })
-        .on("error", (error) => {
-          reject(error);
-        });
-    });
-
-    res.json({
-      success: true,
-      message: `Bulk upload completed. Success: ${successCount}, Failed: ${failedCount}`,
-      successCount,
-      failedCount,
-      total: successCount + failedCount,
-      results: results.slice(0, 50), // Limit results to 50
-      errors: errors.slice(0, 50), // Limit errors to 50
-    });
-  } catch (error) {
-    console.error("Bulk upload error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to process bulk upload",
-      message: error.message,
-    });
-  }
-};
-
-// Alternative: Simple bulk upload for quick implementation
-export const simpleBulkUpload = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: "No file uploaded",
-      });
-    }
-
-    const fileContent = req.file.buffer.toString();
-    const lines = fileContent.split("\n").filter((line) => line.trim() !== "");
-
-    // Skip header row
-    const dataRows = lines.slice(1);
-
-    const results = [];
-    const errors = [];
-    let successCount = 0;
-    let failedCount = 0;
-
-    for (let i = 0; i < dataRows.length; i++) {
-      try {
-        const row = dataRows[i];
-        const columns = row.split(",").map((col) => col.trim());
-
-        // Skip empty rows
-        if (columns.length < 3 || !columns[0]) continue;
-
-        // Extract data (adjust indices based on your CSV format)
-        const testData = {
-          name: columns[0] || "Unnamed Test",
-          description: columns[1] || null,
-          actualPrice: parseFloat(columns[2]) || 0,
-          offerPrice: columns[3] ? parseFloat(columns[3]) : null,
-          discount: columns[4] ? parseFloat(columns[4]) : null,
-          reportWithin: parseInt(columns[5]) || 24,
-          reportUnit: columns[6] || "hours",
-          testType: columns[7] || "Pathology",
-          categoryId: columns[8] ? parseInt(columns[8]) : null,
-          subCategoryId: columns[9] ? parseInt(columns[9]) : null,
-          gender: columns[10] || "both",
-          sampleRequired: columns[11] || null,
-          preparations: columns[12] || null,
-          contains: columns[13] || null,
-          title: columns[14] || null,
-          subtitle: columns[15] || null,
-          status: columns[16] || "active",
-          imgUrl: columns[17] || null,
-        };
-
-        // Validate required fields
-        if (
-          !testData.name ||
-          !testData.actualPrice ||
-          !testData.testType ||
-          !testData.categoryId
-        ) {
-          errors.push({
-            row: i + 2,
-            error: "Missing required fields",
-            data: testData,
-          });
-          failedCount++;
-          continue;
-        }
-
-        // Check if category exists
-        if (testData.categoryId) {
-          const categoryExists = await prisma.category.findUnique({
-            where: { id: testData.categoryId },
-          });
-
-          if (!categoryExists) {
-            errors.push({
-              row: i + 2,
-              error: `Category ID ${testData.categoryId} not found`,
-              data: testData,
-            });
-            failedCount++;
-            continue;
-          }
-        }
-
-        // Check if test exists
-        const existingTest = await prisma.test.findFirst({
-          where: {
-            name: testData.name,
-            categoryId: testData.categoryId,
-          },
-        });
-
-        let savedTest;
-        if (existingTest) {
-          // Update existing
-          savedTest = await prisma.test.update({
-            where: { id: existingTest.id },
-            data: testData,
-          });
-        } else {
-          // Create new
-          savedTest = await prisma.test.create({
-            data: testData,
-          });
-        }
-
-        results.push({
-          id: savedTest.id,
-          name: savedTest.name,
-          status: "success",
-        });
-        successCount++;
-      } catch (error) {
-        errors.push({
-          row: i + 2,
-          error: error.message,
-          rawData: dataRows[i],
-        });
-        failedCount++;
-      }
-    }
-
-    res.json({
-      success: true,
-      message: `Processed ${dataRows.length} rows. Success: ${successCount}, Failed: ${failedCount}`,
-      successCount,
-      failedCount,
-      total: dataRows.length,
-      results: results.slice(0, 20),
-      errors: errors.slice(0, 20),
-    });
-  } catch (error) {
-    console.error("Simple bulk upload error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to process file",
-      message: error.message,
-    });
-  }
-};
-
-// Get categories for template
-export const getCategoriesForTemplate = async (req, res) => {
-  try {
-    const categories = await prisma.category.findMany({
-      select: {
-        id: true,
-        name: true,
-        type: true,
-      },
-      orderBy: {
-        name: "asc",
-      },
-    });
-
-    res.json({
-      success: true,
-      data: categories,
-    });
-  } catch (error) {
-    console.error("Error fetching categories:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch categories",
-    });
-  }
-};
-
-// Validate CSV before upload
-export const validateBulkUpload = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: "No file uploaded",
-      });
-    }
-
-    const fileContent = req.file.buffer.toString();
-    const lines = fileContent.split("\n");
-
-    const validationResults = {
-      totalRows: lines.length - 1, // Exclude header
-      validRows: 0,
-      invalidRows: 0,
-      errors: [],
-      sampleData: [],
-    };
-
-    // Validate header
-    const header = lines[0]?.split(",") || [];
-    const requiredHeaders = ["name", "actualPrice", "testType", "categoryId"];
-    const missingHeaders = requiredHeaders.filter((h) => !header.includes(h));
-
-    if (missingHeaders.length > 0) {
-      validationResults.errors.push({
-        type: "header",
-        message: `Missing required headers: ${missingHeaders.join(", ")}`,
-      });
-    }
-
-    // Check first few rows for sample data
-    for (let i = 1; i < Math.min(5, lines.length); i++) {
-      if (lines[i].trim()) {
-        const columns = lines[i].split(",").map((col) => col.trim());
-        validationResults.sampleData.push({
-          row: i + 1,
-          data: columns,
-        });
-      }
-    }
-
-    res.json({
-      success: true,
-      data: validationResults,
-    });
-  } catch (error) {
-    console.error("Validation error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Validation failed",
-      message: error.message,
-    });
+    return res.status(500).json({ error: "Failed to fetch tests by testType" });
   }
 };
 
@@ -1250,27 +947,98 @@ export const getHomeMostBooked = async (req, res) => {
   try {
     const tests = await prisma.test.findMany({
       include: {
-        // include category + subcategory if needed later
+        departmentItem: { select: { id: true, name: true, type: true } }, // ✅
         _count: {
-          select: {
-            orderMemberPackages: true,
-            parameters: true,
-          },
+          select: { orderMemberPackages: true, parameters: true },
         },
       },
-
       orderBy: {
-        orderMemberPackages: {
-          _count: "desc",
-        },
+        orderMemberPackages: { _count: "desc" },
       },
-
       take: 10,
     });
 
-    res.json({ success: true, data: tests });
+    return res.json({ success: true, data: tests });
   } catch (err) {
     console.error("Error fetching most booked tests:", err);
-    res.status(500).json({ error: "Failed to load most booked tests" });
+    return res.status(500).json({ error: "Failed to load most booked tests" });
+  }
+};
+
+
+
+
+// ✅ BULK DISCOUNT (Postgres + Prisma) — updates discount% + offerPrice only
+export const bulkDiscount = async (req, res) => {
+  try {
+    const { departmentItemId, categoryId, testType, discountInput } = req.body;
+
+    if (!discountInput || !String(discountInput).trim()) {
+      return res
+        .status(400)
+        .json({ message: 'discountInput required. Example: "10%" or "150"' });
+    }
+
+    // Build WHERE (any combination)
+    const where = {};
+
+    if (departmentItemId !== undefined && departmentItemId !== null && departmentItemId !== "") {
+      const depId = Number(departmentItemId);
+      if (!Number.isFinite(depId)) {
+        return res.status(400).json({ message: "Invalid departmentItemId" });
+      }
+      where.departmentItemId = depId;
+    }
+
+    if (categoryId !== undefined && categoryId !== null && categoryId !== "") {
+      const catId = Number(categoryId);
+      if (!Number.isFinite(catId)) {
+        return res.status(400).json({ message: "Invalid categoryId" });
+      }
+      where.categoryId = catId;
+    }
+
+    if (testType !== undefined && testType !== null && String(testType).trim() !== "") {
+      where.testType = String(testType).trim();
+    }
+
+    // Optional safety: require at least one filter
+    if (!where.departmentItemId && !where.categoryId && !where.testType) {
+      return res.status(400).json({
+        message: "Please select at least one filter: departmentItemId or categoryId or testType",
+      });
+    }
+
+    // Fetch matching tests
+    const tests = await prisma.test.findMany({
+      where,
+      select: { id: true, actualPrice: true },
+    });
+
+    if (!tests.length) {
+      return res.json({ message: "No tests found", updated: 0 });
+    }
+
+    // Compute and update per test (offerPrice depends on each actualPrice)
+    const updates = tests.map((t) => {
+      const fields = computeDiscountFields(t.actualPrice, discountInput);
+      return prisma.test.update({
+        where: { id: t.id },
+        data: {
+          discount: fields.discount,      // ✅ percent always
+          offerPrice: fields.offerPrice,  // ✅ computed final price
+        },
+      });
+    });
+
+    await prisma.$transaction(updates);
+
+    return res.json({
+      message: "Discount applied successfully",
+      updated: tests.length,
+    });
+  } catch (e) {
+    console.error("bulkDiscount error:", e);
+    return res.status(500).json({ message: "Server error" });
   }
 };

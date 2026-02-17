@@ -10,15 +10,12 @@ import {
   getTestsBySubCategory,
   getTestsByTestType,
   searchTestsGrouped,
-  downloadTemplate,
-  bulkUpload,
-  getCategoriesForTemplate,
-  simpleBulkUpload,
-  validateBulkUpload,
+
   getHomeMostBooked,
   getSpotlightTests,
   getAllTestsnames,
-  searchTestsAndCheckups
+  searchTestsAndCheckups,
+  bulkDiscount
 } from "./package.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -32,6 +29,10 @@ router.get("/search/all", searchTestsAndCheckups);
 router.get("/most-booked-tests", getHomeMostBooked);
 
 router.get("/", getAllTests);
+
+// routes/tests.routes.js
+router.put("/bulk-discount", bulkDiscount);
+
 
 router.get("/names", getAllTestsnames);
 router.get("/spotlight", getSpotlightTests);
@@ -79,11 +80,5 @@ const handleMulterError = (err, req, res, next) => {
   next();
 };
 
-// Bulk upload routes
-router.get('/template', downloadTemplate);
-router.get('/categories-for-template', getCategoriesForTemplate);
-router.post('/bulk-upload', upload1.single('file'), handleMulterError, bulkUpload);
-router.post('/bulk-upload-simple', upload1.single('file'), handleMulterError, simpleBulkUpload);
-router.post('/validate-bulk-upload', upload1.single('file'), handleMulterError, validateBulkUpload);
 
 export default router;

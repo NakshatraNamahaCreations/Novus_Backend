@@ -182,9 +182,9 @@ model DiagnosticCenter {
   cityId Int
   city   City @relation(fields: [cityId], references: [id])
 
-  orders Order[] // ⭐ ADD THIS LINE
+  orders        Order[] // ⭐ ADD THIS LINE
   assignedUsers UserDiagnosticCenter[]
-    payments Payment[] 
+  payments      Payment[]
 
   createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
@@ -240,36 +240,34 @@ model User {
   createdNotifications             Notification[]
   createdTestParameters            TestParameter[]
   collectionPrices                 CollectionPrice[]
-   assignedDiagnosticCenters UserDiagnosticCenter[]
+  assignedDiagnosticCenters        UserDiagnosticCenter[]
   createdCenterCategoryCommissions CenterCategoryCommission[] @relation("CenterCategoryCommissionCreatedBy")
-
+  createdTestTemplates             TestTemplate[]             @relation("TestTemplateCreatedBy")
   // Payment relations FIXED
-  createdPayments Payment[] @relation("PaymentCreatedBy")
-  updatedPayments Payment[] @relation("PaymentUpdatedBy")
+  createdPayments                  Payment[]                  @relation("PaymentCreatedBy")
+  updatedPayments                  Payment[]                  @relation("PaymentUpdatedBy")
 
   // ANY OTHER DUPLICATES REMOVED
-  patients                 Patient[]
-  addresses                Address[]
-  vendorProfiles           VendorProfile[]
-  earningsHistories        EarningsHistory[]
-  orders                   Order[]
-  vendorOrderRejections    VendorOrderRejection[]
-  paymentGateways          PaymentGateway[]
-  paymentWebhookLogs       PaymentWebhookLog[]
-  carts                    Cart[]
-  cartItems                CartItem[]
-  orderTrackings           OrderTracking[]
-  orderSlots               OrderSlot[]
-  referenceCenters         ReferenceCenter[]
-  parameterRanges          ParameterRange[]
-  resultOptions            ResultOption[]
-  patientTestResults       PatientTestResult[]
-  parameterResults         ParameterResult[]
-  createdDiagnosticCenters DiagnosticCenter[]
+  patients                  Patient[]
+  addresses                 Address[]
+  vendorProfiles            VendorProfile[]
+  earningsHistories         EarningsHistory[]
+  orders                    Order[]
+  vendorOrderRejections     VendorOrderRejection[]
+  paymentGateways           PaymentGateway[]
+  paymentWebhookLogs        PaymentWebhookLog[]
+  carts                     Cart[]
+  cartItems                 CartItem[]
+  orderTrackings            OrderTracking[]
+  orderSlots                OrderSlot[]
+  referenceCenters          ReferenceCenter[]
+  parameterRanges           ParameterRange[]
+  resultOptions             ResultOption[]
+  patientTestResults        PatientTestResult[]
+  parameterResults          ParameterResult[]
+  createdDiagnosticCenters  DiagnosticCenter[]
+  createdTestTemplateBlocks TestTemplateBlock[]    @relation("TestTemplateBlockCreatedBy")
 }
-
-
-
 
 model UserDiagnosticCenter {
   id Int @id @default(autoincrement())
@@ -286,7 +284,6 @@ model UserDiagnosticCenter {
   @@index([userId])
   @@index([diagnosticCenterId])
 }
-
 
 model Patient {
   id       Int       @id @default(autoincrement())
@@ -372,24 +369,25 @@ model Address {
 }
 
 model Category {
-  id                        Int                        @id @default(autoincrement())
-  imgUrl                    String?
-  name                      String
-  order                     Int?
-  type                      String?
-  bannerUrl                 String?
-  createdById               Int? // ⭐ ADDED: Track who created the category
-  createdBy                 User?                      @relation(fields: [createdById], references: [id])
-  isPopular                 Boolean                    @default(false)
-  subCategories             SubCategory[]
-  tests                     Test[]
-  // ✅ NEW: tests that also belong to this category (secondary)
-  otherCategoryTests        TestOtherCategory[]
-  packages                  HealthPackage[]
-  centers                   CenterCategory[]
-  ESignatureCategory        ESignatureCategory[]
+  id                 Int                 @id @default(autoincrement())
+  imgUrl             String?
+  name               String
+  order              Int?
+  type               String?
+  bannerUrl          String?
+  createdById        Int? // ⭐ ADDED: Track who created the category
+  createdBy          User?               @relation(fields: [createdById], references: [id])
+  isPopular          Boolean             @default(false)
+  subCategories      SubCategory[]
+  tests              Test[]
+  // ✅ NEW: link category to department item (MRI, Biochemistry...)
+  departmentItemId   Int?
+  departmentItem     DepartmentItem?     @relation(fields: [departmentItemId], references: [id], onDelete: SetNull)
+  otherCategoryTests TestOtherCategory[]
+  packages           HealthPackage[]
+  centers            CenterCategory[]
+
   centerCategoryCommissions CenterCategoryCommission[]
-  // ✅ NEW
   centerSlots               CenterSlot[]
 
   createdAt DateTime @default(now())
@@ -488,7 +486,11 @@ model Test {
   status        String  @default("active")
 
   // ✅ NEW
-  sortOrder       Int?                @default(0)
+  sortOrder        Int?            @default(0)
+  departmentItemId Int? // ✅ NEW (nullable first)
+  departmentItem   DepartmentItem? @relation(fields: [departmentItemId], references: [id])
+
+  template        TestTemplate?
   // ✅ NEW: Other Categories (many-to-many)
   otherCategories TestOtherCategory[]
 
@@ -513,6 +515,7 @@ model Test {
 
   @@index([categoryId])
   @@index([categoryId, sortOrder])
+  @@index([departmentItemId])
   @@map("Package")
 }
 
@@ -541,30 +544,28 @@ model CheckupPackage {
   @@map("CheckupPackage")
 }
 
-
-
 model Coupon {
-  id              Int       @id @default(autoincrement())
-  code            String    @unique
-  description     String?
-  discountType    String    @default("percentage")
-  discountValue   Float
-  minOrderAmount  Float?
-  maxDiscount     Float?
-  validFrom       DateTime?
-  validUntil      DateTime?
-  usageLimit      Int?
-  perUserLimit    Int?
-  usedCount       Int?      @default(0)
-  isActive        Boolean   @default(true)
-  autoApply       Boolean   @default(false)
+  id             Int       @id @default(autoincrement())
+  code           String    @unique
+  description    String?
+  discountType   String    @default("percentage")
+  discountValue  Float
+  minOrderAmount Float?
+  maxDiscount    Float?
+  validFrom      DateTime?
+  validUntil     DateTime?
+  usageLimit     Int?
+  perUserLimit   Int?
+  usedCount      Int?      @default(0)
+  isActive       Boolean   @default(true)
+  autoApply      Boolean   @default(false)
 
   // ✅ keep for patient-specific coupons (single user)
-  isPatientCoupon Boolean   @default(false)
+  isPatientCoupon Boolean @default(false)
   patientId       Int?
 
   // ✅ NEW: choose who can use
-  audience        CouponAudience @default(ALL)
+  audience CouponAudience @default(ALL)
 
   createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
@@ -574,7 +575,6 @@ model Coupon {
   orders       Order[]       @relation("OrderCouponRelation")
   couponUsages CouponUsage[]
 }
-
 
 model CouponUsage {
   id        Int  @id @default(autoincrement())
@@ -696,7 +696,7 @@ model Center {
   long             Float?
   isSelf           Boolean @default(false)
   status           String  @default("active")
-  showApp           Boolean @default(false)
+  showApp          Boolean @default(false)
 
   cityId Int?
   city   City? @relation(fields: [cityId], references: [id])
@@ -712,7 +712,6 @@ model Center {
   categories                CenterCategory[]
   collectionPrices          CollectionPrice[]
   centerCategoryCommissions CenterCategoryCommission[]
-  
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -885,7 +884,7 @@ model Doctor {
   speciality     String?
   mobile         String?
   landLine       String?
-  email          String? 
+  email          String?
   venue          String?
   refCenter      String?
   source         String?
@@ -920,24 +919,22 @@ model ESignature {
   patientTestResultsCenter PatientTestResult[] @relation("PTR_CenterSig")
   patientTestResultsRight  PatientTestResult[] @relation("PTR_RightSig")
 
-  // ✅ categories via relation table
-  categories ESignatureCategory[]
+  departments ESignatureDepartment[]
 }
 
-model ESignatureCategory {
+model ESignatureDepartment {
   id Int @id @default(autoincrement())
 
   signatureId Int
   signature   ESignature @relation(fields: [signatureId], references: [id], onDelete: Cascade)
 
-  categoryId Int
-  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  departmentItemId Int
+  departmentItem   DepartmentItem @relation(fields: [departmentItemId], references: [id], onDelete: Cascade)
 
-  // ✅ default per category
   isDefault Boolean @default(false)
 
-  @@unique([signatureId, categoryId])
-  @@index([categoryId])
+  @@unique([signatureId, departmentItemId])
+  @@index([departmentItemId])
   @@index([signatureId])
   @@index([isDefault])
 }
@@ -1048,14 +1045,14 @@ model Prescription {
 
 // ⭐ UPDATED: Enhanced Payment Model
 model Payment {
-  id              Int           @id @default(autoincrement())
-  orderId         Int?
-  patientId       Int?
-  userId          Int?
-  centerId        Int?
-  vendorId        Int?
-   diagnosticCenterId Int?
-  
+  id                 Int  @id @default(autoincrement())
+  orderId            Int?
+  patientId          Int?
+  userId             Int?
+  centerId           Int?
+  vendorId           Int?
+  diagnosticCenterId Int?
+
   paymentId       String        @unique
   paymentMethod   PaymentMethod
   paymentMode     PaymentMode?
@@ -1085,11 +1082,11 @@ model Payment {
   ipAddress String?
 
   // Relations
-  order   Order?   @relation(fields: [orderId], references: [id])
-  patient Patient? @relation(fields: [patientId], references: [id])
-  vendor  Vendor?  @relation(fields: [vendorId], references: [id])
-  center  Center?  @relation(fields: [centerId], references: [id])
-  diagnosticCenter   DiagnosticCenter? @relation(fields: [diagnosticCenterId], references: [id])
+  order            Order?            @relation(fields: [orderId], references: [id])
+  patient          Patient?          @relation(fields: [patientId], references: [id])
+  vendor           Vendor?           @relation(fields: [vendorId], references: [id])
+  center           Center?           @relation(fields: [centerId], references: [id])
+  diagnosticCenter DiagnosticCenter? @relation(fields: [diagnosticCenterId], references: [id])
 
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -1369,23 +1366,27 @@ model ReferenceCenter {
 }
 
 model TestParameter {
-  id          Int     @id @default(autoincrement())
-  testId      Int
-  name        String
-  type        String?
-  order       Int?
-  unit        String?
-  method      String?
-  notes       String?
-  isActive    Boolean @default(true)
-  options     Json?
-  createdById Int? // ⭐ ADDED: Track who created the parameter
-  createdBy   User?   @relation(fields: [createdById], references: [id])
+  id       Int     @id @default(autoincrement())
+  testId   Int
+  name     String
+  type     String?
+  order    Int?
+  unit     String?
+  method   String?
+  notes    String?
+  isActive Boolean @default(true)
+  options  Json?
+
+  createdById Int?
+  createdBy   User? @relation(fields: [createdById], references: [id])
 
   test       Test              @relation(fields: [testId], references: [id], onDelete: Cascade)
   ranges     ParameterRange[]
   resultOpts ResultOption[]
   results    ParameterResult[]
+
+  // ✅ ADD THIS
+  templateBlockLinks TestTemplateBlockParameter[] @relation("TemplateBlockParameterToTestParameter")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1633,4 +1634,112 @@ model OrderVendorEarning {
 
   @@index([vendorId])
   @@index([status])
+}
+
+enum TestContentBlockType {
+  TEST_HEADING
+  PARAMETERS
+  MULTI_PARAMETERS
+  NOTES
+  RICH_TEXT
+  FREE_TEXT
+  TABLE_FORMAT
+  ANTIBIOTIC_LIST
+  HTML_TABLE_PARAMETER
+  TEMPLATE_CONTENT
+}
+
+enum GenderScope {
+  ALL
+  MALE
+  FEMALE
+  OTHER
+}
+
+model TestTemplate {
+  id       Int     @id @default(autoincrement())
+  testId   Int     @unique
+  name     String  @default("Default Template")
+  isActive Boolean @default(true)
+
+  createdById Int?
+  createdBy   User? @relation("TestTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  test   Test                @relation(fields: [testId], references: [id], onDelete: Cascade)
+  blocks TestTemplateBlock[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdById])
+}
+
+model TestTemplateBlock {
+  id         Int                  @id @default(autoincrement())
+  templateId Int
+  type       TestContentBlockType
+
+  title    String?
+  text     String?
+  html     String?
+  data     Json?
+  settings Json?
+
+  sortOrder   Int         @default(0)
+  genderScope GenderScope @default(ALL)
+  isActive    Boolean     @default(true)
+
+  createdById Int?
+  createdBy   User? @relation("TestTemplateBlockCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  template        TestTemplate                 @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  blockParameters TestTemplateBlockParameter[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([templateId])
+  @@index([type])
+  @@index([templateId, sortOrder])
+  @@index([genderScope])
+  @@index([createdById])
+}
+
+model TestTemplateBlockParameter {
+  id Int @id @default(autoincrement())
+
+  blockId     Int
+  parameterId Int
+  sortOrder   Int @default(0)
+
+  block     TestTemplateBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  parameter TestParameter     @relation("TemplateBlockParameterToTestParameter", fields: [parameterId], references: [id], onDelete: Cascade)
+
+  @@unique([blockId, parameterId])
+  @@index([blockId])
+  @@index([parameterId])
+  @@index([blockId, sortOrder])
+}
+
+enum DepartmentType {
+  RADIOLOGY
+  PATHOLOGY
+}
+
+model DepartmentItem {
+  id        Int            @id @default(autoincrement())
+  name      String         @unique
+  type      DepartmentType
+  isActive  Boolean        @default(true)
+  sortOrder Int?           @default(0)
+
+  categories Category[]
+  tests      Test[]
+  // ✅ OPTIONAL: see signatures mapped to this department
+  signatures ESignatureDepartment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
 }

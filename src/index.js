@@ -13,6 +13,8 @@ import { Server as SocketIOServer } from 'socket.io';
 // Routes
 import { razorpayWebhook } from "./modules/payments/razorpay.controller.js";
 import categoryRoutes from './modules/categories/category.routes.js';  
+import departmentRoutes from './modules/department/department.route.js';  
+
 import subcategoryRoutes from './modules/subcategories/subcategory.routes.js';  
 import patientRoutes from './modules/patients/patient.routes.js';  
 import packagesRoutes from './modules/packages/package.routes.js';  
@@ -59,7 +61,7 @@ import sourcesRoutes from "./modules/sources/sources.routes.js";
 import collectionPriceRoutes from "./modules/collectionPrice/collectionPrice.routes.js";
 import enquiryRoutes from "./modules/enquiry/enquiry.route.js";
 
-
+import testTemplateRoutes from "./modules/test-template/testTemplate.routes.js";
 
 
 
@@ -113,6 +115,9 @@ app.use(
    ROUTES
 ---------------------------- */
 app.use('/api/categories', categoryRoutes);
+app.use('/api/departments', departmentRoutes);
+
+
 app.use('/api/subcategories', subcategoryRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/tests', packagesRoutes);
@@ -152,6 +157,7 @@ app.use("/api/source",sourcesRoutes)
 app.use("/api/enquiry",enquiryRoutes)
 
 app.use("/api/collection-prices", collectionPriceRoutes);
+app.use("/api/test-template", testTemplateRoutes);
 
 
 

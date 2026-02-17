@@ -38,49 +38,50 @@ export const uploadPrescription = async (req, res) => {
 // ✅ GET all prescriptions with pagination + search + status filter
 export const getAllPrescriptions = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = "", status = "" } = req.query;
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      status = "",
+      fromDate,
+      toDate,
+    } = req.query;
 
-    const pageNumber = parseInt(page);
-    const pageSize = parseInt(limit);
+    const pageNumber = Math.max(1, parseInt(page));
+    const pageSize = Math.max(1, parseInt(limit));
     const skip = (pageNumber - 1) * pageSize;
 
-    // ✅ Build dynamic WHERE clause
     const whereClause = {};
 
-    // 🔹 Filter by status (if provided)
-    if (status) {
-      whereClause.status = status;
-    }
+    if (status) whereClause.status = status;
 
-    // 🔹 Add search condition (patient name / email)
-    if (search) {
+    if (search && String(search).trim()) {
+      const s = String(search).trim();
       whereClause.OR = [
-        {
-          patient: {
-            fullName: { contains: search, mode: "insensitive" },
-          },
-        },
-        {
-          patient: {
-            contactNo: { contains: search, mode: "insensitive" },
-          },
-        },
+        { patient: { fullName: { contains: s, mode: "insensitive" } } },
+        { patient: { contactNo: { contains: s, mode: "insensitive" } } },
       ];
     }
 
-    // ✅ Fetch prescriptions (with pagination)
+    // ✅ Date filter (use createdAt or uploadedAt - choose ONE)
+    // If your model uses createdAt as upload time, keep createdAt.
+    if (fromDate || toDate) {
+      whereClause.createdAt = {};
+      if (fromDate) whereClause.createdAt.gte = new Date(fromDate);
+      if (toDate) {
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999);
+        whereClause.createdAt.lte = end;
+      }
+    }
+
     const [prescriptions, totalCount] = await Promise.all([
       prisma.prescription.findMany({
         where: whereClause,
         include: {
           patient: {
-        select: {
-          id: true,
-          fullName: true,
-          contactNo: true,
-          isPrimary: true,
-        },
-      },
+            select: { id: true, fullName: true, contactNo: true, isPrimary: true },
+          },
           reviewedBy: true,
         },
         orderBy: { createdAt: "desc" },
@@ -90,22 +91,19 @@ export const getAllPrescriptions = async (req, res) => {
       prisma.prescription.count({ where: whereClause }),
     ]);
 
-    // ✅ Send response
     return res.status(200).json({
       success: true,
       data: prescriptions,
       meta: {
         total: totalCount,
         currentPage: pageNumber,
-        totalPages: Math.ceil(totalCount / pageSize),
+        totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
         limit: pageSize,
       },
     });
   } catch (error) {
     console.error("Error fetching prescriptions:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch prescriptions" });
+    return res.status(500).json({ success: false, message: "Failed to fetch prescriptions" });
   }
 };
 
