@@ -61,8 +61,8 @@ import sourcesRoutes from "./modules/sources/sources.routes.js";
 import collectionPriceRoutes from "./modules/collectionPrice/collectionPrice.routes.js";
 import enquiryRoutes from "./modules/enquiry/enquiry.route.js";
 
-import testTemplateRoutes from "./modules/test-template/testTemplate.routes.js";
 
+import reportItemsRouter from "./modules/reportItems/testReportItems.routes.js"
 
 
 import "./modules/notifications/notification.scheduler.js";
@@ -116,7 +116,7 @@ app.use(
 ---------------------------- */
 app.use('/api/categories', categoryRoutes);
 app.use('/api/departments', departmentRoutes);
-
+app.use("/api/report-items", reportItemsRouter);
 
 app.use('/api/subcategories', subcategoryRoutes);
 app.use('/api/patients', patientRoutes);
@@ -157,7 +157,7 @@ app.use("/api/source",sourcesRoutes)
 app.use("/api/enquiry",enquiryRoutes)
 
 app.use("/api/collection-prices", collectionPriceRoutes);
-app.use("/api/test-template", testTemplateRoutes);
+
 
 
 

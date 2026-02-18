@@ -17,21 +17,14 @@ import {
   orderKeys,
 } from "../../utils/orderRedis.js";
 import ExcelJS from "exceljs";
-
+import utc from "dayjs/plugin/utc.js";
+import tz from "dayjs/plugin/timezone.js";
 import { markOrderReportReady } from "./order.service.js";
 
 const prisma = new PrismaClient();
 const formatTime = (date) => dayjs(date).format("hh:mm A");
-
-import utc from "dayjs/plugin/utc.js";
-import tz from "dayjs/plugin/timezone.js";
-
 dayjs.extend(utc);
 dayjs.extend(tz);
-
-/* ===========================
-   ✅ HELPERS (paste once)
-=========================== */
 const normalizeUnit = (u = "") => {
   const unit = String(u || "")
     .toLowerCase()
@@ -328,7 +321,7 @@ export const createOrder = async (req, res) => {
     if (isNaN(orderDate.getTime())) {
       return res.status(400).json({ error: "Invalid date" });
     }
-  
+
     if (isHomeSample) {
       if (!slotId) {
         return res
@@ -505,135 +498,127 @@ export const createOrder = async (req, res) => {
       }
     }
 
-
     const isRadiology = String(testType || "").toUpperCase() === "RADIOLOGY";
-const isPathology = String(testType || "").toUpperCase() === "PATHOLOGY";
+    const isPathology = String(testType || "").toUpperCase() === "PATHOLOGY";
 
+    if (!isRadiology) {
+      const address = await prisma.address.findUnique({
+        where: { id: addressId },
+      });
 
+      const lat = Number(address.latitude);
+      const lng = Number(address.longitude);
+      const pincodeStr = String(address.pincode || "").trim();
 
-   if (!isRadiology) {
-  const address = await prisma.address.findUnique({
-    where: { id: addressId },
-  });
- 
+      let slotLabel = "";
+      if (isHomeSample) {
+        const slotData = await prisma.slot.findUnique({
+          where: { id: Number(slotId) },
+        });
+        slotLabel = slotData
+          ? `${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`
+          : "";
+      } else {
+        const cs = await prisma.centerSlot.findUnique({
+          where: { id: Number(centerSlotId) },
+        });
+        slotLabel = cs
+          ? `${formatTime(cs.startTime)} - ${formatTime(cs.endTime)}`
+          : "";
+      }
 
-  const lat = Number(address.latitude);
-  const lng = Number(address.longitude);
-  const pincodeStr = String(address.pincode || "").trim();
+      // ✅ Notify vendors only for PATHOLOGY (or non-radiology)
+      await vendorNotificationQueue.add(
+        "vendor-notifications",
+        {
+          orderId: order.id,
+          pincode: pincodeStr,
+          latitude: lat,
+          longitude: lng,
+          testType,
+          radiusKm: 5,
+        },
+        { jobId: `vendor-new-order-${order.id}` },
+      );
 
- 
-  let slotLabel = "";
-  if (isHomeSample) {
-    const slotData = await prisma.slot.findUnique({
-      where: { id: Number(slotId) },
-    });
-    slotLabel = slotData
-      ? `${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`
-      : "";
-  } else {
-    const cs = await prisma.centerSlot.findUnique({
-      where: { id: Number(centerSlotId) },
-    });
-    slotLabel = cs ? `${cs.startTime} - ${cs.endTime}` : "";
-  }
+      // ✅ Redis indexing with pincode + geo
+      const dateKey = istDateKey(orderDate);
+      const ttl = secondsToKeepForOrderDate(orderDate, 2);
 
-  // ✅ Notify vendors only for PATHOLOGY (or non-radiology)
-  await vendorNotificationQueue.add(
-    "vendor-notifications",
-    {
-      orderId: order.id,
-      pincode: pincodeStr,
-      latitude: lat,
-      longitude: lng,
-      testType,
-      radiusKm: 5,
-    },
-    { jobId: `vendor-new-order-${order.id}` },
-  );
+      const { orderHash, pendingDateSet, pendingPincodeSet, orderGeo } =
+        orderKeys({
+          orderId: order.id,
+          dateKey,
+          pincode: pincodeStr,
+        });
 
-  // ✅ Redis indexing with pincode + geo
-  const dateKey = istDateKey(orderDate);
-  const ttl = secondsToKeepForOrderDate(orderDate, 2);
-
-  const { orderHash, pendingDateSet, pendingPincodeSet, orderGeo } =
-    orderKeys({
-      orderId: order.id,
-      dateKey,
-      pincode: pincodeStr,
-    });
-
-  await redis.hSet(orderHash, {
-    orderId: String(order.id),
-    date: orderDate.toISOString(),
-    dateKey: String(dateKey),
-    status: "pending",
-    pincode: pincodeStr,
-    latitude: String(lat),
-    longitude: String(lng),
-    testType: String(testType || ""),
-    slot: String(slotLabel || ""),
-
-    isHomeSample: String(Boolean(isHomeSample)),
-    slotId: String(isHomeSample ? slotId : ""),
-    centerId: String(!isHomeSample ? centerId : ""),
-    centerSlotId: String(!isHomeSample ? centerSlotId : ""),
-    createdAt: String(Date.now()),
-  });
-
-  await redis.sAdd(pendingDateSet, String(order.id));
-  await redis.sAdd(pendingPincodeSet, String(order.id));
-
-  if (Number.isFinite(lng) && Number.isFinite(lat)) {
-    await redis.sendCommand([
-      "GEOADD",
-      orderGeo,
-      String(lng),
-      String(lat),
-      String(order.id),
-    ]);
-  }
-
-  await redis.expire(orderHash, ttl);
-  await redis.expire(pendingDateSet, ttl);
-  await redis.expire(pendingPincodeSet, ttl);
-  await redis.expire(orderGeo, ttl);
-
-  // ✅ Live emit only for PATHOLOGY (your existing rule)
-  const io = req.app.get("io");
-  const shouldBroadcastNow = isTodayIST(orderDate);
-
-  if (io && shouldBroadcastNow && isPathology) {
-    await broadcastNewOrder(io, {
-      id: order.id,
-      date: orderDate,
-      testType,
-      radiusKm: 5,
-      slot: slotLabel,
-      address: {
+      await redis.hSet(orderHash, {
+        orderId: String(order.id),
+        date: orderDate.toISOString(),
+        dateKey: String(dateKey),
+        status: "pending",
         pincode: pincodeStr,
-        latitude: lat,
-        longitude: lng,
-      },
-    });
-  }
+        latitude: String(lat),
+        longitude: String(lng),
+        testType: String(testType || ""),
+        slot: String(slotLabel || ""),
 
-  // ✅ response needs dateKey
-  return res.json({
-    success: true,
-    orderId: order.id,
-    orderNumber: order.orderNumber,
+        isHomeSample: String(Boolean(isHomeSample)),
+        slotId: String(isHomeSample ? slotId : ""),
+        centerId: String(!isHomeSample ? centerId : ""),
+        centerSlotId: String(!isHomeSample ? centerSlotId : ""),
+        createdAt: String(Date.now()),
+      });
 
-   
-  });
-}
+      await redis.sAdd(pendingDateSet, String(order.id));
+      await redis.sAdd(pendingPincodeSet, String(order.id));
 
+      if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        await redis.sendCommand([
+          "GEOADD",
+          orderGeo,
+          String(lng),
+          String(lat),
+          String(order.id),
+        ]);
+      }
+
+      await redis.expire(orderHash, ttl);
+      await redis.expire(pendingDateSet, ttl);
+      await redis.expire(pendingPincodeSet, ttl);
+      await redis.expire(orderGeo, ttl);
+
+      // ✅ Live emit only for PATHOLOGY (your existing rule)
+      const io = req.app.get("io");
+      const shouldBroadcastNow = isTodayIST(orderDate);
+
+      if (io && shouldBroadcastNow && isPathology) {
+        await broadcastNewOrder(io, {
+          id: order.id,
+          date: orderDate,
+          testType,
+          radiusKm: 5,
+          slot: slotLabel,
+          address: {
+            pincode: pincodeStr,
+            latitude: lat,
+            longitude: lng,
+          },
+        });
+      }
+
+      // ✅ response needs dateKey
+      return res.json({
+        success: true,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+      });
+    }
 
     res.json({
       success: true,
       orderId: order.id,
       orderNumber: order.orderNumber,
-    
-
     });
 
     await whatsappQueue.add(
@@ -715,20 +700,16 @@ export const createAdminOrder = async (req, res) => {
     if (Boolean(homeCollection)) {
       const addr = castInt(addressId);
       if (!addr)
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "addressId is required for home collection",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "addressId is required for home collection",
+        });
       const sId = castInt(slotId);
       if (!sId)
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "slotId is required for home collection",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "slotId is required for home collection",
+        });
     }
 
     // order number
@@ -1416,8 +1397,8 @@ export const getOrdersByPatientId = async (req, res) => {
         },
         address: true,
         vendor: true,
-          slot:{select:{id:true,startTime:true,endTime:true}},
-        centerSlot:{select:{id:true,startTime:true,endTime:true}},
+        slot: { select: { id: true, startTime: true, endTime: true } },
+        centerSlot: { select: { id: true, startTime: true, endTime: true } },
         payments: {
           select: {
             id: true,
@@ -1622,8 +1603,8 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
         isHomeSample: true,
         sampleCollected: true,
         reportUrl: true,
-        slot:{select:{id:true,startTime:true,endTime:true}},
-        centerSlot:{select:{id:true,startTime:true,endTime:true}},
+        slot: { select: { id: true, startTime: true, endTime: true } },
+        centerSlot: { select: { id: true, startTime: true, endTime: true } },
 
         patient: {
           select: {
@@ -2322,10 +2303,14 @@ export const updateOrderStatus = async (req, res) => {
     const { id } = req.params;
     const { status, paymentStatus, sampleCollected, reportReady, reportUrl } =
       req.body;
-    console.log(status, paymentStatus, sampleCollected, reportReady, reportUrl);
+
+    const orderId = Number(id);
+    if (!orderId) {
+      return res.status(400).json({ message: "Invalid order id" });
+    }
 
     const order = await prisma.order.update({
-      where: { id: Number(id) },
+      where: { id: orderId },
       data: {
         ...(status && { status }),
         ...(paymentStatus && { paymentStatus }),
@@ -2340,16 +2325,25 @@ export const updateOrderStatus = async (req, res) => {
       },
     });
 
+    const io = req.app.get("io");
+
+    if (io) {
+      io.to(`order_${order.id}`).emit("orderStatusForUser", {
+        orderId: order.id,
+        status: order.status,
+      });
+    }
+
     if (reportReady === "true" || reportReady === true) {
       await markOrderReportReady(order);
     }
 
-    res.json({ message: "Order updated successfully", order });
+    return res.json({ message: "Order updated successfully", order });
   } catch (error) {
-    console.error("updateOrderStatus ERROR:", error); // ✅ see real reason
-    res.status(500).json({
+    console.error("updateOrderStatus ERROR:", error);
+    return res.status(500).json({
       error: "Failed to update order",
-      message: error?.message, // ✅ helps debugging
+      message: error?.message,
     });
   }
 };
@@ -3161,8 +3155,8 @@ export const getOrderReports = async (req, res) => {
             city: { select: { id: true, name: true } }, // ✅ IMPORTANT for city filter
           },
         },
- slot: { select: { id: true, startTime: true , endTime:true } },
- centerSlot: { select: { id: true, startTime: true , endTime:true } },
+        slot: { select: { id: true, startTime: true, endTime: true } },
+        centerSlot: { select: { id: true, startTime: true, endTime: true } },
 
         refCenter: { select: { id: true, name: true } },
         doctor: { select: { id: true, name: true } },
@@ -3505,21 +3499,17 @@ export const rescheduleOrder = async (req, res) => {
       centerSlotId !== "";
 
     if (wantsHomeSlot && wantsCenterSlot) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Send either slotId or centerSlotId",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Send either slotId or centerSlotId",
+      });
     }
 
     if (!wantsHomeSlot && !wantsCenterSlot) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Send slotId (home) or centerSlotId (center)",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Send slotId (home) or centerSlotId (center)",
+      });
     }
 
     // ✅ If centerSlotId, check capacity for that date

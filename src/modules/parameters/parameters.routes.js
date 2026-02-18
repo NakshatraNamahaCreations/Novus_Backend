@@ -8,6 +8,7 @@ router.put("/:parameterId", ParameterController.updateParameter);
 router.delete("/:parameterId", ParameterController.deleteParameter);
 router.get("/list/:testId", ParameterController.listByTest);
 router.get("/list1/:testId", ParameterController.listByTest1);
+router.post("/backfill-report-items/:testId", ParameterController.backfillReportItems);
 
 
 export default router;

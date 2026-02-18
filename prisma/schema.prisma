@@ -242,31 +242,31 @@ model User {
   collectionPrices                 CollectionPrice[]
   assignedDiagnosticCenters        UserDiagnosticCenter[]
   createdCenterCategoryCommissions CenterCategoryCommission[] @relation("CenterCategoryCommissionCreatedBy")
-  createdTestTemplates             TestTemplate[]             @relation("TestTemplateCreatedBy")
+
+  createdTestReportItems TestReportItem[] @relation("TestReportItemCreatedBy")
   // Payment relations FIXED
-  createdPayments                  Payment[]                  @relation("PaymentCreatedBy")
-  updatedPayments                  Payment[]                  @relation("PaymentUpdatedBy")
+  createdPayments        Payment[]        @relation("PaymentCreatedBy")
+  updatedPayments        Payment[]        @relation("PaymentUpdatedBy")
 
   // ANY OTHER DUPLICATES REMOVED
-  patients                  Patient[]
-  addresses                 Address[]
-  vendorProfiles            VendorProfile[]
-  earningsHistories         EarningsHistory[]
-  orders                    Order[]
-  vendorOrderRejections     VendorOrderRejection[]
-  paymentGateways           PaymentGateway[]
-  paymentWebhookLogs        PaymentWebhookLog[]
-  carts                     Cart[]
-  cartItems                 CartItem[]
-  orderTrackings            OrderTracking[]
-  orderSlots                OrderSlot[]
-  referenceCenters          ReferenceCenter[]
-  parameterRanges           ParameterRange[]
-  resultOptions             ResultOption[]
-  patientTestResults        PatientTestResult[]
-  parameterResults          ParameterResult[]
-  createdDiagnosticCenters  DiagnosticCenter[]
-  createdTestTemplateBlocks TestTemplateBlock[]    @relation("TestTemplateBlockCreatedBy")
+  patients                 Patient[]
+  addresses                Address[]
+  vendorProfiles           VendorProfile[]
+  earningsHistories        EarningsHistory[]
+  orders                   Order[]
+  vendorOrderRejections    VendorOrderRejection[]
+  paymentGateways          PaymentGateway[]
+  paymentWebhookLogs       PaymentWebhookLog[]
+  carts                    Cart[]
+  cartItems                CartItem[]
+  orderTrackings           OrderTracking[]
+  orderSlots               OrderSlot[]
+  referenceCenters         ReferenceCenter[]
+  parameterRanges          ParameterRange[]
+  resultOptions            ResultOption[]
+  patientTestResults       PatientTestResult[]
+  parameterResults         ParameterResult[]
+  createdDiagnosticCenters DiagnosticCenter[]
 }
 
 model UserDiagnosticCenter {
@@ -485,30 +485,30 @@ model Test {
   reportUnit    String  @default("hours")
   status        String  @default("active")
 
-  // ✅ NEW
   sortOrder        Int?            @default(0)
-  departmentItemId Int? // ✅ NEW (nullable first)
+  departmentItemId Int?
   departmentItem   DepartmentItem? @relation(fields: [departmentItemId], references: [id])
 
-  template        TestTemplate?
-  // ✅ NEW: Other Categories (many-to-many)
   otherCategories TestOtherCategory[]
 
-  createdById Int? // ⭐ ADDED: Track who created the test
+  createdById Int?
   createdBy   User? @relation(fields: [createdById], references: [id])
 
   category    Category     @relation(fields: [categoryId], references: [id])
   subCategory SubCategory? @relation(fields: [subCategoryId], references: [id])
 
-  centerPackages      CenterPackage[]      @relation("TestToCenterPackage")
-  checkupPackages     CheckupPackage[]
-  cartItems           CartItem[]
-  prescriptions       Prescription[]
-  parameters          TestParameter[]
+  parameters  TestParameter[] // ✅ already exists in your schema
+  reportItems TestReportItem[] // ✅ NEW (ADD THIS)
+
   patientResults      PatientTestResult[]
   orderMemberPackages OrderMemberPackage[]
+  prescriptions       Prescription[]
+  cartItems           CartItem[]
   banners             Banner[]
   spotlightBanners    SpotlightBanner[]
+
+  centerPackages  CenterPackage[]  @relation("TestToCenterPackage")
+  checkupPackages CheckupPackage[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1385,8 +1385,8 @@ model TestParameter {
   resultOpts ResultOption[]
   results    ParameterResult[]
 
-  // ✅ ADD THIS
-  templateBlockLinks TestTemplateBlockParameter[] @relation("TemplateBlockParameterToTestParameter")
+  // ✅ ADD THIS (reverse relation)
+  reportItems TestReportItem[] @relation("ParameterReportItems")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1636,89 +1636,38 @@ model OrderVendorEarning {
   @@index([status])
 }
 
-enum TestContentBlockType {
-  TEST_HEADING
-  PARAMETERS
-  MULTI_PARAMETERS
+enum ReportItemType {
+  HEADING
+  PARAMETER
   NOTES
   RICH_TEXT
-  FREE_TEXT
-  TABLE_FORMAT
-  ANTIBIOTIC_LIST
-  HTML_TABLE_PARAMETER
-  TEMPLATE_CONTENT
 }
 
-enum GenderScope {
-  ALL
-  MALE
-  FEMALE
-  OTHER
-}
+model TestReportItem {
+  id        Int            @id @default(autoincrement())
+  testId    Int
+  type      ReportItemType
+  sortOrder Int            @default(0)
 
-model TestTemplate {
-  id       Int     @id @default(autoincrement())
-  testId   Int     @unique
-  name     String  @default("Default Template")
-  isActive Boolean @default(true)
+  title String?
+  text  String?
+  html  String?
+
+  parameterId Int?
+  parameter   TestParameter? @relation("ParameterReportItems", fields: [parameterId], references: [id], onDelete: Cascade)
 
   createdById Int?
-  createdBy   User? @relation("TestTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User? @relation("TestReportItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
-  test   Test                @relation(fields: [testId], references: [id], onDelete: Cascade)
-  blocks TestTemplateBlock[]
+  test Test @relation(fields: [testId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([createdById])
-}
-
-model TestTemplateBlock {
-  id         Int                  @id @default(autoincrement())
-  templateId Int
-  type       TestContentBlockType
-
-  title    String?
-  text     String?
-  html     String?
-  data     Json?
-  settings Json?
-
-  sortOrder   Int         @default(0)
-  genderScope GenderScope @default(ALL)
-  isActive    Boolean     @default(true)
-
-  createdById Int?
-  createdBy   User? @relation("TestTemplateBlockCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-
-  template        TestTemplate                 @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  blockParameters TestTemplateBlockParameter[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([templateId])
-  @@index([type])
-  @@index([templateId, sortOrder])
-  @@index([genderScope])
-  @@index([createdById])
-}
-
-model TestTemplateBlockParameter {
-  id Int @id @default(autoincrement())
-
-  blockId     Int
-  parameterId Int
-  sortOrder   Int @default(0)
-
-  block     TestTemplateBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
-  parameter TestParameter     @relation("TemplateBlockParameterToTestParameter", fields: [parameterId], references: [id], onDelete: Cascade)
-
-  @@unique([blockId, parameterId])
-  @@index([blockId])
+  @@index([testId])
+  @@index([testId, sortOrder])
   @@index([parameterId])
-  @@index([blockId, sortOrder])
+  @@index([createdById])
 }
 
 enum DepartmentType {

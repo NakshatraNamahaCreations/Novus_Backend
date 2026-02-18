@@ -68,5 +68,16 @@ export const ParameterController = {
     console.error("listByTest error:", err);
     return res.status(500).json({ success: false, error: "Failed to fetch parameters" });
   }
+  },
+  backfillReportItems: async (req, res) => {
+  try {
+    const { testId } = req.params;
+    const out = await ParameterService.backfillReportItems(testId, req.body?.createdById);
+    return res.json({ success: true, data: out });
+  } catch (err) {
+    console.error("backfillReportItems error:", err);
+    return res.status(500).json({ success: false, error: err?.message || "Backfill failed" });
   }
+},
+
 };

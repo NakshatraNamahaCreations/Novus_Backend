@@ -36,7 +36,7 @@ router.put(
   updateLayout
 );
 
-// DELETE single layout ✅ (NO :id)
+
 router.delete("/", deleteLayout);
 
 export default router;
