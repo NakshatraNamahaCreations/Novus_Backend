@@ -6,6 +6,9 @@ const router = express.Router();
 // list items for a test
 router.get("/list/:testId", TestReportItemController.listByTest);
 
+// ✅ NEW: full data by test (test + params + ranges + report items)
+router.get("/full/:testId", TestReportItemController.getFullByTest);
+
 // create heading/notes/richtext item
 router.post("/:testId", TestReportItemController.create);
 

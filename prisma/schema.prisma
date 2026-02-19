@@ -1649,10 +1649,10 @@ model TestReportItem {
   type      ReportItemType
   sortOrder Int            @default(0)
 
-  title String?
-  text  String?
-  html  String?
-
+  title       String?
+  text        String?
+  html        String?
+  gender      String?   @default("Both")
   parameterId Int?
   parameter   TestParameter? @relation("ParameterReportItems", fields: [parameterId], references: [id], onDelete: Cascade)
 

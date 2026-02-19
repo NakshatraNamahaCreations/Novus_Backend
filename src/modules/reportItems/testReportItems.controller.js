@@ -1,3 +1,6 @@
+// ✅ CONTROLLER (UPDATED)
+// testReportItems.controller.js
+
 import { TestReportItemService } from "./testReportItems.service.js";
 
 export const TestReportItemController = {
@@ -12,6 +15,19 @@ export const TestReportItemController = {
     }
   },
 
+  // ✅ NEW: /full/:testId?gender=Male
+  getFullByTest: async (req, res) => {
+    try {
+      const { testId } = req.params;
+      const { gender } = req.query; // Male | Female | Both
+      const data = await TestReportItemService.getFullByTest(testId, gender);
+      return res.json({ success: true, data });
+    } catch (err) {
+      console.error("getFullByTest error:", err);
+      return res.status(500).json({ success: false, error: err?.message || "Failed" });
+    }
+  },
+
   create: async (req, res) => {
     try {
       const { testId } = req.params;
@@ -19,7 +35,7 @@ export const TestReportItemController = {
       return res.json({ success: true, data: row });
     } catch (err) {
       console.error("create report item error:", err);
-      return res.status(500).json({ success: false, error: err?.message || "Failed to create report item" });
+      return res.status(500).json({ success: false, error: err?.message || "Failed" });
     }
   },
 
@@ -30,7 +46,7 @@ export const TestReportItemController = {
       return res.json({ success: true, data: row });
     } catch (err) {
       console.error("update report item error:", err);
-      return res.status(500).json({ success: false, error: err?.message || "Failed to update report item" });
+      return res.status(500).json({ success: false, error: err?.message || "Failed" });
     }
   },
 
@@ -41,19 +57,19 @@ export const TestReportItemController = {
       return res.json({ success: true, message: "Report item deleted" });
     } catch (err) {
       console.error("delete report item error:", err);
-      return res.status(500).json({ success: false, error: err?.message || "Failed to delete report item" });
+      return res.status(500).json({ success: false, error: err?.message || "Failed" });
     }
   },
 
   reorder: async (req, res) => {
     try {
       const { testId } = req.params;
-      const { items } = req.body; // [{id, sortOrder}]
+      const { items } = req.body;
       const out = await TestReportItemService.reorder(testId, items);
       return res.json({ success: true, data: out });
     } catch (err) {
       console.error("reorder report items error:", err);
-      return res.status(500).json({ success: false, error: err?.message || "Failed to reorder report items" });
+      return res.status(500).json({ success: false, error: err?.message || "Failed" });
     }
   },
 };

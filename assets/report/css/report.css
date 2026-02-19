@@ -376,7 +376,65 @@ p {
   display: inline-block;
   min-width: 85px;
 }
+.ri-heading-row td {
+  font-weight: 700;
+  background: #f6f7fb;
+  padding: 10px 8px;
+  border-top: 1px solid #e6e8f0;
+}
 
+.ri-html-row td {
+  padding: 10px 8px;
+}
+/* ── Nested tables inside RICH_TEXT / NOTES cells ── */
+.richtext-cell table,
+.notes-cell table {
+  border-collapse: collapse !important;
+  border-spacing: 0 !important;
+  width: 100% !important;
+  border: 1px solid #9aa4b2 !important;
+  margin: 6px 0 !important;
+}
+
+.richtext-cell table td,
+.richtext-cell table th,
+.notes-cell table td,
+.notes-cell table th {
+  border: 1px solid #9aa4b2 !important;
+  padding: 6px 8px !important;
+  font-size: 12px !important;
+  color: #1f2937 !important;
+}
+
+.richtext-cell table tr,
+.notes-cell table tr {
+  border: 1px solid #9aa4b2 !important;
+}
+
+.richtext-cell table th,
+.notes-cell table th {
+  background-color: #f8fafc !important;
+  font-weight: 600 !important;
+}
+
+/* Also target tables with border="0" attribute from Word/TinyMCE */
+.richtext-cell table[border="0"],
+.notes-cell table[border="0"] {
+  border: 1px solid #9aa4b2 !important;
+}
+
+.richtext-cell table[border="0"] td,
+.richtext-cell table[border="0"] th,
+.notes-cell table[border="0"] td,
+.notes-cell table[border="0"] th {
+  border: 1px solid #9aa4b2 !important;
+}
+.param-notes {
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
+  margin-top: 2px;
+}
 /* ===============================
    FOOTER STYLES
    =============================== */
@@ -416,6 +474,15 @@ p {
   page-break-before: avoid;
 }
 
+.tbl .tbl-head-row td {
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  background: #f3f6fb;
+  border-bottom: 1px solid #d7dee9;
+  padding: 10px 12px;
+}
+
 /* ===============================
    TEST TITLE ROW - IMPROVED
    =============================== */
@@ -440,6 +507,41 @@ p {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+/* ── Test name row inside the shared table ── */
+.row-test-group-header td {
+  background: #f5f7fa;
+  font-weight: 700;
+  font-size: 13px;
+  color: #37dd04;
+  padding: 8px 10px;
+  border-top: 2px solid #d0d7e2;
+}
+
+/* ── HEADING row — bold + highlighted ── */
+.row-heading .heading-cell {
+ background: var(--bg-light);
+  font-weight: 700;
+  font-size: 13px;
+margin-top: 10px;
+margin-bottom: 10px;
+  padding: 7px 10px;
+}
+
+/* ── Parameter method ── */
+.param-method {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+/* ── Parameter notes (below name) ── */
+.param-notes {
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
+  margin-top: 3px;
+}
+
 
 /* ===============================
    MAIN RESULTS TABLE

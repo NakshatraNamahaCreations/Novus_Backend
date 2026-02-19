@@ -1,5 +1,5 @@
+// ✅ src/modules/results/results.controller.js
 import { ResultService } from "./result.service.js";
-import puppeteer from "puppeteer";
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
@@ -7,248 +7,166 @@ export const ResultController = {
   create: async (req, res) => {
     try {
       const result = await ResultService.createResult(req.body);
-      res.json({ success: true, data: result });
+      return res.json({ success: true, data: result });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Failed to save test result" });
+      console.error("ResultController.create error:", err);
+      return res.status(500).json({ success: false, error: "Failed to save test result" });
     }
   },
 
   getById: async (req, res) => {
     try {
       const result = await ResultService.fetchById(req.params.id);
-      res.json({ success: true, data: result });
+      return res.json({ success: true, data: result });
     } catch (err) {
-      res.status(500).json({ error: "Failed to fetch test result" });
+      console.error("ResultController.getById error:", err);
+      return res.status(500).json({ success: false, error: "Failed to fetch test result" });
     }
   },
 
-find: async (req, res) => {
-  try {
-    const { orderId, testId, patientId } = req.query;
+  find: async (req, res) => {
+    try {
+      const { orderId, testId, patientId } = req.query;
 
-    if (!orderId || !testId || !patientId) {
-      return res.status(400).json({
+      if (!orderId || !testId || !patientId) {
+        return res.status(400).json({
+          success: false,
+          message: "orderId, testId and patientId are required",
+        });
+      }
+
+      const result = await ResultService.findByOrderTestAndPatient(
+        Number(orderId),
+        Number(testId),
+        Number(patientId)
+      );
+
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      console.error("ResultController.find error:", err);
+      return res.status(500).json({
         success: false,
-        message: "orderId, testId and patientId are required",
+        message: "Failed to fetch result",
       });
     }
+  },
 
-    const result = await ResultService.findByOrderTestAndPatient(
-      Number(orderId),
-      Number(testId),
-      Number(patientId)
-    );
+  // ✅ patientReportPdf lookup (your existing)
+  find1: async (req, res) => {
+    try {
+      const { orderId, patientId, type = "full" } = req.query;
 
-    res.json({ success: true, data: result });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch result",
-    });
-  }
-},
+      if (!orderId || !patientId) {
+        return res.status(400).json({
+          success: false,
+          message: "orderId and patientId are required",
+        });
+      }
 
-find1: async (req, res) => {
-  try {
-    const { orderId, patientId, type = "full" } = req.query;
-
-    if (!orderId || !patientId) {
-      return res.status(400).json({
-        success: false,
-        message: "orderId and patientId are required",
-      });
-    }
-
-    const row = await prisma.patientReportPdf.findUnique({
-      where: {
-        orderId_patientId: {
-          orderId: Number(orderId),
-          patientId: Number(patientId),
+      const row = await prisma.patientReportPdf.findUnique({
+        where: {
+          orderId_patientId: {
+            orderId: Number(orderId),
+            patientId: Number(patientId),
+          },
         },
-      },
-    });
-  
+      });
 
-    if (!row) {
-      return res.status(404).json({
+      if (!row) {
+        return res.status(404).json({
+          success: false,
+          message: "Patient PDF not found (not generated yet)",
+        });
+      }
+
+      const url =
+        type === "plain"
+          ? row.plainPdfUrl
+          : type === "letterhead"
+          ? row.letterheadPdfUrl
+          : row.fullPdfUrl;
+
+      if (!url) {
+        return res.status(404).json({
+          success: false,
+          message: `PDF url not available for type=${type}`,
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          orderId: row.orderId,
+          patientId: row.patientId,
+          type,
+          url,
+          status: row.status,
+        },
+      });
+    } catch (err) {
+      console.error("patientReportPdf.find error:", err);
+      return res.status(500).json({
         success: false,
-        message: "Patient PDF not found (not generated yet)",
+        message: "Failed to fetch patient pdf url",
       });
     }
+  },
 
-    const url =
-      type === "plain"
-        ? row.plainPdfUrl
-        : type === "letterhead"
-        ? row.letterheadPdfUrl
-        : row.fullPdfUrl;
-
-    if (!url) {
-      return res.status(404).json({
-        success: false,
-        message: `PDF url not available for type=${type}`,
-      });
-    }
-
-    return res.json({
-      success: true,
-      data: {
-        orderId: row.orderId,
-        patientId: row.patientId,
-        type,
-        url,
-        status: row.status,
-      },
-    });
-  } catch (err) {
-    console.error("patientReportPdf.find error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch patient pdf url",
-    });
-  }
-},
-
- // UPDATE RESULT
   update: async (req, res) => {
     try {
       const id = Number(req.params.id);
       const data = await ResultService.update(id, req.body);
       return res.json({ success: true, data });
     } catch (err) {
+      console.error("ResultController.update error:", err);
       return res.status(500).json({ success: false, message: err.message });
     }
   },
 
-print: async (req, res) => {
-  try {
-    const report = await ResultService.fetchById(req.params.id);
-
-    if (!report) return res.status(404).send("Report not found");
-
-    const html = ResultService.generatePrintableHtml(report);
-
-    res.set("Content-Type", "text/html");
-    res.send(html);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Failed to print report");
-  }
-},
-
-download: async (req, res) => {
-  try {
-    const report = await ResultService.fetchById(req.params.id);
-
-    if (!report) return res.status(404).send("Report not found");
-
-    const html = ResultService.generatePrintableHtml(report);
-
-    res.setHeader("Content-Type", "application/octet-stream");
-    res.setHeader("Content-Disposition", `attachment; filename=report-${report.id}.html`);
-    res.send(html);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Failed to download report");
-  }
-},
- downloadPdf: async (req, res) => {
+  getPatientReportByOrder: async (req, res) => {
     try {
-      const result = await ResultService.fetchById(req.params.id);
-      if (!result) return res.status(404).send("Report not found");
-    const withLetterhead = req.query.letterhead === "true";
+      const { orderId, patientId } = req.params;
+      const { testId } = req.query;
 
-    const layout = withLetterhead
-      ? await ResultService.getDefaultLayout()
-      : null;
-
-      const defaultSignature = await prisma.eSignature.findFirst({
-     where: { isDefault: true },
-     });
-
-      // Generate the HTML using your existing service
-      const html = ResultService.generatePrintableHtml(result, layout, defaultSignature);
-
-      // Launch Puppeteer
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-        ]
+      const data = await ResultService.getPatientReportByOrder({
+        orderId,
+        patientId,
+        testId,
       });
 
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: "networkidle0" });
-
-      // Generate PDF
-      const pdfBuffer = await page.pdf({
-        format: "A4",
-        printBackground: true,
-       margin: { top: "0mm", bottom: "0mm", left: "0mm", right: "0mm" }
-      });
-
-      await browser.close();
-
-      // Send PDF to browser
-      res.set({
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename=report-${result.id}.pdf`,
-      });
-
-      res.send(pdfBuffer);
-
+      return res.json({ success: true, data });
     } catch (err) {
-      console.error(err);
-      res.status(500).send("Failed to download PDF");
+      console.error("getPatientReportByOrder error:", err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || "Failed to fetch report",
+      });
     }
   },
-  
 
-  htmlReport: async (req, res) => {
+  getReportDataByTest: async (req, res) => {
     try {
-      const report = await ResultService.fetchById(req.params.id);
+      const testId = Number(req.params.testId);
+      const patientTestResultId = Number(req.query.patientTestResultId);
+      const gender = String(req.query.gender || "Both");
 
-      // PATHOLOGY TABLE
-      const rows = report.parameterResults
-        .map(
-          (x) => `
-          <tr>
-            <td>${x.parameterId}</td>
-            <td>${x.valueNumber ?? x.valueText ?? ""}</td>
-            <td>${x.normalRangeText ?? ""}</td>
-            <td>${x.flag ?? ""}</td>
-          </tr>`
-        )
-        .join("");
+      if (!Number.isFinite(testId) || testId <= 0) {
+        return res.status(400).json({ success: false, error: "Valid testId is required" });
+      }
+      if (!Number.isFinite(patientTestResultId) || patientTestResultId <= 0) {
+        return res.status(400).json({ success: false, error: "Valid patientTestResultId is required" });
+      }
 
-      const html = `
-        <html>
-          <body>
-            <h2>${report.test.name}</h2>
-            <p><b>Patient:</b> ${report.patient.fullName}</p>
-            <hr/>
-            <table border="1" cellpadding="6" cellspacing="0">
-              <tr>
-                <th>Parameter</th>
-                <th>Value</th>
-                <th>Normal Range</th>
-                <th>Flag</th>
-              </tr>
-              ${rows}
-            </table>
-          </body>
-        </html>`;
+      const data = await ResultService.getReportDataByTest({
+        testId,
+        patientTestResultId,
+        gender,
+      });
 
-      res.set("Content-Type", "text/html");
-      res.send(html);
+      return res.json({ success: true, data });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Failed to generate HTML" });
+      console.error("getReportDataByTest error:", err);
+      return res.status(500).json({ success: false, error: err?.message || "Failed" });
     }
   },
 };

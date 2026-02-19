@@ -1,7 +1,58 @@
+// ✅ src/modules/results/result.service.js
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
+const normalizeGender = (g) => {
+  const x = String(g || "").trim().toUpperCase();
+  if (!x) return "BOTH";
+  if (x === "M" || x === "MALE") return "MALE";
+  if (x === "F" || x === "FEMALE") return "FEMALE";
+  return "BOTH";
+};
+
+const genderWhere = (gender) => {
+  const g = normalizeGender(gender);
+  return { OR: [{ gender: "Both" }, { gender: "BOTH" }, { gender: g }] };
+};
+
+const toIntOrNull = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const isEmptyDefaults = (d) => !d?.left && !d?.center && !d?.right;
+
 export const ResultService = {
+  // -------------------------------------------
+  // DEFAULT SIGNATURES (DEPARTMENT-WISE ✅)
+  // -------------------------------------------
+  getDefaultSignaturesByDepartment: async (departmentItemId) => {
+    try {
+      if (!departmentItemId) return { left: null, center: null, right: null };
+
+      const rows = await prisma.eSignatureDepartment.findMany({
+        where: { departmentItemId: Number(departmentItemId), isDefault: true },
+        select: { signature: { select: { id: true, alignment: true } } },
+      });
+
+      const defaults = { left: null, center: null, right: null };
+      for (const r of rows) {
+        const a = String(r.signature?.alignment || "").toUpperCase();
+        if (a === "LEFT") defaults.left = r.signature.id;
+        if (a === "CENTER") defaults.center = r.signature.id;
+        if (a === "RIGHT") defaults.right = r.signature.id;
+      }
+      return defaults;
+    } catch (err) {
+      console.error("getDefaultSignaturesByDepartment error:", err);
+      return { left: null, center: null, right: null };
+    }
+  },
+
+  // (Optional fallback if you still want category-wise defaults)
+  // getDefaultSignaturesByCategory: async (categoryId) => { ... },
+
   // -------------------------------------------
   // FETCH BEST MATCHING RANGE
   // -------------------------------------------
@@ -10,324 +61,19 @@ export const ResultService = {
       where: { parameterId },
       orderBy: { id: "asc" },
     });
-
     if (!ranges.length) return null;
 
     const gender = patient.gender?.toLowerCase();
 
-    // Priority: gender match → any → first
     return (
       ranges.find((r) => r.gender?.toLowerCase() === gender) ||
       ranges.find((r) => !r.gender || r.gender === "any") ||
       ranges[0]
     );
   },
-update: async (id, payload) => {
-  try {
-    const existing = await prisma.patientTestResult.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        testId: true,
-        patientId: true,          // ✅ needed
-        leftSignatureId: true,
-        centerSignatureId: true,
-        rightSignatureId: true,
-      },
-    });
-
-    if (!existing) throw new Error("Result not found");
-
-    // ✅ patient needed for range calc (age/gender)
-    const patient = await prisma.patient.findUnique({
-      where: { id: existing.patientId },
-    });
-    if (!patient) throw new Error("Invalid patientId");
-
-    // ✅ get test category for defaults
-    const test = await prisma.test.findUnique({
-      where: { id: existing.testId },
-      select: { categoryId: true },
-    });
-    if (!test) throw new Error("Test not found for result");
-
-    // ✅ defaults resolver
-    const getDefaultSignaturesByCategory = async (categoryId) => {
-      const rows = await prisma.eSignatureCategory.findMany({
-        where: { categoryId, isDefault: true },
-        select: { signature: { select: { id: true, alignment: true } } },
-      });
-
-      const defaults = { left: null, center: null, right: null };
-      for (const r of rows) {
-        const a = String(r.signature.alignment || "").toUpperCase();
-        if (a === "LEFT") defaults.left = r.signature.id;
-        if (a === "CENTER") defaults.center = r.signature.id;
-        if (a === "RIGHT") defaults.right = r.signature.id;
-      }
-      return defaults;
-    };
-
-    const defaults = await getDefaultSignaturesByCategory(test.categoryId);
-
-    const hasLeft = Object.prototype.hasOwnProperty.call(payload, "leftSignatureId");
-    const hasCenter = Object.prototype.hasOwnProperty.call(payload, "centerSignatureId");
-    const hasRight = Object.prototype.hasOwnProperty.call(payload, "rightSignatureId");
-
-    const nextLeft =
-      hasLeft ? (payload.leftSignatureId ? Number(payload.leftSignatureId) : null)
-      : existing.leftSignatureId ?? defaults.left;
-
-    const nextCenter =
-      hasCenter ? (payload.centerSignatureId ? Number(payload.centerSignatureId) : null)
-      : existing.centerSignatureId ?? defaults.center;
-
-    const nextRight =
-      hasRight ? (payload.rightSignatureId ? Number(payload.rightSignatureId) : null)
-      : existing.rightSignatureId ?? defaults.right;
-
-    await prisma.patientTestResult.update({
-      where: { id },
-      data: {
-        status: payload.approve ? "APPROVED" : "REPORTED",
-        reportedById: payload.reportedById,
-        createdById: payload.createdById,
-        reportedAt: new Date(),
-        notes: payload.notes,
-
-        leftSignatureId: nextLeft || null,
-        centerSignatureId: nextCenter || null,
-        rightSignatureId: nextRight || null,
-
-        ...(payload.testType === "RADIOLOGY" && {
-          reportHtml: payload.reportHtml,
-          rawJson: payload.rawJson || null,
-        }),
-      },
-    });
-
-    // ✅ PATHOLOGY PARAMETERS (rebuild with normalRangeText + flag)
-    if (payload.testType === "PATHOLOGY" && payload.parameters?.length) {
-      await prisma.parameterResult.deleteMany({
-        where: { patientTestResultId: id },
-      });
-
-      const rows = [];
-
-      for (const p of payload.parameters) {
-        const range = await ResultService.findRange(p.parameterId, patient);
-
-        const flag =
-          p.valueNumber != null
-            ? ResultService.evaluateFlag(p.valueNumber, range)
-            : "NA";
-
-      const ref = (range?.referenceRange ?? "").trim();
-
-const hasLower = range?.lowerLimit !== null && range?.lowerLimit !== undefined;
-const hasUpper = range?.upperLimit !== null && range?.upperLimit !== undefined;
-
-const limitText = (hasLower || hasUpper)
-  ? `${hasLower ? range.lowerLimit : ""} - ${hasUpper ? range.upperLimit : ""}`.trim()
-  : "";
-
-const normalRangeText =
-  ref ||
-  limitText ||
-  (range?.normalValueHtml ?? null);
-
-rows.push({
-  patientTestResultId: id,
-  parameterId: p.parameterId,
-  valueNumber: p.valueNumber ?? null,
-  valueText: p.valueText ?? null,
-  unit: p.unit ?? null,
-  flag,
-  normalRangeText, // ✅ now normalValueHtml used only when ref & limits missing
-});
-
-      }
-
-      if (rows.length) {
-        await prisma.parameterResult.createMany({ data: rows });
-      }
-    }
-
-    return prisma.patientTestResult.findUnique({
-      where: { id },
-      include: {
-        parameterResults: true,
-        leftSignature: true,
-        centerSignature: true,
-        rightSignature: true,
-      },
-    });
-  } catch (err) {
-    console.error("Update error:", err);
-    throw err;
-  }
-},
-
-
 
   // -------------------------------------------
-  // CREATE TEST RESULT (PATHOLOGY + RADIOLOGY)
-  // -------------------------------------------
-createResult: async (payload) => {
-  const patient = await prisma.patient.findUnique({
-    where: { id: payload.patientId },
-  });
-  if (!patient) throw new Error("Invalid patientId");
-
-  const isRadiology = payload.testType === "RADIOLOGY";
-
-  // ✅ Get test category (needed for default signature)
-  const test = await prisma.test.findUnique({
-    where: { id: payload.testId },
-    select: { id: true, categoryId: true },
-  });
-  if (!test) throw new Error("Invalid testId");
-
-  // ✅ Helper: get category default signatures (LEFT/CENTER/RIGHT)
-  const getDefaultSignaturesByCategory = async (categoryId) => {
-    const rows = await prisma.eSignatureCategory.findMany({
-      where: { categoryId, isDefault: true },
-      select: {
-        signature: {
-          select: { id: true, alignment: true },
-        },
-      },
-    });
-
-    const defaults = { left: null, center: null, right: null };
-
-    for (const r of rows) {
-      const a = String(r.signature.alignment || "").toUpperCase();
-      if (a === "LEFT") defaults.left = r.signature.id;
-      if (a === "CENTER") defaults.center = r.signature.id;
-      if (a === "RIGHT") defaults.right = r.signature.id;
-    }
-
-    return defaults;
-  };
-
-  const defaults = await getDefaultSignaturesByCategory(test.categoryId);
-
-  // ✅ Choose signature ids: manual override > category defaults
-  const leftSignatureId =
-    payload.leftSignatureId != null ? Number(payload.leftSignatureId) : defaults.left;
-
-  const centerSignatureId =
-    payload.centerSignatureId != null ? Number(payload.centerSignatureId) : defaults.center;
-
-  const rightSignatureId =
-    payload.rightSignatureId != null ? Number(payload.rightSignatureId) : defaults.right;
-
-  // ✅ 1️⃣ Create PatientTestResult WITH signatures
-  const created = await prisma.patientTestResult.create({
-    data: {
-      patientId: payload.patientId,
-      testId: payload.testId,
-      orderId: payload.orderId,
-      collectedAt: payload.collectedAt,
-      reportedAt: new Date(),
-      reportedById: payload.reportedById,
-      notes: payload.notes,
-      reportHtml: payload.reportHtml || null,
-
-      // ✅ signatures stored on result
-      leftSignatureId: leftSignatureId || null,
-      centerSignatureId: centerSignatureId || null,
-      rightSignatureId: rightSignatureId || null,
-    },
-  });
-
-  // ✅ 2️⃣ Radiology => no parameters
-  if (isRadiology) {
-    return ResultService.fetchById(created.id);
-  }
-
-  // ✅ 3️⃣ Pathology parameters
-  const paramInsert = [];
-
-  for (const p of payload.parameters) {
-    const range = await ResultService.findRange(p.parameterId, patient);
-
-    console.log("range",range)
-
-    const flag =
-      p.valueNumber != null
-        ? ResultService.evaluateFlag(p.valueNumber, range)
-        : "NA";
-
-   const ref = (range?.referenceRange ?? "").trim();
-
-const hasLower = range?.lowerLimit !== null && range?.lowerLimit !== undefined;
-const hasUpper = range?.upperLimit !== null && range?.upperLimit !== undefined;
-
-const limitsText = (hasLower || hasUpper)
-  ? `${hasLower ? range.lowerLimit : "-"} - ${hasUpper ? range.upperLimit : "-"}`.trim()
-  : "";
-
-paramInsert.push({
-  patientTestResultId: created.id,
-  parameterId: p.parameterId,
-  valueNumber: p.valueNumber ?? null,
-  valueText: p.valueText ?? null,
-  unit: p.unit ?? null,
-  flag,
-  normalRangeText: ref || limitsText || (range?.normalValueHtml ?? null),
-});
-
-  }
-
-  if (paramInsert.length > 0) {
-    await prisma.parameterResult.createMany({ data: paramInsert });
-  }
-
-  return ResultService.fetchById(created.id);
-},
-
-
-
-
-  findByOrderTestAndPatient: (orderId, testId, patientId) =>
-    prisma.patientTestResult.findFirst({
-      where: {
-        orderId,
-        testId,
-        patientId,
-      },
-      include: {
-        patient: {
-          select: {
-            id: true,
-            fullName: true,
-          },
-        },
-        test: {
-          select: {
-            id: true,
-            name: true,
-            testType: true,
-          },
-        },
-        parameterResults: {
-          include: {
-            parameter: {
-              select: {
-                id: true,
-                name: true,
-                type: true,
-              },
-            },
-          },
-        },
-      },
-    }),
-
-  // -------------------------------------------
-  // FLAG EVALUATION (COLOR LOGIC)
+  // FLAG EVALUATION
   // -------------------------------------------
   evaluateFlag: (value, range) => {
     if (value === null || value === undefined || !range) return "NA";
@@ -346,7 +92,275 @@ paramInsert.push({
   },
 
   // -------------------------------------------
-  // FETCH WITH children
+  // CREATE TEST RESULT (PATHOLOGY + RADIOLOGY)
+  // -------------------------------------------
+  createResult: async (payload) => {
+    try {
+      const patient = await prisma.patient.findUnique({
+        where: { id: Number(payload.patientId) },
+      });
+      if (!patient) throw new Error("Invalid patientId");
+
+      const isRadiology = payload.testType === "RADIOLOGY";
+
+      // ✅ Get test department for department-wise default signature
+      const test = await prisma.test.findUnique({
+        where: { id: Number(payload.testId) },
+        select: { id: true, departmentItemId: true, categoryId: true },
+      });
+      if (!test) throw new Error("Invalid testId");
+
+      // ✅ Department-wise defaults
+      let defaults = await ResultService.getDefaultSignaturesByDepartment(
+        test.departmentItemId
+      );
+
+      // ✅ Optional fallback to category defaults (only if you keep that feature)
+      // if (isEmptyDefaults(defaults)) {
+      //   defaults = await ResultService.getDefaultSignaturesByCategory(test.categoryId);
+      // }
+
+      // ✅ Choose signature ids: manual override > department defaults
+      const leftSignatureId =
+        payload.leftSignatureId != null
+          ? toIntOrNull(payload.leftSignatureId)
+          : defaults.left;
+
+      const centerSignatureId =
+        payload.centerSignatureId != null
+          ? toIntOrNull(payload.centerSignatureId)
+          : defaults.center;
+
+      const rightSignatureId =
+        payload.rightSignatureId != null
+          ? toIntOrNull(payload.rightSignatureId)
+          : defaults.right;
+
+      // ✅ Create PatientTestResult WITH signatures
+      const created = await prisma.patientTestResult.create({
+        data: {
+          patientId: Number(payload.patientId),
+          testId: Number(payload.testId),
+          orderId: payload.orderId != null ? Number(payload.orderId) : null,
+          collectedAt: payload.collectedAt || null,
+          reportedAt: new Date(),
+          reportedById:
+            payload.reportedById != null ? Number(payload.reportedById) : null,
+          createdById:
+            payload.createdById != null ? Number(payload.createdById) : null,
+          status: payload.approve ? "APPROVED" : "REPORTED",
+          notes: payload.notes || null,
+          reportHtml: payload.reportHtml || null,
+          rawJson: payload.rawJson || null,
+
+          leftSignatureId: leftSignatureId || null,
+          centerSignatureId: centerSignatureId || null,
+          rightSignatureId: rightSignatureId || null,
+        },
+      });
+
+      // ✅ Radiology => no parameters
+      if (isRadiology) return ResultService.fetchById(created.id);
+
+      // ✅ Pathology parameters
+      const paramInsert = [];
+      const params = Array.isArray(payload.parameters) ? payload.parameters : [];
+
+      for (const p of params) {
+        const range = await ResultService.findRange(p.parameterId, patient);
+
+        const flag =
+          p.valueNumber != null
+            ? ResultService.evaluateFlag(p.valueNumber, range)
+            : "NA";
+
+        const ref = (range?.referenceRange ?? "").trim();
+
+        const hasLower =
+          range?.lowerLimit !== null && range?.lowerLimit !== undefined;
+        const hasUpper =
+          range?.upperLimit !== null && range?.upperLimit !== undefined;
+
+        const limitsText =
+          hasLower || hasUpper
+            ? `${hasLower ? range.lowerLimit : "-"} - ${
+                hasUpper ? range.upperLimit : "-"
+              }`.trim()
+            : "";
+
+        paramInsert.push({
+          patientTestResultId: created.id,
+          parameterId: Number(p.parameterId),
+          valueNumber: p.valueNumber ?? null,
+          valueText: p.valueText ?? null,
+          unit: p.unit ?? null,
+          flag,
+          normalRangeText: ref || limitsText || (range?.normalValueHtml ?? null),
+          createdById:
+            payload.createdById != null ? Number(payload.createdById) : null,
+        });
+      }
+
+      if (paramInsert.length) {
+        await prisma.parameterResult.createMany({ data: paramInsert });
+      }
+
+      return ResultService.fetchById(created.id);
+    } catch (err) {
+      console.error("createResult error:", err);
+      throw err;
+    }
+  },
+
+  // -------------------------------------------
+  // UPDATE RESULT (DEPARTMENT DEFAULTS ✅)
+  // -------------------------------------------
+  update: async (id, payload) => {
+    try {
+      const existing = await prisma.patientTestResult.findUnique({
+        where: { id: Number(id) },
+        select: {
+          id: true,
+          testId: true,
+          patientId: true,
+          leftSignatureId: true,
+          centerSignatureId: true,
+          rightSignatureId: true,
+        },
+      });
+      if (!existing) throw new Error("Result not found");
+
+      const patient = await prisma.patient.findUnique({
+        where: { id: existing.patientId },
+      });
+      if (!patient) throw new Error("Invalid patientId");
+
+      const test = await prisma.test.findUnique({
+        where: { id: existing.testId },
+        select: { departmentItemId: true, categoryId: true },
+      });
+      if (!test) throw new Error("Test not found for result");
+
+      // ✅ Department-wise defaults
+      let defaults = await ResultService.getDefaultSignaturesByDepartment(
+        test.departmentItemId
+      );
+
+      // ✅ Optional fallback to category defaults
+      // if (isEmptyDefaults(defaults)) {
+      //   defaults = await ResultService.getDefaultSignaturesByCategory(test.categoryId);
+      // }
+
+      const hasLeft = Object.prototype.hasOwnProperty.call(
+        payload,
+        "leftSignatureId"
+      );
+      const hasCenter = Object.prototype.hasOwnProperty.call(
+        payload,
+        "centerSignatureId"
+      );
+      const hasRight = Object.prototype.hasOwnProperty.call(
+        payload,
+        "rightSignatureId"
+      );
+
+      const nextLeft = hasLeft
+        ? toIntOrNull(payload.leftSignatureId)
+        : existing.leftSignatureId ?? defaults.left;
+
+      const nextCenter = hasCenter
+        ? toIntOrNull(payload.centerSignatureId)
+        : existing.centerSignatureId ?? defaults.center;
+
+      const nextRight = hasRight
+        ? toIntOrNull(payload.rightSignatureId)
+        : existing.rightSignatureId ?? defaults.right;
+
+      await prisma.patientTestResult.update({
+        where: { id: Number(id) },
+        data: {
+          status: payload.approve ? "APPROVED" : "REPORTED",
+          reportedById: toIntOrNull(payload.reportedById),
+          createdById: toIntOrNull(payload.createdById),
+          reportedAt: new Date(),
+          notes: payload.notes ?? null,
+
+          leftSignatureId: nextLeft || null,
+          centerSignatureId: nextCenter || null,
+          rightSignatureId: nextRight || null,
+
+          ...(payload.testType === "RADIOLOGY" && {
+            reportHtml: payload.reportHtml ?? null,
+            rawJson: payload.rawJson ?? null,
+          }),
+        },
+      });
+
+      // ✅ PATHOLOGY PARAMETERS (rebuild with normalRangeText + flag)
+      if (payload.testType === "PATHOLOGY" && Array.isArray(payload.parameters)) {
+        await prisma.parameterResult.deleteMany({
+          where: { patientTestResultId: Number(id) },
+        });
+
+        const rows = [];
+
+        for (const p of payload.parameters) {
+          const range = await ResultService.findRange(p.parameterId, patient);
+
+          const flag =
+            p.valueNumber != null
+              ? ResultService.evaluateFlag(p.valueNumber, range)
+              : "NA";
+
+          const ref = (range?.referenceRange ?? "").trim();
+
+          const hasLower =
+            range?.lowerLimit !== null && range?.lowerLimit !== undefined;
+          const hasUpper =
+            range?.upperLimit !== null && range?.upperLimit !== undefined;
+
+          const limitText =
+            hasLower || hasUpper
+              ? `${hasLower ? range.lowerLimit : ""} - ${
+                  hasUpper ? range.upperLimit : ""
+                }`.trim()
+              : "";
+
+          const normalRangeText =
+            ref || limitText || (range?.normalValueHtml ?? null);
+
+          rows.push({
+            patientTestResultId: Number(id),
+            parameterId: Number(p.parameterId),
+            valueNumber: p.valueNumber ?? null,
+            valueText: p.valueText ?? null,
+            unit: p.unit ?? null,
+            flag,
+            normalRangeText,
+            createdById: toIntOrNull(payload.createdById),
+          });
+        }
+
+        if (rows.length) await prisma.parameterResult.createMany({ data: rows });
+      }
+
+      return prisma.patientTestResult.findUnique({
+        where: { id: Number(id) },
+        include: {
+          parameterResults: true,
+          leftSignature: true,
+          centerSignature: true,
+          rightSignature: true,
+        },
+      });
+    } catch (err) {
+      console.error("Update error:", err);
+      throw err;
+    }
+  },
+
+  // -------------------------------------------
+  // FETCH / FIND
   // -------------------------------------------
   fetchById: (id) =>
     prisma.patientTestResult.findUnique({
@@ -357,281 +371,258 @@ paramInsert.push({
         parameterResults: {
           include: {
             parameter: {
+              select: { id: true, name: true },
+            },
+          },
+        },
+        leftSignature: true,
+        centerSignature: true,
+        rightSignature: true,
+      },
+    }),
+
+  findByOrderTestAndPatient: (orderId, testId, patientId) =>
+    prisma.patientTestResult.findFirst({
+      where: { orderId, testId, patientId },
+      include: {
+        patient: { select: { id: true, fullName: true } },
+        test: { select: { id: true, name: true, testType: true } },
+        parameterResults: {
+          include: { parameter: { select: { id: true, name: true, type: true } } },
+        },
+        leftSignature: true,
+        centerSignature: true,
+        rightSignature: true,
+      },
+    }),
+
+  // -------------------------------------------
+  // PDF / REPORT HELPERS (unchanged from yours)
+  // -------------------------------------------
+  getDefaultLayout: () =>
+    prisma.reportLayout.findFirst({ orderBy: { id: "desc" } }),
+
+  getPatientReportByOrder: async ({ orderId, patientId, testId }) => {
+    const oId = Number(orderId);
+    const pId = Number(patientId);
+    const tId =
+      testId != null && String(testId).trim() !== "" ? Number(testId) : null;
+
+    const [patient, order] = await Promise.all([
+      prisma.patient.findUnique({
+        where: { id: pId },
+        select: {
+          id: true,
+          fullName: true,
+          initial: true,
+          dob: true,
+          age: true,
+          gender: true,
+          contactNo: true,
+          email: true,
+        },
+      }),
+      prisma.order.findUnique({
+        where: { id: oId },
+        select: {
+          id: true,
+          orderNumber: true,
+          merchantOrderId: true,
+          date: true,
+          status: true,
+          totalAmount: true,
+          finalAmount: true,
+          patientId: true,
+          doctor: {
+            select: { id: true, name: true, initial: true, qualification: true },
+          },
+          center: { select: { id: true, name: true, address: true } },
+          diagnosticCenter: { select: { id: true, name: true, address: true } },
+          vendor: { select: { id: true, name: true } },
+        },
+      }),
+    ]);
+
+    if (!patient) throw new Error("Patient not found");
+    if (!order) throw new Error("Order not found");
+    if (order.patientId !== pId) {
+      throw new Error("This patient is not linked to the given order");
+    }
+
+    const gender = normalizeGender(patient.gender);
+
+    const results = await prisma.patientTestResult.findMany({
+      where: {
+        orderId: oId,
+        patientId: pId,
+        ...(tId ? { testId: tId } : {}),
+      },
+      include: {
+        test: {
+          select: {
+            id: true,
+            name: true,
+            testType: true,
+            categoryId: true,
+            subCategoryId: true,
+            departmentItemId: true,
+          },
+        },
+        parameterResults: {
+          orderBy: { parameterId: "asc" },
+          include: {
+            parameter: {
+              include: {
+                ranges: { where: genderWhere(gender), orderBy: { id: "asc" } },
+                resultOpts: { orderBy: { id: "asc" } },
+              },
+            },
+          },
+        },
+        leftSignature: true,
+        centerSignature: true,
+        rightSignature: true,
+      },
+      orderBy: { id: "asc" },
+    });
+
+    if (!results?.length) {
+      throw new Error("No test results found for this patient in this order");
+    }
+
+    const testIds = [...new Set(results.map((r) => r.testId))];
+
+    const reportItemsByTestId = {};
+    await Promise.all(
+      testIds.map(async (tid) => {
+        const items = await prisma.testReportItem.findMany({
+          where: { testId: tid, ...genderWhere(gender) },
+          orderBy: { sortOrder: "asc" },
+          include: {
+            parameter: {
+              include: {
+                ranges: { where: genderWhere(gender), orderBy: { id: "asc" } },
+                resultOpts: { orderBy: { id: "asc" } },
+              },
+            },
+          },
+        });
+        reportItemsByTestId[tid] = items;
+      })
+    );
+
+    const layout = await prisma.reportLayout.findFirst({
+      orderBy: { id: "desc" },
+    });
+
+    return { patient, order, gender, layout, results, reportItemsByTestId };
+  },
+
+  getReportDataByTest: async ({ testId, patientTestResultId, gender }) => {
+    const tId = Number(testId);
+    const ptrId = patientTestResultId ? Number(patientTestResultId) : null;
+    const g = normalizeGender(gender);
+
+    if (!tId) throw new Error("testId is required");
+
+    const test = await prisma.test.findUnique({
+      where: { id: tId },
+      select: {
+        id: true,
+        name: true,
+        testType: true,
+        gender: true,
+        categoryId: true,
+        parameters: {
+          orderBy: { order: "asc" },
+          select: {
+            id: true,
+            testId: true,
+            name: true,
+            type: true,
+            order: true,
+            unit: true,
+            method: true,
+            notes: true,
+            isActive: true,
+            options: true,
+            resultOpts: { orderBy: { id: "asc" }, select: { id: true, label: true, value: true } },
+            ranges: {
+              orderBy: { id: "asc" },
               select: {
                 id: true,
-                name: true, // 👈 GET PARAMETER NAME
+                gender: true,
+                lowerLimit: true,
+                upperLimit: true,
+                criticalLow: true,
+                criticalHigh: true,
+                referenceRange: true,
+                normalValueHtml: true,
+                specialConditionHtml: true,
               },
             },
           },
         },
       },
-    }),
-getDefaultLayout: () =>
-  prisma.reportLayout.findFirst({
-    orderBy: { id: "desc" }, // or createdAt: "desc"
-  }),
+    });
 
+    if (!test) throw new Error("Test not found");
 
-  generatePrintableHtml: (report, layout = null, signature = null) => {
-    const withLetterhead = !!layout;
+    const reportItems = await prisma.testReportItem.findMany({
+      where: { testId: tId, ...(g ? genderWhere(g) : {}) },
+      orderBy: { sortOrder: "asc" },
+      include: {
+        parameter: true,
+        createdBy: { select: { id: true, name: true, email: true } },
+      },
+    });
 
-    const isRadiology = !!report.reportHtml && report.reportHtml !== "";
-    const isPathology = report.parameterResults?.length > 0;
+    const patientTestResult = ptrId
+      ? await prisma.patientTestResult.findUnique({
+          where: { id: ptrId },
+          include: {
+            test: { select: { id: true, name: true } },
+            parameterResults: {
+              orderBy: { parameterId: "asc" },
+              include: {
+                parameter: {
+                  select: {
+                    id: true,
+                    name: true,
+                    unit: true,
+                    method: true,
+                    ranges: true,
+                    resultOpts: true,
+                    options: true,
+                  },
+                },
+              },
+            },
+            leftSignature: true,
+            centerSignature: true,
+            rightSignature: true,
+          },
+        })
+      : null;
 
-    const today = new Date(report.reportedAt).toLocaleString();
+    const filteredParameters = (test.parameters || []).map((p) => {
+      const ranges = Array.isArray(p.ranges) ? p.ranges : [];
+      const rangesFiltered =
+        g === "BOTH"
+          ? ranges
+          : ranges.filter((r) => {
+              const rg = normalizeGender(r.gender);
+              return rg === "BOTH" || rg === g;
+            });
 
-    // Pathology rows
-    const parameterRows = isPathology
-      ? report.parameterResults
-          .map(
-            (p) => `
-        <tr>
-          <td>${p.parameter?.name || "–"}</td>
-          <td>${p.valueNumber ?? p.valueText ?? "–"}</td>
-          <td>${p.unit ?? ""}</td>
-          <td>${p.normalRangeText ?? "–"}</td>
-          <td><span class="flag ${p.flag?.toLowerCase()}">${
-              p.flag || ""
-            }</span></td>
-        </tr>
-      `
-          )
-          .join("")
-      : "";
+      return { ...p, ranges: rangesFiltered };
+    });
 
-    // Header
-    const headerHtml = withLetterhead
-      ? `
-      <div class="header-img-box">
-        <img src="${layout.headerImg}" class="header-img" />
-      </div>
-    `
-      : `
-      <div class="header"></div>
-    `;
-
-    // Footer
-    const footerHtml = withLetterhead
-      ? `
-      <div class="footer-img-box">
-        <img src="${layout.footerImg}" class="footer-img" />
-      </div>
-    `
-      : `
-      <div class="footer">
-        This is a computer-generated report. No signature is required.
-      </div>
-    `;
-
-    // ⭐ SIGNATURE BLOCK
-    const signatureHtml = signature
-      ? `
-      <div class="signature-area" style="text-align: right; margin-top: 50px;">
-        <img src="${
-          signature.signatureImg
-        }" style="height: 80px; object-fit: contain;" />
-        <p style="font-weight: bold; margin: 4px 0;">${signature.name}</p>
-        <p style="margin: 2px 0;">${signature.qualification || ""}</p>
-        <p style="margin: 2px 0;">${signature.designation || ""}</p>
-      </div>
-    `
-      : `
-      <div class="signature-area" style="text-align: right; margin-top: 50px;">
-        <p><b>Reported By:</b> ${
-          report.reportedById ? "Authorised Personnel" : "System"
-        }</p>
-        <p>__________________________</p>
-      </div>
-    `;
-
-    return `
-  <html>
-  <head>
-    <meta charset="UTF-8">
-    <title>Report - ${report.test.name}</title>
-
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 0;
-        padding: 0;
-        color: #222;
-      }
-
-      html, body {
-        background: white !important;
-        width: 100% !important;
-      }
-
-   .page {
-  padding: 24px 36px;
-  max-width: 794px; /* A4 width */
-  margin: 0 auto;
-}
-.header-img-box {
-  margin-bottom: 16px;
-}
-.footer-img-box {
-  margin-top: 40px;
-}
-
-
-      .header-img-box, .footer-img-box {
-        overflow: hidden;
-        width: 100%;
-        text-align: center;
-      }
-
-      .header-img {
-        width: 100%;
-        display: block;
-      }
-
-      .footer-img {
-        width: 100%;
-        display: block;
-      }
-
-      .header {
-        display: flex;
-        justify-content: space-between;
-        border-bottom: 2px solid #1e40af;
-        padding-bottom: 12px;
-        margin-bottom: 20px;
-      }
-
-    .patient-box {
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  padding: 16px 18px;
-  border-radius: 8px;
-  margin-bottom: 24px;
-}
-
-.patient-box h3 {
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 12px;
-  color: #1e3a8a;
-}
-
-
-      .info-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 6px 20px;
-        font-size: 13px;
-      }
-
-.section-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1e3a8a;
-  margin: 28px 0 10px;
-  padding-left: 10px;
-  border-left: 4px solid #1e40af;
-}
-
-
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 12px;
-      }
-
-      th {
-        background: #1e3a8a;
-        color: white;
-        text-align: left;
-        padding: 8px;
-        font-size: 13px;
-      }
-
-      td {
-        padding: 8px;
-        border-bottom: 1px solid #e5e7eb;
-        font-size: 13px;
-      }
-
-      .flag.normal { color: #16a34a; font-weight: bold; }
-      .flag.high { color: #dc2626; font-weight: bold; }
-      .flag.low { color: #ca8a04; font-weight: bold; }
-      .flag.critical_high { color: #b91c1c; font-weight: bold; }
-      .flag.critical_low { color: #b45309; font-weight: bold; }
-      .flag.na { color: #6b7280; }
-
-      .radiology-box {
-        padding: 15px;
-        border: 1px solid #d1d5db;
-        border-radius: 6px;
-        background: #f9fafb;
-        margin-top: 12px;
-        font-size: 14px;
-        line-height: 1.5;
-      }
-
-      .footer {
-        text-align: center;
-        font-size: 11px;
-        color: #6b7280;
-        margin-top: 40px;
-        padding-top: 10px;
-        border-top: 1px solid #d1d5db;
-      }
-    </style>
-  </head>
-
-  <body>
-    <div class="page">
-
-      ${headerHtml}
-
-      <div class="patient-box">
-        <h3>Patient Information</h3>
-        <div class="info-grid">
-          <div><b>Name:</b> ${report.patient.fullName}</div>
-          <div><b>Test:</b> ${report.test.name}</div>
-          <div><b>Reported At:</b> ${today}</div>
-          <div><b>Patient ID:</b> ${report.patientId}</div>
-        </div>
-      </div>
-
-      ${
-        isPathology
-          ? `
-      <div class="section-title">Pathology Results</div>
-
-      <table>
-        <tr>
-          <th>Parameter</th>
-          <th>Value</th>
-          <th>Unit</th>
-          <th>Normal Range</th>
-          <th>Flag</th>
-        </tr>
-        ${parameterRows}
-      </table>
-      `
-          : ""
-      }
-
-      ${
-        isRadiology
-          ? `
-      <div class="section-title">Radiology Report</div>
-      <div class="radiology-box">${report.reportHtml}</div>
-      `
-          : ""
-      }
-
-      <!-- SIGNATURE -->
-      ${signatureHtml}
-
-      ${footerHtml}
-
-    </div>
-  </body>
-  </html>
-  `;
+    return {
+      test: { ...test, parameters: filteredParameters },
+      reportItems,
+      patientTestResult,
+      gender: g,
+    };
   },
 };
