@@ -344,7 +344,7 @@ export const getBasedOnTestType = async (req, res) => {
     // If you still want "CHECKUP" behavior, keep it based on category.type (CURATED_CHECKUP / PROFILE etc.)
     if (type) {
       if (String(type).toUpperCase() === "CHECKUP") {
-        where.OR = [{ type: "CURATED_CHECKUP" }, { type: "PROFILE" }];
+        where.OR = [{ type: "CURATED_CHECKUP" }, { type: "PATHOLOGY" }];
       } else {
         where.type = type;
       }

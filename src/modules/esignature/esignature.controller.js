@@ -112,25 +112,41 @@ export const createESignature = async (req, res) => {
 export const getSignaturesByTest = async (req, res) => {
   try {
     const testId = Number(req.query.testId);
-    if (!testId) {
-      return res.status(400).json({ success: false, message: "testId is required" });
+    if (!Number.isFinite(testId) || testId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Valid testId is required" });
     }
 
     const test = await prisma.test.findUnique({
       where: { id: testId },
-      select: { id: true, categoryId: true,departmentItemId:true },
+      select: { id: true, categoryId: true, departmentItemId: true },
     });
 
     if (!test) {
-      return res.status(404).json({ success: false, message: "Test not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Test not found" });
     }
 
-    const category = await prisma.category.findUnique({
-      where: { id: Number(test.categoryId) },
-      select: { id: true, departmentItemId: true },
-    });
+    // ✅ Prefer departmentItemId from Test
+    let departmentItemId = test.departmentItemId
+      ? Number(test.departmentItemId)
+      : null;
 
-    if (!category?.departmentItemId) {
+    // ✅ Optional fallback (only if you still want support when test.departmentItemId is null)
+    if (!departmentItemId && test.categoryId) {
+      const category = await prisma.category.findUnique({
+        where: { id: Number(test.categoryId) },
+        select: { departmentItemId: true },
+      });
+
+      departmentItemId = category?.departmentItemId
+        ? Number(category.departmentItemId)
+        : null;
+    }
+
+    if (!departmentItemId) {
       return res.json({
         success: true,
         data: {
@@ -138,16 +154,15 @@ export const getSignaturesByTest = async (req, res) => {
           defaults: { left: null, center: null, right: null },
           signatures: [],
         },
-        message: "Category is not linked to any department",
+        message: "Test is not linked to any department",
       });
     }
 
-    const departmentItemId = Number(category.departmentItemId);
-
     const deptRows = await prisma.eSignatureDepartment.findMany({
-      where: { departmentItemId }, // ✅ FIX
+      where: { departmentItemId },
       select: {
         isDefault: true,
+        signatureId: true,
         signature: {
           select: {
             id: true,
@@ -162,14 +177,18 @@ export const getSignaturesByTest = async (req, res) => {
       orderBy: [{ isDefault: "desc" }, { signatureId: "asc" }],
     });
 
-    const signatures = deptRows.map((r) => ({
-      ...r.signature,
-      isDefault: r.isDefault,
-    }));
+    const signatures = deptRows
+      .filter((r) => r.signature)
+      .map((r) => ({
+        ...r.signature,
+        isDefault: r.isDefault,
+      }));
 
     const defaults = { left: null, center: null, right: null };
+
     for (const r of deptRows) {
-      if (!r.isDefault) continue;
+      if (!r.isDefault || !r.signature) continue;
+
       const a = String(r.signature.alignment || "").toUpperCase();
       if (a === "LEFT" && !defaults.left) defaults.left = r.signature.id;
       if (a === "CENTER" && !defaults.center) defaults.center = r.signature.id;
@@ -182,7 +201,9 @@ export const getSignaturesByTest = async (req, res) => {
     });
   } catch (err) {
     console.error("getSignaturesByTest error:", err);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
 
