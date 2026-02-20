@@ -3,28 +3,14 @@ import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 
 const prisma = new PrismaClient();
 
-/**
- * ✅ Changes done:
- * 1) Category now requires departmentItemId (DepartmentItem relation)
- * 2) Category "type" is optional and should NOT be PATHOLOGY/RADIOLOGY (comes from department)
- * 3) All list APIs support departmentItemId filter
- * 4) Popular filters corrected (use isPopular, not bannerUrl)
- * 5) include departmentItem in responses for UI
- * 6) try/catch everywhere ✅
- */
-
 // ✅ CREATE
 export const addCategory = async (req, res) => {
   try {
-    const { name, type, order, isPopular, departmentItemId } = req.body;
+    const { name, type, order, isPopular } = req.body;
 
     if (!name?.trim()) {
       return res.status(400).json({ error: "Category name is required" });
     }
-    if (!departmentItemId) {
-      return res.status(400).json({ error: "departmentItemId is required" });
-    }
-
 
     let imgUrl = null;
     let bannerUrl = null;
@@ -39,16 +25,13 @@ export const addCategory = async (req, res) => {
       data: {
         name: name.trim(),
         type: type || null,
-        order: order !== undefined && order !== null && order !== ""
-          ? Number(order)
-          : null,
+        order:
+          order !== undefined && order !== null && order !== ""
+            ? Number(order)
+            : null,
         isPopular: isPopular === "true" || isPopular === true,
         imgUrl,
         bannerUrl,
-        departmentItemId: Number(departmentItemId), // ✅ NEW
-      },
-      include: {
-        departmentItem: true, // ✅ for frontend display
       },
     });
 
@@ -58,7 +41,9 @@ export const addCategory = async (req, res) => {
 
     // unique constraint
     if (error?.code === "P2002") {
-      return res.status(409).json({ error: "Category with this name already exists" });
+      return res
+        .status(409)
+        .json({ error: "Category with this name already exists" });
     }
 
     return res.status(500).json({ error: "Failed to create category" });
@@ -68,12 +53,11 @@ export const addCategory = async (req, res) => {
 // ✅ READ ALL (with optional filters + limit)
 export const getAllCategories = async (req, res) => {
   try {
-    const { type, limit, popular, departmentItemId } = req.query;
+    const { type, limit, popular } = req.query;
 
     const where = {};
 
     // ✅ optional filters
-    if (departmentItemId) where.departmentItemId = Number(departmentItemId);
     if (type) where.type = type;
 
     // ✅ if popular=true => isPopular true
@@ -81,7 +65,6 @@ export const getAllCategories = async (req, res) => {
 
     const categories = await prisma.category.findMany({
       where,
-      include: { departmentItem: true },
       orderBy: [{ order: "asc" }, { createdAt: "desc" }],
       take: limit ? Number(limit) : undefined,
     });
@@ -98,7 +81,7 @@ export const getCategoryById = async (req, res) => {
   try {
     const category = await prisma.category.findUnique({
       where: { id: Number(req.params.id) },
-      include: { subCategories: true, departmentItem: true },
+      include: { subCategories: true },
     });
 
     if (!category) return res.status(404).json({ error: "Category not found" });
@@ -120,7 +103,6 @@ export const updateCategory = async (req, res) => {
       isPopular,
       removeBanner,
       removeImage,
-      departmentItemId,
     } = req.body;
 
     const existingCategory = await prisma.category.findUnique({
@@ -130,8 +112,6 @@ export const updateCategory = async (req, res) => {
     if (!existingCategory) {
       return res.status(404).json({ error: "Category not found" });
     }
-
-
 
     let imgUrl = existingCategory.imgUrl;
     let bannerUrl = existingCategory.bannerUrl;
@@ -211,14 +191,7 @@ export const updateCategory = async (req, res) => {
 
         imgUrl,
         bannerUrl,
-
-        // ✅ NEW
-        departmentItemId:
-          departmentItemId !== undefined && departmentItemId !== null && departmentItemId !== ""
-            ? Number(departmentItemId)
-            : existingCategory.departmentItemId,
       },
-      include: { departmentItem: true },
     });
 
     return res.json(updatedCategory);
@@ -226,7 +199,9 @@ export const updateCategory = async (req, res) => {
     console.error("Error updating category:", error);
 
     if (error?.code === "P2002") {
-      return res.status(409).json({ error: "Category with this name already exists" });
+      return res
+        .status(409)
+        .json({ error: "Category with this name already exists" });
     }
 
     return res.status(500).json({ error: "Failed to update category" });
@@ -257,7 +232,7 @@ export const deleteCategory = async (req, res) => {
             tests: true,
             packages: true,
             centers: true,
-            ESignatureCategory: true,
+
           },
         },
       },
@@ -308,7 +283,8 @@ export const deleteCategory = async (req, res) => {
     // best-effort S3 cleanup
     try {
       if (existingCategory.imgUrl) await deleteFromS3(existingCategory.imgUrl);
-      if (existingCategory.bannerUrl) await deleteFromS3(existingCategory.bannerUrl);
+      if (existingCategory.bannerUrl)
+        await deleteFromS3(existingCategory.bannerUrl);
     } catch (s3Err) {
       console.error("S3 delete failed (ignored):", s3Err);
     }
@@ -338,15 +314,13 @@ export const deleteCategory = async (req, res) => {
 
 export const getPopularCategories = async (req, res) => {
   try {
-    const { limit = 6, type, departmentItemId } = req.query;
+    const { limit = 6, type } = req.query;
 
     const where = { isPopular: true };
     if (type) where.type = type;
-    if (departmentItemId) where.departmentItemId = Number(departmentItemId);
 
     const categories = await prisma.category.findMany({
       where,
-      include: { departmentItem: true },
       orderBy: [{ order: "asc" }, { createdAt: "desc" }],
       take: Number(limit),
     });
@@ -360,10 +334,9 @@ export const getPopularCategories = async (req, res) => {
 
 export const getBasedOnTestType = async (req, res) => {
   try {
-    const { type, limit = 50, departmentItemId } = req.query;
+    const { type, limit = 50 } = req.query;
 
     const where = {};
-    if (departmentItemId) where.departmentItemId = Number(departmentItemId);
 
     // ✅ IMPORTANT:
     // You said "remove pathology/radiology from category type".
@@ -379,7 +352,6 @@ export const getBasedOnTestType = async (req, res) => {
 
     const categories = await prisma.category.findMany({
       where,
-      include: { departmentItem: true },
       orderBy: [{ order: "asc" }, { createdAt: "desc" }],
       take: Number(limit) || 50,
     });

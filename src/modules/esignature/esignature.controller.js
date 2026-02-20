@@ -118,7 +118,7 @@ export const getSignaturesByTest = async (req, res) => {
 
     const test = await prisma.test.findUnique({
       where: { id: testId },
-      select: { id: true, categoryId: true },
+      select: { id: true, categoryId: true,departmentItemId:true },
     });
 
     if (!test) {
@@ -230,6 +230,9 @@ export const getESignatureById = async (req, res) => {
 export const updateESignature = async (req, res) => {
   try {
     const sigId = Number(req.params.id);
+    if (!Number.isFinite(sigId) || sigId <= 0) {
+      return res.status(400).json({ error: "Invalid e-signature id" });
+    }
 
     const {
       name,
@@ -245,18 +248,47 @@ export const updateESignature = async (req, res) => {
       include: { departments: true },
     });
 
-    if (!existing) return res.status(404).json({ error: "E-signature not found" });
+    if (!existing) {
+      return res.status(404).json({ error: "E-signature not found" });
+    }
 
+    // ---------------------------
+    // Image handling
+    // ---------------------------
     let imgUrl = existing.signatureImg;
     if (req.file) {
-      if (existing.signatureImg) await deleteFromS3(existing.signatureImg);
+      if (existing.signatureImg) {
+        await deleteFromS3(existing.signatureImg);
+      }
       imgUrl = await uploadToS3(req.file, "esignatures");
     }
 
-    const departmentItemIds = departments !== undefined ? parseIds(departments) : null;
-    const defaultDeptItemId = defaultDepartmentId ? Number(defaultDepartmentId) : null;
+    // ---------------------------
+    // Parse departments + default
+    // ---------------------------
+    const departmentItemIds =
+      departments !== undefined && departments !== null
+        ? parseIds(departments) // must return number[]
+        : null;
+
+    const defaultDeptItemId =
+      defaultDepartmentId !== undefined &&
+      defaultDepartmentId !== null &&
+      String(defaultDepartmentId).trim() !== ""
+        ? Number(defaultDepartmentId)
+        : null;
+
+    if (
+      defaultDeptItemId !== null &&
+      (!Number.isFinite(defaultDeptItemId) || defaultDeptItemId <= 0)
+    ) {
+      return res.status(400).json({ error: "Invalid defaultDepartmentId" });
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
+      // ---------------------------
+      // Update main signature
+      // ---------------------------
       await tx.eSignature.update({
         where: { id: sigId },
         data: {
@@ -268,19 +300,26 @@ export const updateESignature = async (req, res) => {
         },
       });
 
-      if (departmentItemIds) {
+      // ---------------------------
+      // Sync departments list (optional)
+      // ---------------------------
+      if (departmentItemIds !== null) {
+        // remove unselected
         await tx.eSignatureDepartment.deleteMany({
           where: {
             signatureId: sigId,
-            departmentItemId: { notIn: departmentItemIds.length ? departmentItemIds : [-1] },
+            departmentItemId: {
+              notIn: departmentItemIds.length ? departmentItemIds : [-1],
+            },
           },
         });
 
+        // add missing
         if (departmentItemIds.length) {
           await tx.eSignatureDepartment.createMany({
             data: departmentItemIds.map((deptItemId) => ({
               signatureId: sigId,
-              departmentItemId: deptItemId,
+              departmentItemId: Number(deptItemId),
               isDefault: false,
             })),
             skipDuplicates: true,
@@ -288,12 +327,12 @@ export const updateESignature = async (req, res) => {
         }
       }
 
-      if (defaultDeptItemId) {
-        await tx.eSignatureDepartment.updateMany({
-          where: { departmentItemId: defaultDeptItemId, isDefault: true },
-          data: { isDefault: false },
-        });
-
+      // ---------------------------
+      // ✅ Fix: default department should be unique per signature
+      // ---------------------------
+      if (defaultDeptItemId !== null) {
+        // ensure the selected default dept exists for this signature
+        // (if departments were not passed, the relation might not exist yet)
         await tx.eSignatureDepartment.upsert({
           where: {
             signatureId_departmentItemId: {
@@ -301,21 +340,47 @@ export const updateESignature = async (req, res) => {
               departmentItemId: defaultDeptItemId,
             },
           },
-          update: { isDefault: true },
-          create: { signatureId: sigId, departmentItemId: defaultDeptItemId, isDefault: true },
+          update: {},
+          create: {
+            signatureId: sigId,
+            departmentItemId: defaultDeptItemId,
+            isDefault: false,
+          },
+        });
+
+        // ✅ clear any previous default for THIS signature
+        await tx.eSignatureDepartment.updateMany({
+          where: { signatureId: sigId, isDefault: true },
+          data: { isDefault: false },
+        });
+
+        // ✅ set the new default for THIS signature
+        await tx.eSignatureDepartment.update({
+          where: {
+            signatureId_departmentItemId: {
+              signatureId: sigId,
+              departmentItemId: defaultDeptItemId,
+            },
+          },
+          data: { isDefault: true },
         });
       }
 
+      // return updated record
       return tx.eSignature.findUnique({
         where: { id: sigId },
-        include: { departments: { include: { departmentItem: true } } },
+        include: {
+          departments: {
+            include: { departmentItem: true },
+          },
+        },
       });
     });
 
-    res.json(updated);
+    return res.json(updated);
   } catch (error) {
     console.error("Error updating e-signature:", error);
-    res.status(500).json({ error: "Failed to update e-signature" });
+    return res.status(500).json({ error: "Failed to update e-signature" });
   }
 };
 

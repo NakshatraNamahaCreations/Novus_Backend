@@ -76,7 +76,8 @@ model Pincode {
   city    String?
   state   String?
   area    String?
-
+  // ✅ ADD THIS reverse relation
+vendorPincodes VendorPincode[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -380,9 +381,7 @@ model Category {
   isPopular          Boolean             @default(false)
   subCategories      SubCategory[]
   tests              Test[]
-  // ✅ NEW: link category to department item (MRI, Biochemistry...)
-  departmentItemId   Int?
-  departmentItem     DepartmentItem?     @relation(fields: [departmentItemId], references: [id], onDelete: SetNull)
+  
   otherCategoryTests TestOtherCategory[]
   packages           HealthPackage[]
   centers            CenterCategory[]
@@ -592,44 +591,54 @@ model CouponUsage {
 }
 
 model Vendor {
-  id       Int       @id @default(autoincrement())
+  id       Int      @id @default(autoincrement())
   name     String
-  number   String    @unique
+  number   String   @unique
   city     String?
   category String?
   gender   String?
   dob      DateTime?
   age      Int?
-  pincode  Int?
-  radius   Int?
-  earnings Float     @default(0)
+
+  radius   Float?
+  earnings Float    @default(0)
   address  String?
-  email    String?   @unique
+  email    String?  @unique
   password String
-  status   String    @default("inactive")
-  block    Boolean   @default(false)
+  status   String   @default("inactive")
+  block    Boolean  @default(false)
 
-  createdById Int? // ⭐ ADDED: Track who created the vendor
-  createdBy   User? @relation(fields: [createdById], references: [id])
+  isOnline      Boolean   @default(false)
+  otp           String?
+  otpExpiry     DateTime?
+  overallRating Float     @default(0)
+  totalReviews  Int       @default(0)
 
-  isOnline            Boolean              @default(false)
-  otp                 String?
-  otpExpiry           DateTime?
-  overallRating       Float                @default(0)
-  totalReviews        Int                  @default(0)
-  profile             VendorProfile?
+  // ✅ created-by relation (fixes User.createdVendors error)
+  createdById Int?
+  createdBy   User?     @relation(fields: [createdById], references: [id])
+
+  // ✅ multi-pincode relation
+  pincodes VendorPincode[]
+
+  // ✅ opposite fields for relations (fixes your current validation errors)
   orders              Order[]
+  payments            Payment[]
+  profile             VendorProfile?
   history             EarningsHistory[]
   locationHistory     VendorLocation[]
-  reviews             VendorReview[]
-  payments            Payment[]
+  reviews             VendorReview[]          // ⬅ opposite of VendorReview.vendor
+  attendance          VendorAttendance[]      // ⬅ opposite of VendorAttendance.vendor
+  orderVendorEarnings OrderVendorEarning[]    // ⬅ opposite of OrderVendorEarning.vendor
   devices             VendorDevice[]
-  attendance          VendorAttendance[]
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
   vendorEarningConfig VendorEarningConfig?
-  orderVendorEarnings OrderVendorEarning[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdById])
 }
+
 
 model VendorReview {
   id        Int      @id @default(autoincrement())
@@ -1682,7 +1691,7 @@ model DepartmentItem {
   isActive  Boolean        @default(true)
   sortOrder Int?           @default(0)
 
-  categories Category[]
+
   tests      Test[]
   // ✅ OPTIONAL: see signatures mapped to this department
   signatures ESignatureDepartment[]
@@ -1692,41 +1701,19 @@ model DepartmentItem {
 
   @@index([type])
 }
+model VendorPincode {
+  id        Int      @id @default(autoincrement())
+  vendorId  Int
+  pincode   String
 
+  isActive  Boolean  @default(true)
+  priority  Int      @default(0)
+  radiusKm  Float?
 
-enum LabWorkflowStage {
-  COLLECTED
-  RECEIVED
-  ACCEPTED
-  ENTERED
-  APPROVED_1
-  APPROVED_2
-  APPROVED_3
-  DISPATCHED
-  PRINTED
-}
+  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  pin       Pincode  @relation(fields: [pincode], references: [pincode], onDelete: Cascade)
 
-model LabWorkflowEvent {
-  id Int @id @default(autoincrement())
-
-  // This links to the exact row you are listing in "Report Due"
-  orderMemberPackageId Int
-  orderMemberPackage   OrderMemberPackage @relation(fields: [orderMemberPackageId], references: [id], onDelete: Cascade)
-
-  stage LabWorkflowStage
-
-  at DateTime @default(now())
-
-  // who did it (lab staff)
-  byUserId Int?
-  byUser   User? @relation(fields: [byUserId], references: [id], onDelete: SetNull)
-
-  notes String?
-
-  createdAt DateTime @default(now())
-
-  @@index([orderMemberPackageId])
-  @@index([stage])
-  @@index([at])
-  @@unique([orderMemberPackageId, stage]) // 1 stage only once (optional, remove if you want history)
+  @@unique([vendorId, pincode])
+  @@index([pincode])
+  @@index([vendorId])
 }

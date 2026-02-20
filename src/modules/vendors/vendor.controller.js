@@ -5,7 +5,65 @@ import jwt from "jsonwebtoken";
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || "NOVUS!@2025";
 
-// ✅ REGISTER
+const normalizePincodes = (value) => {
+  // supports:
+  // 1) "560060,560061"
+  // 2) ["560060","560061"]
+  // 3) [{pincode:"560060", priority:0, radiusKm:null}, ...]
+  if (!value) return [];
+
+  // array
+  if (Array.isArray(value)) {
+    return value
+      .map((x) => {
+        if (x == null) return null;
+
+        if (typeof x === "string" || typeof x === "number") {
+          return { pincode: String(x).trim(), priority: 0, radiusKm: null };
+        }
+
+        // object
+        const p = String(x.pincode ?? "").trim();
+        if (!p) return null;
+
+        return {
+          pincode: p,
+          priority: x.priority != null ? Number(x.priority) : 0,
+          radiusKm: x.radiusKm != null && x.radiusKm !== ""
+            ? Number(x.radiusKm)
+            : null,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  // string
+  return String(value)
+    .split(",")
+    .map((x) => String(x).trim())
+    .filter(Boolean)
+    .map((p) => ({ pincode: p, priority: 0, radiusKm: null }));
+};
+
+const dedupePincodes = (list) => {
+  const map = new Map();
+  for (const item of list) {
+    const key = item.pincode;
+    if (!key) continue;
+
+    // if duplicate, keep the one with higher priority (or latest)
+    if (!map.has(key)) map.set(key, item);
+    else {
+      const prev = map.get(key);
+      const prevPr = Number(prev.priority ?? 0);
+      const curPr = Number(item.priority ?? 0);
+      map.set(key, curPr >= prevPr ? item : prev);
+    }
+  }
+  return Array.from(map.values());
+};
+
+// ✅ REGISTER (FULL FIXED)
 export const registerVendor = async (req, res) => {
   try {
     const {
@@ -17,41 +75,105 @@ export const registerVendor = async (req, res) => {
       dob,
       age,
       address,
-      pincode,
+      pincodes,
       radius,
       email,
       password,
       status,
     } = req.body;
 
-    // Check duplicate number or email
+    if (!name || !number) {
+      return res.status(400).json({ error: "name and number are required" });
+    }
+    if (!password || !String(password).trim()) {
+      return res.status(400).json({ error: "password is required" });
+    }
+
+    // ✅ check existing
     const existing = await prisma.vendor.findFirst({
-      where: { OR: [{ number }, { email }] },
+      where: {
+        OR: [
+          { number: String(number).trim() },
+          ...(email ? [{ email: String(email).trim() }] : []),
+        ],
+      },
+      select: { id: true },
     });
 
     if (existing) {
-      return res.status(400).json({ error: "This vendor phone number or email is already registered." });
+      return res.status(400).json({
+        error: "This vendor phone number or email is already registered.",
+      });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // ✅ normalize pincodes (supports objects array)
+    const pinRowsRaw = normalizePincodes(pincodes);
+    const pinRows = dedupePincodes(pinRowsRaw);
 
-    const vendor = await prisma.vendor.create({
-      data: {
-        name,
-        createdById: req.user.id,
-        number,
-        city,
-        category,
-        gender,
-        dob: dob ? new Date(dob) : null,
-        age: age ? Number(age) : null,
-        address,
-        pincode: pincode ? Number(pincode) : null,
-        radius: radius ? Number(radius) : null,
-        email,
-        password: hashedPassword,
-        status: status || "inactive", // default
-      },
+    // ✅ hash password
+    const hashedPassword = await bcrypt.hash(String(password), 10);
+
+    const vendor = await prisma.$transaction(async (tx) => {
+      // ✅ IMPORTANT: ensure Pincode master exists (fix FK P2003)
+      if (pinRows.length) {
+        for (const p of pinRows) {
+          await tx.pincode.upsert({
+            where: { pincode: p.pincode },
+            update: {}, // keep existing
+            create: {
+              pincode: p.pincode,
+              // city/state/area optional; you can fill later
+            },
+          });
+        }
+      }
+
+      // ✅ create vendor + pincodes
+      const created = await tx.vendor.create({
+        data: {
+          name: String(name).trim(),
+          number: String(number).trim(),
+          email: email ? String(email).trim() : null,
+          city: city ? String(city).trim() : null,
+          category: category ? String(category).trim() : null,
+          gender: gender ? String(gender).trim() : null,
+          dob: dob ? new Date(dob) : null,
+          age: age != null && age !== "" ? Number(age) : null,
+          address: address ? String(address).trim() : null,
+          radius: radius != null && radius !== "" ? Number(radius) : null,
+          password: hashedPassword,
+          status: status ? String(status) : "inactive",
+
+          // createdById only if auth exists
+          ...(req?.user?.id ? { createdById: Number(req.user.id) } : {}),
+
+          ...(pinRows.length
+            ? {
+                pincodes: {
+                  create: pinRows.map((p) => ({
+                    pincode: p.pincode,
+                    isActive: true,
+                    priority: p.priority ?? 0,
+                    radiusKm: p.radiusKm ?? null,
+                  })),
+                },
+              }
+            : {}),
+        },
+        include: {
+          pincodes: {
+            select: {
+              pincode: true,
+              isActive: true,
+              priority: true,
+              radiusKm: true,
+            },
+            orderBy: { priority: "desc" },
+          },
+        },
+      });
+
+      return created;
     });
 
     return res.status(201).json({
@@ -60,9 +182,27 @@ export const registerVendor = async (req, res) => {
     });
   } catch (error) {
     console.error("Error registering vendor:", error);
+
+    // ✅ better error messages
+    if (error?.code === "P2002") {
+      return res.status(400).json({
+        error: "Duplicate value. Vendor already exists or duplicate pincode.",
+        details: error?.meta,
+      });
+    }
+    if (error?.code === "P2003") {
+      return res.status(400).json({
+        error:
+          "Invalid pincode(s). They must exist in Pincode master (auto-created in this fix).",
+        details: error?.meta,
+      });
+    }
+
     return res.status(500).json({ error: "Failed to register vendor" });
   }
 };
+
+
 
 export const loginVendor = async (req, res) => {
   try {
@@ -304,28 +444,23 @@ export const getAllVendors = async (req, res) => {
       status,
       block,
       search,
+      pincode, // ✅ NEW filter
     } = req.query;
 
     const skip = (Number(page) - 1) * Number(limit);
     const take = Number(limit);
 
-    // ✅ Build dynamic filters
     const where = {};
 
-    if (city) {
-      where.city = { contains: city, mode: "insensitive" };
-    }
+    if (city) where.city = { contains: city, mode: "insensitive" };
+    if (category) where.category = { contains: category, mode: "insensitive" };
+    if (status) where.status = { equals: status, mode: "insensitive" };
+    if (block !== undefined) where.block = block === "true";
 
-    if (category) {
-      where.category = { contains: category, mode: "insensitive" };
-    }
-
-    if (status) {
-      where.status = { equals: status, mode: "insensitive" };
-    }
-
-    if (block !== undefined) {
-      where.block = block === "true";
+    if (pincode) {
+      where.pincodes = {
+        some: { pincode: String(pincode).trim(), isActive: true },
+      };
     }
 
     if (search) {
@@ -337,15 +472,20 @@ export const getAllVendors = async (req, res) => {
       ];
     }
 
-    // ✅ Fetch total count (for pagination info)
     const totalCount = await prisma.vendor.count({ where });
 
-    // ✅ Fetch vendors with filters + pagination
     const vendors = await prisma.vendor.findMany({
       where,
       skip,
       take,
       orderBy: { createdAt: "desc" },
+      include: {
+        pincodes: {
+          where: { isActive: true },
+          select: { pincode: true, isActive: true, priority: true, radiusKm: true },
+          orderBy: { priority: "desc" },
+        },
+      },
     });
 
     res.json({
@@ -367,15 +507,12 @@ export const getVendorById = async (req, res) => {
     const { id } = req.params;
     const vendorId = Number(id);
 
-  
     const now = new Date();
     const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
-    // fetch vendor + today's attendance in parallel
     const [vendor, todayAttendance] = await Promise.all([
       prisma.vendor.findUnique({
         where: { id: vendorId },
-        // optional: don't return password
         select: {
           id: true,
           name: true,
@@ -385,7 +522,6 @@ export const getVendorById = async (req, res) => {
           gender: true,
           dob: true,
           age: true,
-          pincode: true,
           radius: true,
           earnings: true,
           address: true,
@@ -396,19 +532,22 @@ export const getVendorById = async (req, res) => {
           createdAt: true,
           updatedAt: true,
           createdById: true,
-          overallRating:true,
-          totalReviews:true
+          overallRating: true,
+          totalReviews: true,
+
+          // ✅ NEW
+          pincodes: {
+            where: { isActive: true },
+            select: { pincode: true, isActive: true, priority: true, radiusKm: true },
+            orderBy: { priority: "desc" },
+          },
         },
       }),
       prisma.vendorAttendance.findUnique({
         where: {
-          vendorId_day: { vendorId, day: todayUTC }, 
+          vendorId_day: { vendorId, day: todayUTC },
         },
-        select: {
-          id: true,
-          day: true,
-
-        },
+        select: { id: true, day: true },
       }),
     ]);
 
@@ -417,7 +556,6 @@ export const getVendorById = async (req, res) => {
     return res.json({
       ...vendor,
       attendanceAddedToday: !!todayAttendance,
-   
     });
   } catch (error) {
     console.error("Error fetching vendor:", error);
@@ -426,13 +564,22 @@ export const getVendorById = async (req, res) => {
 };
 
 
-// ✅ GET Vendors by Category
+
 export const getVendorsByCategory = async (req, res) => {
   try {
     const { category } = req.params;
+
     const vendors = await prisma.vendor.findMany({
       where: { category: { equals: category, mode: "insensitive" } },
+      include: {
+        pincodes: {
+          where: { isActive: true },
+          select: { pincode: true, isActive: true, priority: true, radiusKm: true },
+          orderBy: { priority: "desc" },
+        },
+      },
     });
+
     res.json(vendors);
   } catch (error) {
     console.error("Error fetching vendors by category:", error);
@@ -443,6 +590,8 @@ export const getVendorsByCategory = async (req, res) => {
 export const updateVendor = async (req, res) => {
   try {
     const { id } = req.params;
+    const vendorId = Number(id);
+
     const {
       name,
       number,
@@ -452,7 +601,7 @@ export const updateVendor = async (req, res) => {
       dob,
       age,
       address,
-      pincode,
+      pincodes, // ✅ can be array of objects/strings OR csv string
       radius,
       email,
       password,
@@ -461,45 +610,109 @@ export const updateVendor = async (req, res) => {
     } = req.body;
 
     const existing = await prisma.vendor.findUnique({
-      where: { id: Number(id) },
+      where: { id: vendorId },
+      select: { id: true, password: true },
     });
 
-    if (!existing) {
-      return res.status(404).json({ error: "Vendor not found" });
-    }
+    if (!existing) return res.status(404).json({ error: "Vendor not found" });
 
-    // Password update (only if new password provided)
+    // ✅ hash password only if provided
     let hashedPassword = existing.password;
-    if (password) {
-      hashedPassword = await bcrypt.hash(password, 10);
+    if (password && String(password).trim()) {
+      hashedPassword = await bcrypt.hash(String(password).trim(), 10);
     }
 
-    const updated = await prisma.vendor.update({
-      where: { id: Number(id) },
-      data: {
-        name: name ?? existing.name,
-        number: number ?? existing.number,
-        city: city ?? existing.city,
-        category: category ?? existing.category,
-        gender: gender ?? existing.gender,
-        dob: dob ? new Date(dob) : existing.dob,
-        age: age ? Number(age) : existing.age,
-        address: address ?? existing.address,
-        pincode: pincode ? Number(pincode) : existing.pincode,
-        radius: radius ? Number(radius) : existing.radius,
-        email: email ?? existing.email,
-        password: hashedPassword,
-        status: status ?? existing.status,
-        block: block !== undefined ? block : existing.block,
-      },
+    // ✅ update pincodes only if field is sent
+    const shouldUpdatePins = pincodes !== undefined;
+
+    // ✅ normalize + dedupe
+    const pinRowsRaw = shouldUpdatePins ? normalizePincodes(pincodes) : [];
+    const pinRows = shouldUpdatePins ? dedupePincodes(pinRowsRaw) : [];
+
+    const updated = await prisma.$transaction(async (tx) => {
+      // ✅ ensure Pincode master exists (prevents FK error P2003)
+      if (shouldUpdatePins && pinRows.length) {
+        for (const p of pinRows) {
+          await tx.pincode.upsert({
+            where: { pincode: p.pincode },
+            update: {},
+            create: { pincode: p.pincode },
+          });
+        }
+      }
+
+      // ✅ update vendor
+      const v = await tx.vendor.update({
+        where: { id: vendorId },
+        data: {
+          name: name ?? undefined,
+          number: number ?? undefined,
+          city: city ?? undefined,
+          category: category ?? undefined,
+          gender: gender ?? undefined,
+          dob: dob ? new Date(dob) : undefined,
+          age: age !== undefined && age !== "" ? Number(age) : undefined,
+          address: address ?? undefined,
+          radius: radius !== undefined && radius !== "" ? Number(radius) : undefined,
+          email: email ?? undefined,
+          password: hashedPassword,
+          status: status ?? undefined,
+          block: block !== undefined ? Boolean(block) : undefined,
+
+          // ✅ MULTI PINCODES REPLACE MODE
+          ...(shouldUpdatePins
+            ? {
+                pincodes: {
+                  deleteMany: {}, // remove all old
+                  create: pinRows.map((p) => ({
+                    pincode: p.pincode,
+                    isActive: true,
+                    priority: p.priority ?? 0,
+                    radiusKm: p.radiusKm ?? null,
+                  })),
+                },
+              }
+            : {}),
+        },
+        include: {
+          pincodes: {
+            select: {
+              pincode: true,
+              isActive: true,
+              priority: true,
+              radiusKm: true,
+            },
+            orderBy: { priority: "desc" },
+          },
+        },
+      });
+
+      return v;
     });
 
     return res.json(updated);
   } catch (error) {
     console.error("Error updating vendor:", error);
+
+    if (error?.code === "P2002") {
+      return res.status(400).json({
+        error: "Duplicate value. Possibly duplicate vendor number/email or pincodes.",
+        details: error?.meta,
+      });
+    }
+
+    if (error?.code === "P2003") {
+      return res.status(400).json({
+        error: "Invalid pincode(s). FK failed (Pincode master missing).",
+        details: error?.meta,
+      });
+    }
+
     return res.status(500).json({ error: "Failed to update vendor" });
   }
 };
+
+
 
 // ✅ DELETE Vendor
 export const deleteVendor = async (req, res) => {

@@ -1,50 +1,64 @@
+// orderSocket.js
 import redis from "../config/redis.js";
+import { PrismaClient } from "@prisma/client";
+const prisma = new PrismaClient();
 import { istDateKey, orderKeys } from "../utils/orderRedis.js";
 
-export default function orderSocket(io, socket) {
-  socket.on("ping", (msg) => socket.emit("pong", msg));
+async function getVendorActivePincodes(vendorId) {
+  try {
+    const vid = Number(vendorId);
+    if (!Number.isFinite(vid)) return [];
 
-  // This event name is fine. But it must read from DATE+PINCODE index.
-  socket.on("vendorOnline", async ({ vendorId, pincode }) => {
-    try {
-      if (!vendorId || !pincode) return;
+    const rows = await prisma.vendorPincode.findMany({
+      where: { vendorId: vid, isActive: true },
+      select: { pincode: true },
+      orderBy: [{ priority: "desc" }, { id: "desc" }],
+    });
 
-      const vendorIdStr = String(vendorId);
-      const pincodeStr = String(pincode).trim();
+    // unique + clean
+    const pins = [...new Set(rows.map((r) => String(r.pincode).trim()).filter(Boolean))];
+    return pins;
+  } catch (err) {
+    console.error("getVendorActivePincodes error", err);
+    return [];
+  }
+}
 
-      // ✅ leave ALL previous pin_ rooms (otherwise you'll receive multiple pincodes)
-      for (const room of socket.rooms) {
-        if (room.startsWith("pin_")) socket.leave(room);
-      }
+async function replayPendingOrdersForPincodes({
+  socket,
+  vendorIdStr,
+  pincodes,
+  dateKey,
+}) {
+  try {
+    if (!Array.isArray(pincodes) || pincodes.length === 0) return;
 
-      socket.join(`vendor_${vendorIdStr}`);
-      socket.join(`pin_${pincodeStr}`);
+    // ✅ avoid sending duplicates in case of any overlap
+    const sent = new Set();
 
-      const todayKey = istDateKey(new Date());
-      const { pendingPincodeSet } = orderKeys({
-        orderId: "0",
-        dateKey: todayKey,
-        pincode: pincodeStr,
-      });
+    for (const pincodeStr of pincodes) {
+      const pendingPincodeSet = `orders:pending:date:${dateKey}:pincode:${pincodeStr}`;
+      const ids = await redis.sMembers(pendingPincodeSet);
 
-      const pendingOrderIds = await redis.sMembers(pendingPincodeSet);
+      for (const orderId of ids) {
+        const orderIdStr = String(orderId);
 
-      for (const orderId of pendingOrderIds) {
-        const rejected = await redis.sIsMember(
-          `rejected:${orderId}`,
-          vendorIdStr,
-        );
+        const rejected = await redis.sIsMember(`rejected:${orderIdStr}`, vendorIdStr);
         if (rejected) continue;
 
-        const orderData = await redis.hGetAll(`order:${orderId}`);
+        const orderData = await redis.hGetAll(`order:${orderIdStr}`);
         if (!orderData || !Object.keys(orderData).length) continue;
         if (orderData.status !== "pending") continue;
 
         // ✅ HARD FILTER: do not send past/future date jobs
-        if (orderData.dateKey !== todayKey) continue;
+        if (String(orderData.dateKey) !== String(dateKey)) continue;
+
+        // ✅ no duplicates
+        if (sent.has(orderIdStr)) continue;
+        sent.add(orderIdStr);
 
         socket.emit("orderForPincode", {
-          orderId: Number(orderData.orderId),
+          orderId: Number(orderData.orderId || orderIdStr),
           slotId: orderData.slotId,
           slot: orderData.slot || "",
           date: orderData.date,
@@ -54,44 +68,89 @@ export default function orderSocket(io, socket) {
           latitude: Number(orderData.latitude),
           longitude: Number(orderData.longitude),
           isReplay: true,
+          debugDateKey: dateKey,
         });
       }
+    }
+  } catch (err) {
+    console.error("replayPendingOrdersForPincodes error", err);
+  }
+}
+
+export default function orderSocket(io, socket) {
+  socket.on("ping", (msg) => socket.emit("pong", msg));
+
+  // ✅ Now pincode is OPTIONAL (server can derive from vendorId)
+  socket.on("vendorOnline", async ({ vendorId, pincode }) => {
+    try {
+      if (!vendorId) return;
+
+      const vendorIdStr = String(vendorId);
+
+      // ✅ leave ALL previous pin_ rooms
+      for (const room of socket.rooms) {
+        if (room.startsWith("pin_")) socket.leave(room);
+      }
+
+      socket.join(`vendor_${vendorIdStr}`);
+
+      // ✅ Determine pincodes
+      let pincodes = [];
+
+      // If client still sends pincode, you can restrict to it
+      const passedPin = String(pincode || "").trim();
+      if (passedPin) {
+        pincodes = [passedPin];
+      } else {
+        pincodes = await getVendorActivePincodes(vendorIdStr);
+      }
+
+      if (!pincodes.length) return;
+
+      // ✅ join ALL pin rooms (or just 1 if passed)
+      for (const pin of pincodes) socket.join(`pin_${pin}`);
+
+      const todayKey = istDateKey(new Date());
+
+      // ✅ Replay pending orders for those pincodes for today
+      await replayPendingOrdersForPincodes({
+        socket,
+        vendorIdStr,
+        pincodes,
+        dateKey: todayKey,
+      });
     } catch (err) {
       console.error("vendorOnline error", err);
     }
   });
 
+  // ✅ Now pincode is OPTIONAL here too
   socket.on("vendorOnlineForDate", async ({ vendorId, pincode, dateKey }) => {
-    if (!vendorId || !pincode || !dateKey) return;
+    try {
+      if (!vendorId || !dateKey) return;
 
-    const vendorIdStr = String(vendorId);
-    const pincodeStr = String(pincode).trim();
+      const vendorIdStr = String(vendorId);
 
-    const pendingPincodeSet = `orders:pending:date:${dateKey}:pincode:${pincodeStr}`;
-    const ids = await redis.sMembers(pendingPincodeSet);
+      // ✅ Determine pincodes
+      let pincodes = [];
+      const passedPin = String(pincode || "").trim();
 
-    for (const orderId of ids) {
-      const rejected = await redis.sIsMember(
-        `rejected:${orderId}`,
+      if (passedPin) {
+        pincodes = [passedPin];
+      } else {
+        pincodes = await getVendorActivePincodes(vendorIdStr);
+      }
+
+      if (!pincodes.length) return;
+
+      await replayPendingOrdersForPincodes({
+        socket,
         vendorIdStr,
-      );
-      if (rejected) continue;
-
-      const orderData = await redis.hGetAll(`order:${orderId}`);
-      if (!orderData || !Object.keys(orderData).length) continue;
-      if (orderData.status !== "pending") continue;
-
-      socket.emit("orderForPincode", {
-        orderId: Number(orderData.orderId),
-        pincode: orderData.pincode,
-        latitude: Number(orderData.latitude),
-        longitude: Number(orderData.longitude),
-        slot: orderData.slot || "",
-        date: orderData.date,
-        testType: orderData.testType,
-        isReplay: true,
-        debugDateKey: dateKey,
+        pincodes,
+        dateKey: String(dateKey),
       });
+    } catch (err) {
+      console.error("vendorOnlineForDate error", err);
     }
   });
 }

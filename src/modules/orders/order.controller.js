@@ -20,12 +20,15 @@ import ExcelJS from "exceljs";
 import utc from "dayjs/plugin/utc.js";
 import tz from "dayjs/plugin/timezone.js";
 import { markOrderReportReady } from "./order.service.js";
-import { report } from "process";
+import { formatTimeIST } from "../../utils/timezone.js";
+
 
 const prisma = new PrismaClient();
-const formatTime = (date) => dayjs(date).format("hh:mm A");
+
 dayjs.extend(utc);
 dayjs.extend(tz);
+
+
 const normalizeUnit = (u = "") => {
   const unit = String(u || "")
     .toLowerCase()
@@ -517,14 +520,14 @@ export const createOrder = async (req, res) => {
           where: { id: Number(slotId) },
         });
         slotLabel = slotData
-          ? `${formatTime(slotData.startTime)} - ${formatTime(slotData.endTime)}`
+          ? `${formatTimeIST(slotData.startTime)} - ${formatTimeIST(slotData.endTime)}`
           : "";
       } else {
         const cs = await prisma.centerSlot.findUnique({
           where: { id: Number(centerSlotId) },
         });
         slotLabel = cs
-          ? `${formatTime(cs.startTime)} - ${formatTime(cs.endTime)}`
+          ? `${formatTimeIST(cs.startTime)} - ${formatTimeIST(cs.endTime)}`
           : "";
       }
 
