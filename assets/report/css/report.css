@@ -6,8 +6,7 @@
   --footer-h: 50px;
   --patient-strip-h: 140px;
   --pad-x: 14mm;
-  
-  /* Clean Professional Colors */
+
   --primary-blue: #2c5f8d;
   --accent-orange: #ff6b35;
   --text-dark: #1a1a1a;
@@ -19,7 +18,7 @@
 }
 
 /* ===============================
-   PAGE SETUP - DEFAULT (letterhead + full + plain)
+   PAGE SETUP — DEFAULT
    =============================== */
 @page {
   size: A4;
@@ -27,7 +26,7 @@
   margin-bottom: calc(var(--footer-h) + 8px);
   margin-left: var(--pad-x);
   margin-right: var(--pad-x);
-  
+
   @top {
     content: element(header-content);
     vertical-align: top;
@@ -39,22 +38,53 @@
     vertical-align: bottom;
     padding: 0;
   }
+
+  @bottom-right {
+    content: "P " counter(page) " of " counter(pages);
+    font-size: 6px;
+    color: #666;
+    padding-bottom: 2px;
+  }
 }
 
 /* ===============================
-   PAGE SETUP - FULL IMAGE PAGES
+   PAGE SETUP — FULL IMAGE PAGES
    =============================== */
 @page imgpage {
   size: A4;
   margin: 0;
+
+  @bottom-right {
+    content: "P " counter(page) " of " counter(pages);
+    font-size: 6px;
+    color: #666;
+    padding: 8px 10px;
+  }
+}
+
+/* ===============================
+   PAGE SETUP — INDEX ONLY PAGE
+   No running header, patient stripe, or footer.
+   =============================== */
+@page indexpage {
+  size: A4;
+  margin: 14mm var(--pad-x) 14mm var(--pad-x);
+
+  @top    { content: none; }
+  @bottom { content: none; }
+
+  @bottom-right {
+    content: "P " counter(page) " of " counter(pages);
+    font-size: 6px;
+    color: #666;
+    padding-bottom: 2px;
+  }
 }
 
 /* ===============================
    BASE STYLES
    =============================== */
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 html, body {
   margin: 0;
@@ -64,17 +94,15 @@ html, body {
   line-height: 1.4;
 }
 
-p {
-  font-size: 14px;
-}
+p { font-size: 14px; }
 
 /* ===============================
    RUNNING ELEMENTS
    =============================== */
-.header-with-patient { 
-  position: running(header-content); 
-  margin: 0; 
-  padding: 0; 
+.header-with-patient {
+  position: running(header-content);
+  margin: 0;
+  padding: 0;
 }
 
 .page-footer {
@@ -82,12 +110,12 @@ p {
 }
 
 /* ===============================
-   HEADER STYLES - FIXED
+   HEADER / FOOTER IMAGES
    =============================== */
 .hdr {
   height: var(--header-h);
   width: 100%;
-  margin: 0; 
+  margin: 0;
   padding: 0;
 }
 
@@ -98,251 +126,307 @@ p {
   display: block;
 }
 
-/* ===============================
-   PAGE NUMBERS (Prince)
-   =============================== */
-@page {
-  @bottom-right {
-    content: "P " counter(page) " of " counter(pages);
-    font-size: 6px;
-    color: #666;
-    padding-bottom: 2px;
-  }
-}
-
-@page imgpage {
-  @bottom-right {
-    content: "P " counter(page) " of " counter(pages);
-    font-size: 6px;
-    color: #666;
-    padding: 8px 10px;
-  }
+.page-footer {
+  height: var(--footer-h);
+  width: 100%;
+  background: var(--bg-white);
+  margin: 0;
+  padding: 0;
 }
 
 /* ===============================
-   REPORT INDEX PAGE UI
+   FULL IMAGE PAGES
    =============================== */
-.report-index-page {
-  padding: 10px 2px 0;
+.image-page { page: imgpage; }
+
+.fullpage-img {
+  width: 210mm;
+  height: 297mm;
+  object-fit: cover;
+  display: block;
 }
 
-.idx-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
+/* ===============================
+   INDEX ONLY PAGE
+   @page indexpage — no running header/footer
+   =============================== */
+.index-only-page {
+  page: indexpage;
+  /* No page-break-before — named page transition is automatic in PrinceXML */
+}
+
+/* ── Patient strip on index page ── */
+.idx-patient-strip {
+  border: 1.5px solid var(--primary-blue);
+  border-radius: 6px;
+  padding: 10px 14px 12px;
+  margin-bottom: 18px;
   background: var(--bg-white);
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
 }
 
-.idx-name {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--text-dark);
-  margin-bottom: 3px;
-}
-
-.idx-sub, .idx-sub2 {
-  font-size: 12px;
-  color: var(--text-gray);
-  margin-top: 2px;
-}
-
-.idx-stats {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
-}
-
-.idx-stat {
-  min-width: 110px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  background: #fafafa;
-}
-
-.idx-stat-lbl {
-  font-size: 10px;
-  color: var(--text-gray);
+.idx-patient-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary-blue);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
-.idx-stat-val {
-  font-size: 18px;
-  font-weight: 800;
-  margin-top: 4px;
-  color: var(--text-dark);
-}
-
-.idx-pill {
-  margin-top: 8px;
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 800;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: #d7fbe5;
-  color: #087443;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
-.idx-title {
-  margin: 16px 0 6px;
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--text-dark);
-}
-
-.idx-hint {
-  font-size: 12px;
-  color: var(--text-gray);
-  margin-bottom: 12px;
-}
-
-.idx-group {
-  margin-top: 10px;
-}
-
-.idx-group-title {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--text-dark);
-  margin: 10px 0 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.idx-list {
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--bg-white);
-}
-
-.idx-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  text-decoration: none;
-  color: inherit;
+  letter-spacing: 0.5px;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
   border-bottom: 1px solid var(--border-light);
 }
 
-.idx-row:last-child {
+.idx-patient-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px 16px;
+}
+
+.idx-patient-cell {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-bottom: 1px dashed #ebebeb;
+  font-size: 12px;
+}
+
+.idx-patient-cell:nth-last-child(-n+3) {
   border-bottom: none;
 }
 
-.idx-left {
-  display: flex;
-  gap: 10px;
-  align-items: center;
+.idx-patient-label {
+  font-size: 10px;
+  color: #888;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
 }
 
-.idx-doc {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid var(--border-light);
-  background: #f4f6f8;
-  position: relative;
-}
-
-.idx-doc:before {
-  content: "";
-  position: absolute;
-  inset: 7px 9px 7px 9px;
-  border-left: 2px solid var(--primary-blue);
-  border-right: 2px solid var(--primary-blue);
-  opacity: 0.35;
-}
-
-.idx-row-title {
+.idx-patient-value {
   font-size: 12px;
-  font-weight: 800;
-  color: var(--text-dark);
+  font-weight: 600;
+  color: #1a1a1a;
 }
 
-.idx-row-sub {
-  font-size: 11px;
-  color: var(--text-gray);
-  margin-top: 2px;
-}
-
-.idx-right {
+/* ── Index page header ── */
+.idx-page-header {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-gray);
-  font-size: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--primary-blue);
 }
 
-.idx-row .idx-page-auto:before {
-  content: "Page " target-counter(attr(href), page);
+.idx-page-title {
+  font-size: 18px;
   font-weight: 700;
-  color: var(--text-gray);
+  color: #1a1a2e;
+  letter-spacing: -0.3px;
 }
 
-.idx-arrow {
-  font-size: 16px;
-  color: var(--accent-orange);
-  font-weight: 900;
+.idx-page-sub {
+  font-size: 12px;
+  color: #888;
 }
 
-.idx-row:hover {
-  background: #fbfbfb;
+.idx-page-sub strong { color: var(--primary-blue); }
+
+/* ── Department section ── */
+.idx-section { margin-bottom: 18px; }
+
+.idx-dept-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: #eef2ff;
+  border-left: 4px solid var(--primary-blue);
+  border-radius: 0 4px 4px 0;
+  margin-bottom: 0;
 }
 
-.idx-note {
-  margin-top: 14px;
-  border: 1px solid #f1d58a;
-  background: #fff7dd;
+.idx-dept-icon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary-blue);
+  flex-shrink: 0;
+}
+
+.idx-dept-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  flex: 1;
+}
+
+.idx-dept-count {
+  font-size: 10px;
+  color: #888;
+  background: #fff;
+  padding: 2px 8px;
   border-radius: 10px;
-  padding: 10px 12px;
+  border: 1px solid #dde4ff;
 }
 
-.idx-note-title {
-  font-weight: 900;
-  color: #8a5b00;
-  margin-bottom: 6px;
+/* ── Index table ── */
+.idx-table {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 12px;
 }
 
-.idx-note ul {
-  margin: 0;
-  padding-left: 18px;
-  color: #8a5b00;
-  font-size: 11px;
+.idx-table thead tr { background: #f8f9ff; }
+
+.idx-table th {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e0e7ff;
+  color: #666;
+  font-weight: 600;
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.break-after {
-  page-break-after: always;
+.idx-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid #f5f5f5;
+  vertical-align: middle;
+}
+
+.idx-row:last-child td { border-bottom: none; }
+
+.th-num  { width: 36px; }
+.th-name { width: auto; }
+.th-type { width: 110px; }
+.th-page       { width: 40px; text-align: center; }
+
+.idx-num {
+  color: #bbb;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Clickable test name */
+.idx-name-cell { color: #1a1a2e; }
+
+.idx-test-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1a1a2e;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.idx-test-link:hover {
+  color: var(--primary-blue);
+  text-decoration: underline;
+}
+
+.idx-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-orange);
+  flex-shrink: 0;
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.badge-radiology { background: #e8f4fd; color: #1a6fa8; }
+.badge-pathology  { background: #eafaf1; color: #1a7a4a; }
+
+/* Page number column */
+.idx-page-cell { text-align: center; width: 40px; }
+
+.idx-page-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  text-decoration: none;
+}
+.idx-page-link:hover { color: var(--primary-blue); }
+.idx-link-icon { width: 13px; height: 13px; display: block; }
+/* ── Notice box ── */
+.idx-notice {
+  margin-top: 20px;
+  padding: 10px 14px;
+  background: #fffbf0;
+  border: 1px solid #fde68a;
+  border-left: 4px solid #f59e0b;
+  border-radius: 0 6px 6px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.radio-html img {
+  max-width: 100%;
+  max-height: 500px;      /* optional height cap */
+  width: auto;
+  height: auto;
+  display: block;
+  margin: 0 auto;         /* center it */
+  object-fit: contain;
+}
+.idx-notice-icon {
+  font-size: 14px;
+  color: #d97706;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.idx-notice-text {
+  font-size: 11px;
+  color: #78580a;
+  line-height: 1.6;
 }
 
 /* ===============================
-   PATIENT STRIP - IMPROVED SPACING
+   RESULTS PAGE
+   @page default — header+footer run here
+   =============================== */
+.results-page {
+  /* No page-break-before — named page transition is automatic */
+}
+
+.results-page .content {
+  padding-top: 4px;
+}
+
+/* ===============================
+   PATIENT STRIP (running header)
    =============================== */
 .patient-strip {
   border: 1.5px solid var(--primary-blue);
   border-radius: 4px;
-  padding: 8px 12px; 
+  padding: 8px 12px 10px;
   margin: 0;
   background: var(--bg-white);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  padding-top: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.1);
 }
 
 .ps-title {
   font-weight: 700;
   font-size: 11px;
-  margin-bottom: 6px; 
+  margin-bottom: 6px;
   color: var(--primary-blue);
-  padding-bottom: 5px; 
+  padding-bottom: 5px;
   border-bottom: 1px solid var(--border-light);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -351,7 +435,7 @@ p {
 .ps-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px 12px; 
+  gap: 6px 12px;
   font-size: 12px;
   line-height: 1.4;
 }
@@ -376,122 +460,38 @@ p {
   display: inline-block;
   min-width: 85px;
 }
-.ri-heading-row td {
+
+/* ===============================
+   DEPARTMENT HEADER (in results)
+   =============================== */
+.dept-header {
+  margin: 18px 0 6px 0;
+  padding: 6px 14px;
+  background: #eef2ff;
+  border-left: 4px solid var(--primary-blue);
+  border-radius: 0 4px 4px 0;
+}
+
+.dept-header-title {
+  font-size: 13px;
   font-weight: 700;
-  background: #f6f7fb;
-  padding: 10px 8px;
-  border-top: 1px solid #e6e8f0;
-}
-
-.ri-html-row td {
-  padding: 10px 8px;
-}
-/* ── Nested tables inside RICH_TEXT / NOTES cells ── */
-.richtext-cell table,
-.notes-cell table {
-  border-collapse: collapse !important;
-  border-spacing: 0 !important;
-  width: 100% !important;
-  border: 1px solid #9aa4b2 !important;
-  margin: 6px 0 !important;
-}
-
-.richtext-cell table td,
-.richtext-cell table th,
-.notes-cell table td,
-.notes-cell table th {
-  border: 1px solid #9aa4b2 !important;
-  padding: 6px 8px !important;
-  font-size: 12px !important;
-  color: #1f2937 !important;
-}
-
-.richtext-cell table tr,
-.notes-cell table tr {
-  border: 1px solid #9aa4b2 !important;
-}
-
-.richtext-cell table th,
-.notes-cell table th {
-  background-color: #f8fafc !important;
-  font-weight: 600 !important;
-}
-
-/* Also target tables with border="0" attribute from Word/TinyMCE */
-.richtext-cell table[border="0"],
-.notes-cell table[border="0"] {
-  border: 1px solid #9aa4b2 !important;
-}
-
-.richtext-cell table[border="0"] td,
-.richtext-cell table[border="0"] th,
-.notes-cell table[border="0"] td,
-.notes-cell table[border="0"] th {
-  border: 1px solid #9aa4b2 !important;
-}
-.param-notes {
-  font-size: 11px;
-  color: #666;
-  font-style: italic;
-  margin-top: 2px;
-}
-/* ===============================
-   FOOTER STYLES
-   =============================== */
-.page-footer {
-  height: var(--footer-h);
-  width: 100%;
-  background: var(--bg-white);
-  margin: 0; 
-  padding: 0; 
-}
-
-/* ===============================
-   CONTENT - IMPROVED SPACING
-   =============================== */
-.page {
-  /* Let content flow naturally */
-}
-
-.content {
-  padding-top: 4px;
-}
-
-/* ===============================
-   SECTION STYLING
-   =============================== */
-.section {
-  margin-bottom: 20px;
-}
-
-.section.keep-together {
-  page-break-inside: avoid;
-}
-
-.test-title-row + .tbl,
-.section-title + .tbl,
-.section-title + .radio-html {
-  page-break-before: avoid;
-}
-
-.tbl .tbl-head-row td {
-  font-weight: 700;
-  font-size: 12px;
+  color: var(--primary-blue);
   text-transform: uppercase;
-  background: #f3f6fb;
-  border-bottom: 1px solid #d7dee9;
-  padding: 10px 12px;
+  letter-spacing: 0.5px;
 }
 
 /* ===============================
-   TEST TITLE ROW - IMPROVED
+   SECTION & TEST TITLE
    =============================== */
+.section { margin-bottom: 20px; }
+.section.keep-together { page-break-inside: avoid; }
+
 .test-title-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-top: 12px;
-  margin-bottom: 6px;
+  margin-bottom: 0;
   padding: 12px 14px;
   background: var(--bg-light);
   border-left: 3px solid var(--accent-orange);
@@ -507,41 +507,21 @@ p {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-/* ── Test name row inside the shared table ── */
-.row-test-group-header td {
-  background: #f5f7fa;
+
+.section-title {
+  font-size: 12px;
   font-weight: 700;
-  font-size: 13px;
-  color: #37dd04;
-  padding: 8px 10px;
-  border-top: 2px solid #d0d7e2;
+  margin-bottom: 10px;
+  color: var(--text-dark);
+  padding: 10px 14px;
+  background: var(--bg-light);
+  border-left: 3px solid var(--accent-orange);
+  border-bottom: 1px solid var(--border-light);
+  page-break-after: avoid;
+  page-break-inside: avoid;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
-
-/* ── HEADING row — bold + highlighted ── */
-.row-heading .heading-cell {
- background: var(--bg-light);
-  font-weight: 700;
-  font-size: 13px;
-margin-top: 10px;
-margin-bottom: 10px;
-  padding: 7px 10px;
-}
-
-/* ── Parameter method ── */
-.param-method {
-  font-size: 11px;
-  color: #888;
-  margin-top: 2px;
-}
-
-/* ── Parameter notes (below name) ── */
-.param-notes {
-  font-size: 11px;
-  color: #666;
-  font-style: italic;
-  margin-top: 3px;
-}
-
 
 /* ===============================
    MAIN RESULTS TABLE
@@ -552,16 +532,9 @@ margin-bottom: 10px;
   font-size: 12px;
   margin: 0;
   background: var(--bg-white);
-
 }
 
-.mt {
-  margin-top: 10px;
-}
-
-.tbl thead {
-  background: var(--bg-light);
-}
+.tbl thead { background: var(--bg-light); }
 
 .tbl th {
   padding: 10px 12px;
@@ -571,40 +544,15 @@ margin-bottom: 10px;
   color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.4px;
- 
 }
 
-/* 3-column layout */
-.tbl .test-name-header {
-  width: 42%;
-  padding-left: 14px;
-}
+.tbl .test-name-header { width: 42%; padding-left: 14px; }
+.tbl .result-header    { width: 29%; text-align: left; }
+.tbl .bio-ref-header   { width: 29%; text-align: left; }
 
-.tbl .result-header {
-  width: 29%;
-  text-align: left;
-}
-
-.tbl .bio-ref-header {
-  width: 29%;
-  text-align: left;
-}
-
-.tbl tbody tr {
- 
-}
-
-.tbl tbody tr:last-child {
-  border-bottom: none;
-}
-
-.tbl tbody tr:nth-child(even) {
-  background: #fafafa;
-}
-
-.tbl tbody tr:hover {
-  background: #f0f7ff;
-}
+.tbl tbody tr:last-child { border-bottom: none; }
+.tbl tbody tr:nth-child(even) { background: #fafafa; }
+.tbl tbody tr:hover { background: #f0f7ff; }
 
 .tbl td {
   padding: 10px 12px;
@@ -613,20 +561,11 @@ margin-bottom: 10px;
   color: var(--text-dark);
 }
 
-.tbl tbody td:nth-child(1) {
-  padding-left: 14px;
-}
+.tbl tbody td:nth-child(1) { padding-left: 14px; }
+.tbl tbody td:nth-child(2) { text-align: left; font-weight: 600; }
+.tbl tbody td:nth-child(3) { text-align: left; }
 
-.tbl tbody td:nth-child(2) {
-  text-align: left;
-  font-weight: 600;
-}
-
-.tbl tbody td:nth-child(3) {
-  text-align: left;
-}
-
-/* Parameter Name Cell */
+/* ── Parameter name cell ── */
 .param-name-cell {
   vertical-align: top;
   padding: 10px 12px !important;
@@ -647,191 +586,74 @@ margin-bottom: 10px;
   margin-top: 3px;
 }
 
-/* Reference Range */
+.param-notes {
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
+  margin-top: 3px;
+}
+
+/* ── Reference range ── */
 .ref-range {
   color: var(--text-gray);
   font-size: 11px;
   font-style: italic;
 }
 
-/* Abnormal Values with Arrows */
-.abnormal-value {
-  color: #c53030;
-  font-weight: 700;
-  position: relative;
-}
+.ref-range.ref-html,
+.ref-range.ref-html * { line-height: 1.15 !important; }
+.ref-range.ref-html p { margin: 0 !important; padding: 0 !important; }
+.ref-range.ref-html p + p { margin-top: 2px !important; }
 
-.abnormal-value::before {
-  content: '';
-  display: inline-block;
-  margin-right: 6px;
-  font-weight: 700;
-  color: #c53030;
-}
+/* ── Abnormal values ── */
+.abnormal-value { color: #c53030; font-weight: 700; }
+.abnormal-value.high::before { content: '▲'; margin-right: 6px; }
+.abnormal-value.low::before  { content: '▼'; margin-right: 6px; }
 
-.abnormal-value.high::before {
-  content: '▲';
-}
-
-.abnormal-value.low::before {
-  content: '▼';
-}
-
-/* ===============================
-   TRENDS SECTION - AT THE END
-   =============================== */
-.trends-section {
-  margin-top: 28px;
-  margin-bottom: 22px;
-  page-break-inside: avoid;
-}
-
-.trends-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 14px;
-  background: linear-gradient(135deg, #2c5f8d 0%, #3a7bb8 100%);
-  border-radius: 6px 6px 0 0;
-  margin-bottom: 0;
-}
-
-.trends-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #ffffff;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.trends-title::before {
-  content: "📊";
-  font-size: 16px;
-}
-
-.trends-subtitle {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.85);
-  font-weight: 500;
-}
-
-.trends-table-wrapper {
-  border: 1px solid var(--border-light);
-  border-top: none;
-  border-radius: 0 0 6px 6px;
-  overflow: hidden;
-  background: var(--bg-white);
-}
-
-.trends-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-  margin: 0;
-}
-
-.trends-table thead {
-  background: var(--trend-bg);
-}
-
-.trends-table th {
-  padding: 10px 12px;
-  text-align: left;
-  
-  font-weight: 700;
-  font-size: 10px;
-  color: var(--primary-blue);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
-.trends-table th:first-child {
-  width: 40%;
-}
-
-.trends-table th:not(:first-child) {
-  text-align: center;
-  width: 20%;
-}
-
-/* ✅ NEW: Test header rows in trends table */
-.trends-table tbody tr.trend-test-header {
+/* ── Row types ── */
+.row-heading .heading-cell {
   background: var(--bg-light);
-  border-top: 2px solid var(--primary-blue);
-}
-
-.trends-table tbody tr.trend-test-header td {
-  padding: 8px 12px;
   font-weight: 700;
-  font-size: 11px;
-  color: var(--primary-blue);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+  font-size: 13px;
+  padding: 7px 10px;
 }
 
-.trends-table tbody tr {
-
+.richtext-cell,
+.notes-cell {
+  font-size: 12px;
+  color: #444;
+  padding: 8px 12px;
 }
 
-.trends-table tbody tr:last-child {
-  border-bottom: none;
+/* Nested tables */
+.richtext-cell table,
+.notes-cell table {
+  border-collapse: collapse !important;
+  width: 100% !important;
+  border: 1px solid #9aa4b2 !important;
+  margin: 6px 0 !important;
 }
 
-.trends-table tbody tr:nth-child(even):not(.trend-test-header) {
-  background: #fafafa;
+.richtext-cell table td,
+.richtext-cell table th,
+.notes-cell table td,
+.notes-cell table th {
+  border: 1px solid #9aa4b2 !important;
+  padding: 6px 8px !important;
+  font-size: 12px !important;
+  color: #1f2937 !important;
 }
 
-.trends-table tbody tr:hover:not(.trend-test-header) {
-  background: #f0f7ff;
-}
-
-.trends-table td {
-  padding: 9px 12px;
-  font-size: 11px;
-  color: var(--text-dark);
-  vertical-align: middle;
-}
-
-.trends-table td:first-child {
-  font-weight: 600;
-  color: var(--text-dark);
-}
-
-.trends-table td:not(:first-child) {
-  text-align: center;
-  font-weight: 500;
-  color: var(--text-gray);
-}
-
-.trend-value-cell {
-  font-family: 'Courier New', monospace;
-}
-
-.trend-no-data {
-  color: #999;
-  font-style: italic;
+.richtext-cell table th,
+.notes-cell table th {
+  background-color: #f8fafc !important;
+  font-weight: 600 !important;
 }
 
 /* ===============================
    RADIOLOGY SECTION
    =============================== */
-.section-title {
-  font-size: 12px;
-  font-weight: 700;
-  margin-bottom: 10px;
-  color: var(--text-dark);
-  padding: 10px 14px;
-  background: var(--bg-light);
-  border-left: 3px solid var(--accent-orange);
-  border-bottom: 1px solid var(--border-light);
-  page-break-after: avoid;
-  page-break-inside: avoid;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
+.section.radiology { margin-bottom: 20px; }
 
 .radio-html {
   border: 1px solid var(--border-light);
@@ -841,17 +663,29 @@ margin-bottom: 10px;
   background: var(--bg-white);
 }
 
-.ql-scope p {
-  margin: 6px 0;
-  color: var(--text-dark);
-}
-
-.ql-scope .ql-align-center {
-  text-align: center;
-}
+.ql-scope p { margin: 6px 0; color: var(--text-dark); }
+.ql-scope .ql-align-center { text-align: center; }
 
 /* ===============================
-   SIGNATURES - PER TEST (3-COLUMN LAYOUT)
+   TEST NOTES BLOCK
+   =============================== */
+.test-notes {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e6e6e6;
+  border-radius: 8px;
+}
+
+.test-notes-title { font-weight: 700; margin-bottom: 6px; }
+
+.test-notes-body { font-size: 12px; line-height: 1.4; }
+.test-notes-body,
+.test-notes-body * { line-height: 1.35 !important; }
+.test-notes-body p { margin: 0 !important; }
+.test-notes-body p + p { margin-top: 2px !important; }
+
+/* ===============================
+   SIGNATURES — PER DEPT GROUP
    =============================== */
 .sig-wrap {
   display: grid;
@@ -864,22 +698,10 @@ margin-bottom: 10px;
   background: var(--bg-white);
 }
 
-.sig-col {
-  display: flex;
-  align-items: flex-start;
-}
-
-.sig-col.sig-left {
-  justify-content: flex-start;
-}
-
-.sig-col.sig-center {
-  justify-content: center;
-}
-
-.sig-col.sig-right {
-  justify-content: flex-end;
-}
+.sig-col { display: flex; align-items: flex-start; }
+.sig-col.sig-left   { justify-content: flex-start; }
+.sig-col.sig-center { justify-content: center; }
+.sig-col.sig-right  { justify-content: flex-end; }
 
 .sig-card {
   flex: 0 0 auto;
@@ -889,9 +711,7 @@ margin-bottom: 10px;
   padding: 8px;
 }
 
-.sig-card.sig-empty {
-  visibility: hidden;
-}
+.sig-card.sig-empty { visibility: hidden; }
 
 .sig-img {
   max-height: 55px;
@@ -924,6 +744,104 @@ margin-bottom: 10px;
   font-style: italic;
   font-size: 9px;
 }
+
+/* ===============================
+   TRENDS SECTION
+   =============================== */
+.trends-section {
+  margin-top: 28px;
+  margin-bottom: 22px;
+  page-break-inside: avoid;
+}
+
+.trends-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #2c5f8d 0%, #3a7bb8 100%);
+  border-radius: 6px 6px 0 0;
+}
+
+.trends-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trends-title::before { content: "📊"; font-size: 16px; }
+
+.trends-subtitle { font-size: 11px; color: rgba(255,255,255,.85); font-weight: 500; }
+
+.trends-table-wrapper {
+  border: 1px solid var(--border-light);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  overflow: hidden;
+  background: var(--bg-white);
+}
+
+.trends-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin: 0;
+}
+
+.trends-table thead { background: var(--trend-bg); }
+
+.trends-table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--primary-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.trends-table th:first-child  { width: 40%; }
+.trends-table th:not(:first-child) { text-align: center; width: 20%; }
+
+.trends-table tbody tr.trend-test-header {
+  background: var(--bg-light);
+  border-top: 2px solid var(--primary-blue);
+}
+
+.trends-table tbody tr.trend-test-header td {
+  padding: 8px 12px;
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--primary-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.trends-table tbody tr:last-child { border-bottom: none; }
+.trends-table tbody tr:nth-child(even):not(.trend-test-header) { background: #fafafa; }
+.trends-table tbody tr:hover:not(.trend-test-header) { background: #f0f7ff; }
+
+.trends-table td {
+  padding: 9px 12px;
+  font-size: 11px;
+  color: var(--text-dark);
+  vertical-align: middle;
+}
+
+.trends-table td:first-child { font-weight: 600; }
+.trends-table td:not(:first-child) {
+  text-align: center;
+  font-weight: 500;
+  color: var(--text-gray);
+}
+
+.trend-value-cell { font-family: 'Courier New', monospace; }
+.trend-no-data { color: #999; font-style: italic; }
 
 /* ===============================
    CONDITIONS SECTION
@@ -972,107 +890,26 @@ margin-bottom: 10px;
 }
 
 /* ===============================
-   FULL IMAGE PAGES
+   PAGE BREAK UTILITIES
    =============================== */
-.image-page {
-  page: imgpage;
-}
-
-.fullpage-img {
-  width: 210mm;
-  height: 297mm;
-  object-fit: cover;
-  display: block;
-}
+.keep-together { page-break-inside: avoid; }
+.break-before  { page-break-before: always; }
+.break-after   { page-break-after: always; }
 
 /* ===============================
-   PAGE BREAK CONTROL
+   UTILITY
    =============================== */
-.keep-together {
-  page-break-inside: avoid;
-}
-
-.break-before {
-  page-break-before: always;
-}
-
-.break-after {
-  page-break-after: always;
-}
+.muted       { color: var(--text-gray); font-style: italic; }
+.text-center { text-align: center; }
+.text-right  { text-align: right; }
 
 /* ===============================
-   UTILITY CLASSES
-   =============================== */
-.muted {
-  color: var(--text-gray);
-  font-style: italic;
-}
-
-.text-center {
-  text-align: center;
-}
-
-.text-right {
-  text-align: right;
-}
-
-/* ===============================
-   PRINT OPTIMIZATIONS
+   PRINT OPTIMISATIONS
    =============================== */
 @media print {
   * {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  
-  .keep-together {
-    page-break-inside: avoid !important;
-  }
+  .keep-together { page-break-inside: avoid !important; }
 }
-
-.test-notes {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border: 1px solid #e6e6e6;
-  border-radius: 8px;
-}
-
-.test-notes-title {
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-
-.test-notes-body {
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.test-notes-body,
-.test-notes-body * {
-  line-height: 1.35 !important;
-}
-
-.test-notes-body p {
-  margin: 0 !important;
-}
-
-.test-notes-body p + p {
-  margin-top: 2px !important;
-}
-/* for the Biological Reference HTML cell */
-.ref-range.ref-html,
-.ref-range.ref-html * {
-  line-height: 1.15 !important;
-}
-
-/* remove extra gaps from <p> tags generated by editor */
-.ref-range.ref-html p {
-  margin: 0 !important;
-  padding: 0 !important;
-}
-
-/* if you want a tiny gap between lines, do this instead of margin */
-.ref-range.ref-html p + p {
-  margin-top: 2px !important;
-}
-

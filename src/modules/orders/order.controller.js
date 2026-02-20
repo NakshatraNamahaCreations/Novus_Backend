@@ -20,6 +20,7 @@ import ExcelJS from "exceljs";
 import utc from "dayjs/plugin/utc.js";
 import tz from "dayjs/plugin/timezone.js";
 import { markOrderReportReady } from "./order.service.js";
+import { report } from "process";
 
 const prisma = new PrismaClient();
 const formatTime = (date) => dayjs(date).format("hh:mm A");
@@ -3330,6 +3331,9 @@ export const fetchReportDue = async (req, res) => {
               testType: true,
               status: true,
               isHomeSample: true,
+              reportReady:true,
+              createdAt:true,
+              updatedAt:true
             },
           },
         },
@@ -3362,12 +3366,12 @@ export const fetchReportDue = async (req, res) => {
     // Build where for each tab
     const whereDueSoon = {
       reportDueAt: { gte: now, lte: soonEnd },
-      dispatchStatus: { in: OPEN_STATUSES },
+      // dispatchStatus: { in: OPEN_STATUSES },
     };
 
     const whereOverdue = {
       reportDueAt: { lt: now },
-      dispatchStatus: { in: OPEN_STATUSES },
+      // dispatchStatus: { in: OPEN_STATUSES },
     };
 
     // totals (for pagination)

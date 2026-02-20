@@ -122,7 +122,7 @@ export class PatientService {
   static async getPatientResults(orderId, patientId, patientGender) {
     const gender = normalizeGender(patientGender);
 
-    console.log("gender",gender)
+ 
 
     // 1) Results (with test.departmentItemId)
     const results = await prisma.patientTestResult.findMany({
@@ -138,6 +138,9 @@ export class PatientService {
             categoryId: true,
             departmentItemId: true, // ✅ needed
             testType: true,
+            departmentItem: {          // ✅ ADD THIS
+      select: { id: true, name: true }
+    },
           },
         },
         parameterResults: {

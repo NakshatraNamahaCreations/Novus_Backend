@@ -10,102 +10,161 @@ function esc(s) {
     .replace(/"/g, "&quot;");
 }
 
-function buildIndexPage({ patient, order, indexItems }) {
-  const totalTests = indexItems.length;
+// ── SVG external-link icon ────────────────────────────────────
+const LINK_ICON = `<svg class="idx-link-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+  <polyline points="15 3 21 3 21 9"/>
+  <line x1="10" y1="14" x2="21" y2="3"/>
+</svg>`;
 
-  const grouped = indexItems.reduce((acc, it) => {
-    const g = it.group || "General Tests";
-    acc[g] = acc[g] || [];
-    acc[g].push(it);
-    return acc;
-  }, {});
+// ── Patient details strip for index page ─────────────────────
+function buildPatientStrip({ patient, order, derived }) {
+  const name      = esc(patient?.fullName || patient?.name || "—");
+  const initial   = esc(patient?.initial || "");
+  const age       = patient?.age ?? "—";
+  const gender    = esc(patient?.gender || "—");
+  const patientId = esc(String(patient?.id || "—"));
+
 
   return `
-    <div class="report-index-page break-after">
-      <div class="idx-title">Report Index</div>
-      <div class="idx-hint">Click on any test name to navigate directly to that section</div>
-
-      ${Object.keys(grouped)
-        .map((groupName) => {
-          const items = grouped[groupName];
-          return `
-            <div class="idx-group">
-              <div class="idx-group-title">${esc(groupName)}</div>
-              <div class="idx-list">
-                ${items
-                  .map((it) => {
-                    const href = `#${it.id}`;
-                    const params = it.paramCount
-                      ? `${it.paramCount} parameters`
-                      : "";
-                    return `
-                      <a class="idx-row" href="${esc(href)}">
-                        <div class="idx-left">
-                          <div class="idx-doc"></div>
-                          <div class="idx-text">
-                            <div class="idx-row-title">${esc(it.title)}</div>
-                            <div class="idx-row-sub">${esc(params)}</div>
-                          </div>
-                        </div>
-                        <div class="idx-right">
-                          <span class="idx-page-auto"></span>
-                          <span class="idx-arrow">›</span>
-                        </div>
-                      </a>
-                    `;
-                  })
-                  .join("")}
-              </div>
-            </div>
-          `;
-        })
-        .join("")}
-
-      <div class="idx-note">
-        <div class="idx-note-title">Important Notes</div>
-        <ul>
-          <li>This report contains ${totalTests} tests.</li>
-          <li>Results should be interpreted by a qualified healthcare professional.</li>
-          <li>For any queries, contact your healthcare provider or lab directly.</li>
-        </ul>
+    <div class="idx-patient-strip">
+      <div class="idx-patient-title">PATIENT DETAILS</div>
+      <div class="idx-patient-grid">
+        <div class="idx-patient-cell">
+          <span class="idx-patient-label">Name</span>
+          <span class="idx-patient-value">${initial ? initial + " " : ""}${name}</span>
+        </div>
+        <div class="idx-patient-cell">
+          <span class="idx-patient-label">Age / Gender</span>
+          <span class="idx-patient-value">${age} / ${gender}</span>
+        </div>
+        <div class="idx-patient-cell">
+          <span class="idx-patient-label">Patient ID</span>
+          <span class="idx-patient-value">${patientId}</span>
+        </div>
+      
       </div>
     </div>
   `;
 }
 
+// ── Standalone index page ─────────────────────────────────────
+// @page indexpage — no running header / footer
+function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
+  if (!indexItems.length) return "";
+
+  const totalTests = indexItems.length;
+
+  // Group by department
+  const deptMap = new Map();
+  for (const item of indexItems) {
+    const d = item.dept || "General Tests";
+    if (!deptMap.has(d)) deptMap.set(d, []);
+    deptMap.get(d).push(item);
+  }
+
+  const sections = [...deptMap.entries()].map(([deptName, items]) => {
+    const rows = items.map((it, i) => `
+      <tr class="idx-row">
+        <td class="idx-num">${String(i + 1).padStart(2, "0")}</td>
+        <td class="idx-name-cell">
+          <a class="idx-test-link" href="#${esc(it.id)}">
+            <span class="idx-dot"></span>
+            ${esc(it.title)}
+          </a>
+        </td>
+        <td class="idx-type-cell">
+          <span class="badge badge-${(it.type || "").toLowerCase()}">${esc(it.type || "")}</span>
+        </td>
+        <td class="idx-page-cell">
+          <a class="idx-page-link" href="#${esc(it.id)}">
+            ${LINK_ICON}
+          </a>
+        </td>
+      </tr>
+    `).join("");
+
+    return `
+      <div class="idx-section">
+        <div class="idx-dept-header">
+          <div class="idx-dept-icon"></div>
+          <span class="idx-dept-name">${esc(deptName)}</span>
+          <span class="idx-dept-count">${items.length} test${items.length > 1 ? "s" : ""}</span>
+        </div>
+        <table class="idx-table">
+          <thead>
+            <tr>
+              <th class="th-num">#</th>
+              <th class="th-name">Test Name</th>
+              <th class="th-type">Type</th>
+              <th class="th-page"></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="index-only-page">
+
+      ${buildPatientStrip({ patient, order, derived })}
+
+      <div class="idx-page-header">
+        <div class="idx-page-title">Report Index</div>
+        <div class="idx-page-sub">
+          This report contains <strong>${totalTests}</strong> test${totalTests > 1 ? "s" : ""}
+        </div>
+      </div>
+
+      ${sections}
+
+      <div class="idx-notice">
+        <div class="idx-notice-icon">ℹ</div>
+        <div class="idx-notice-text">
+          Results should be interpreted by a qualified healthcare professional.
+          For any queries, contact your healthcare provider or lab directly.
+        </div>
+      </div>
+
+    </div>
+  `;
+}
+
+// ── Conditions section ────────────────────────────────────────
+const conditionsSection = `
+  <div class="conditions-section keep-together">
+    <div class="conditions-title">CONDITIONS OF LABORATORY TESTING &amp; REPORTING</div>
+    <div class="conditions-content">
+      <p>The test results reported herein pertain only to the specimen received and tested by Novus Health Labs.</p>
+      <p>It is presumed that the specimen submitted belongs to the patient whose name and details appear on the test requisition form.</p>
+      <p>Laboratory investigations are performed to assist the referring physician in clinical diagnosis and should be interpreted in correlation with the patient's clinical condition.</p>
+      <p>All tests are performed using validated laboratory methods and internal quality control procedures.</p>
+      <p>Test results are dependent on the quality, quantity, and integrity of the specimen received, as well as the analytical methodology used.</p>
+      <p>Report delivery timelines are indicative and may be affected due to unforeseen technical or operational circumstances. Any inconvenience caused is regretted.</p>
+    </div>
+  </div>
+`;
+
+// ═════════════════════════════════════════════════════════════
 export function buildHtml({ reportData, variant = "letterhead" }) {
   const { order, patient, layout, results, derived, trendMap } = reportData;
 
   const patientStripContent = patientStripHtml({ order, patient, derived });
 
-  // ✅ REMOVED: Global signatures section (now each test has its own)
-
-  const conditionsSection = `
-    <div class="conditions-section keep-together">
-      <div class="conditions-title">CONDITIONS OF LABORATORY TESTING & REPORTING</div>
-      <div class="conditions-content">
-        <p>The test results reported herein pertain only to the specimen received and tested by Novus Health Labs.</p>
-        <p>It is presumed that the specimen submitted belongs to the patient whose name and details appear on the test requisition form.</p>
-        <p>Laboratory investigations are performed to assist the referring physician in clinical diagnosis and should be interpreted in correlation with the patient's clinical condition.</p>
-        <p>All tests are performed using validated laboratory methods and internal quality control procedures.</p>
-        <p>Test results are dependent on the quality, quantity, and integrity of the specimen received, as well as the analytical methodology used.</p>
-        <p>Report delivery timelines are indicative and may be affected due to unforeseen technical or operational circumstances. Any inconvenience caused is regretted.</p>
-      </div>
-    </div>
-  `;
-
+  // ── FULL variant ─────────────────────────────────────────────
   if (variant === "full") {
     const hasFrontPage = layout?.frontPageLastImg;
-    const hasLastPage = layout?.lastPageImg;
+    const hasLastPage  = layout?.lastPageImg;
 
-    // ✅ get results HTML + index items
     const { html: resultsContent, indexItems } = resultsTableHtml({
       results,
       trendMap,
       returnMeta: true,
     });
 
-    const indexPage = buildIndexPage({ patient, order, indexItems });
+    const indexPageContent = buildIndexPage(indexItems, { patient, order, derived });
 
     return `
 <!DOCTYPE html>
@@ -117,56 +176,54 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
 </head>
 <body>
 
-  ${
-    hasFrontPage
-      ? `
-  <!-- Front Page -->
+  ${hasFrontPage ? `
+  <!-- PAGE 1: Full-bleed front cover -->
   <div class="image-page">
     <img class="fullpage-img" src="images/_frontPageLast.jpg" alt="Front Page" />
   </div>
-  `
-      : ""
-  }
+  ` : ""}
 
-  <!-- Running header -->
-  <div class="header-with-patient">
-    <div class="hdr">
-      <img class="hf-img" src="images/_header.png" alt="Header" />
+  <!-- PAGE 2: Clean index — NO header/patient stripe/footer.
+       Placed BEFORE running elements so PrinceXML does not create
+       a blank default @page to register them. -->
+  ${indexPageContent}
+
+  <!-- PAGE 3+: Results.
+       Running header/footer declared INSIDE .results-page so they
+       only register once content starts — no blank page. -->
+  <div class="results-page">
+
+    <div class="header-with-patient">
+      <div class="hdr">
+        <img class="hf-img" src="images/_header.png" alt="Header" />
+      </div>
+      ${patientStripContent}
     </div>
-    ${patientStripContent}
-  </div>
 
-  <!-- Running footer -->
-  <div class="page-footer">
-    <img class="hf-img" src="images/_footer.png" alt="Footer" />
-  </div>
+    <div class="page-footer">
+      <img class="hf-img" src="images/_footer.png" alt="Footer" />
+    </div>
 
-  <!-- ✅ Index Page + Results (each test now has its own signatures) -->
-  <div class="page">
     <div class="content">
-      ${indexPage}
       ${resultsContent}
       ${conditionsSection}
     </div>
+
   </div>
 
-  ${
-    hasLastPage
-      ? `
-  <!-- Last Page -->
-  <div class="image-page break-before">
+  ${hasLastPage ? `
+  <!-- Last page -->
+  <div class="image-page">
     <img class="fullpage-img" src="images/_lastPage.jpg" alt="Last Page" />
   </div>
-  `
-      : ""
-  }
+  ` : ""}
 
 </body>
 </html>
     `;
   }
 
-  // ✅ letterhead/plain variants - each test now has signatures
+  // ── LETTERHEAD variant ───────────────────────────────────────
   const resultsContent = resultsTableHtml({ results, trendMap });
 
   if (variant === "letterhead") {
@@ -179,8 +236,11 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
   <link rel="stylesheet" href="css/report.css">
 </head>
 <body>
+
   <div class="header-with-patient">
-    <div class="hdr"><img class="hf-img" src="images/_header.png" alt="Header" /></div>
+    <div class="hdr">
+      <img class="hf-img" src="images/_header.png" alt="Header" />
+    </div>
     ${patientStripContent}
   </div>
 
@@ -188,17 +248,19 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
     <img class="hf-img" src="images/_footer.png" alt="Footer" />
   </div>
 
-  <div class="page">
+  <div class="results-page">
     <div class="content">
       ${resultsContent}
       ${conditionsSection}
     </div>
   </div>
+
 </body>
 </html>
     `;
   }
 
+  // ── PLAIN variant ────────────────────────────────────────────
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -208,23 +270,29 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
   <link rel="stylesheet" href="css/report.css">
 </head>
 <body>
+
   <div class="header-with-patient">
     <div class="hdr">
-      <img class="hf-img" src="https://novus-images.s3.ap-southeast-2.amazonaws.com/Screenshot_14.png" alt="Header" />
+      <img class="hf-img"
+        src="https://novus-images.s3.ap-southeast-2.amazonaws.com/Screenshot_14.png"
+        alt="Header" />
     </div>
     ${patientStripContent}
   </div>
 
   <div class="page-footer">
-    <img class="hf-img" src="https://novus-images.s3.ap-southeast-2.amazonaws.com/Screenshot_14.png" alt="Footer" />
+    <img class="hf-img"
+      src="https://novus-images.s3.ap-southeast-2.amazonaws.com/Screenshot_14.png"
+      alt="Footer" />
   </div>
 
-  <div class="page">
+  <div class="results-page">
     <div class="content">
       ${resultsContent}
       ${conditionsSection}
     </div>
   </div>
+
 </body>
 </html>
   `;

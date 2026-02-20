@@ -1692,3 +1692,41 @@ model DepartmentItem {
 
   @@index([type])
 }
+
+
+enum LabWorkflowStage {
+  COLLECTED
+  RECEIVED
+  ACCEPTED
+  ENTERED
+  APPROVED_1
+  APPROVED_2
+  APPROVED_3
+  DISPATCHED
+  PRINTED
+}
+
+model LabWorkflowEvent {
+  id Int @id @default(autoincrement())
+
+  // This links to the exact row you are listing in "Report Due"
+  orderMemberPackageId Int
+  orderMemberPackage   OrderMemberPackage @relation(fields: [orderMemberPackageId], references: [id], onDelete: Cascade)
+
+  stage LabWorkflowStage
+
+  at DateTime @default(now())
+
+  // who did it (lab staff)
+  byUserId Int?
+  byUser   User? @relation(fields: [byUserId], references: [id], onDelete: SetNull)
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([orderMemberPackageId])
+  @@index([stage])
+  @@index([at])
+  @@unique([orderMemberPackageId, stage]) // 1 stage only once (optional, remove if you want history)
+}
