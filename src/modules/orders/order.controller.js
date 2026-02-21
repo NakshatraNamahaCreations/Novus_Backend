@@ -3,7 +3,7 @@ import dayjs from "dayjs";
 import redis from "../../config/redis.js";
 import { acquireLock } from "../../utils/redisLock.js";
 import { bookSlotTx } from "../../utils/bookSlotTx.js"; // home slots
-import { bookCenterSlotTx } from "../../utils/bookCenterSlotTx.js"; // ✅ new
+
 import { invoiceQueue } from "../../queues/invoice.queue.js";
 import { whatsappQueue } from "../../queues/whatsapp.queue.js";
 import { vendorNotificationQueue } from "../../queues/vendorNotification.queue.js";
@@ -16,12 +16,16 @@ import {
   secondsToKeepForOrderDate,
   orderKeys,
 } from "../../utils/orderRedis.js";
+import {
+  buildOrderSlotWindow,
+  isOrderExpiringSoonOrOverdue,
+  IST_TIMEZONE,
+} from "../../utils/orderSlotTime.js";
 import ExcelJS from "exceljs";
 import utc from "dayjs/plugin/utc.js";
 import tz from "dayjs/plugin/timezone.js";
 import { markOrderReportReady } from "./order.service.js";
-import { formatTimeIST } from "../../utils/timezone.js";
-
+import { formatTimeIST , getISTDayRange, getISTDateRange, getISTMonthRange } from "../../utils/timezone.js";
 
 const prisma = new PrismaClient();
 
@@ -66,73 +70,90 @@ const parseISTDateTime = (v) => {
 
 // ✅ reuse same filter logic (keep it identical to getOrderReports)
 function buildOrderReportWhere(query) {
-  let {
-    date,
-    fromDate,
-    toDate,
-    centerId,
-    refCenterId,
-    doctorId,
-    diagnosticCenterId,
-    status,
-    source,
-    city,
-    pincode,
-  } = query;
+  try {
+    let {
+      date,
+      fromDate,
+      toDate,
+      month, // ✅ NEW (YYYY-MM)
+      dateField = "date", // ✅ NEW: "date" or "createdAt"
 
-  const where = {};
+      centerId,
+      refCenterId,
+      doctorId,
+      diagnosticCenterId,
+      status,
+      source,
+      city,
+      pincode,
+      orderId,
+    } = query;
 
-  // DATE FILTERS
-  if (date && date !== "") {
-    const d = dayjs(date).startOf("day");
-    where.date = { gte: d.toDate(), lt: d.add(1, "day").toDate() };
-  }
-  if (query.orderId && String(query.orderId).trim()) {
-    const idNum = Number(String(query.orderId).replace(/\D/g, ""));
-    if (!Number.isNaN(idNum) && idNum > 0) {
-      where.id = idNum;
+    const where = {};
+
+    // ✅ ORDER ID FILTER
+    if (orderId && String(orderId).trim()) {
+      const idNum = Number(String(orderId).replace(/\D/g, ""));
+      if (!Number.isNaN(idNum) && idNum > 0) {
+        where.id = idNum;
+      }
     }
-  }
 
-  if (fromDate && toDate && fromDate !== "" && toDate !== "") {
-    where.date = {
-      gte: dayjs(fromDate).startOf("day").toDate(),
-      lt: dayjs(toDate).endOf("day").toDate(),
-    };
-  }
+    // ✅ Choose which field to filter by: date vs createdAt
+    const dateKey = String(dateField) === "createdAt" ? "createdAt" : "date";
 
-  // OTHER FILTERS
-  if (centerId) where.centerId = Number(centerId);
-  if (refCenterId) where.refCenterId = Number(refCenterId);
-  if (doctorId) where.doctorId = Number(doctorId);
-  if (diagnosticCenterId) where.diagnosticCenterId = Number(diagnosticCenterId);
-  if (status) where.status = status;
-  if (source) where.source = source;
+    // ✅ DATE FILTERS (priority: range > month > single date)
+    if (fromDate && toDate && String(fromDate).trim() && String(toDate).trim()) {
+      const range = getISTDateRange(fromDate, toDate);
+      if (range) where[dateKey] = range;
+    } else if (month && String(month).trim()) {
+      const range = getISTMonthRange(month); // expects "YYYY-MM"
+      if (range) where[dateKey] = range;
+    } else if (date && String(date).trim()) {
+      const range = getISTDayRange(date); // expects "YYYY-MM-DD"
+      if (range) where[dateKey] = range;
+    }
 
-  // CITY / PINCODE FILTER
-  if ((city && city.trim()) || (pincode && pincode.trim())) {
-    const c = city?.trim();
-    const p = pincode?.trim();
+    // ✅ OTHER FILTERS
+    if (centerId) where.centerId = Number(centerId);
+    if (refCenterId) where.refCenterId = Number(refCenterId);
+    if (doctorId) where.doctorId = Number(doctorId);
+    if (diagnosticCenterId)
+      where.diagnosticCenterId = Number(diagnosticCenterId);
+    if (status) where.status = status;
+    if (source) where.source = source;
 
-    where.OR = [
-      {
-        address: {
-          ...(c ? { city: { contains: c, mode: "insensitive" } } : {}),
-          ...(p ? { pincode: { contains: p, mode: "insensitive" } } : {}),
+    // ✅ CITY / PINCODE FILTER
+    if ((city && city.trim()) || (pincode && pincode.trim())) {
+      const c = city?.trim();
+      const p = pincode?.trim();
+
+      where.OR = [
+        // 1) Match order address (home sample)
+        {
+          address: {
+            ...(c ? { city: { contains: c, mode: "insensitive" } } : {}),
+            ...(p ? { pincode: { contains: p, mode: "insensitive" } } : {}),
+          },
         },
-      },
-      {
-        center: {
-          ...(p ? { pincode: { contains: p, mode: "insensitive" } } : {}),
-          ...(c
-            ? { city: { name: { contains: c, mode: "insensitive" } } }
-            : {}),
-        },
-      },
-    ];
-  }
 
-  return where;
+        // 2) Match center details (center visit)
+        {
+          center: {
+            ...(p ? { pincode: { contains: p, mode: "insensitive" } } : {}),
+            ...(c
+              ? { city: { name: { contains: c, mode: "insensitive" } } }
+              : {}),
+          },
+        },
+      ];
+    }
+
+    return where;
+  } catch (err) {
+    console.error("buildOrderReportWhere error:", err);
+    return {};
+  }
 }
 
 const formatExcelDateTime = (d) => {
@@ -3048,12 +3069,16 @@ export const getOrderPaymentSummary = async (req, res) => {
   }
 };
 
+
 export const getOrderReports = async (req, res) => {
   try {
     let {
       date,
       fromDate,
       toDate,
+      month, // ✅ NEW (YYYY-MM)
+      dateField = "date", // ✅ NEW: "date" or "createdAt"
+
       centerId,
       refCenterId,
       doctorId,
@@ -3061,38 +3086,39 @@ export const getOrderReports = async (req, res) => {
       status,
       source,
       orderId,
-      city, // ✅ NEW
-      pincode, // ✅ NEW
+      city,
+      pincode,
+
       page = 1,
       limit = 25,
     } = req.query;
 
-    page = Number(page);
-    limit = Number(limit);
+    page = Number(page) || 1;
+    limit = Number(limit) || 25;
 
     const where = {};
 
-    // ✅ DATE FILTERS
-    if (date && date !== "") {
-      const d = dayjs(date).startOf("day");
-      where.date = {
-        gte: d.toDate(),
-        lt: d.add(1, "day").toDate(),
-      };
-    }
     // ✅ ORDER ID FILTER
     if (orderId && String(orderId).trim()) {
       const idNum = Number(String(orderId).replace(/\D/g, ""));
       if (!Number.isNaN(idNum) && idNum > 0) {
-        where.id = idNum; // ✅ Prisma order.id
+        where.id = idNum;
       }
     }
 
-    if (fromDate && toDate && fromDate !== "" && toDate !== "") {
-      where.date = {
-        gte: dayjs(fromDate).startOf("day").toDate(),
-        lt: dayjs(toDate).endOf("day").toDate(),
-      };
+    // ✅ Choose which field to filter by: date vs createdAt
+    const dateKey = String(dateField) === "createdAt" ? "createdAt" : "date";
+
+    // ✅ DATE FILTERS (priority: range > month > single date)
+    if (fromDate && toDate && String(fromDate).trim() && String(toDate).trim()) {
+      const range = getISTDateRange(fromDate, toDate);
+      if (range) where[dateKey] = range;
+    } else if (month && String(month).trim()) {
+      const range = getISTMonthRange(month); // expects "YYYY-MM"
+      if (range) where[dateKey] = range;
+    } else if (date && String(date).trim()) {
+      const range = getISTDayRange(date); // expects "YYYY-MM-DD"
+      if (range) where[dateKey] = range;
     }
 
     // ✅ OTHER FILTERS
@@ -3146,8 +3172,7 @@ export const getOrderReports = async (req, res) => {
             pincode: true,
             address: true,
           },
-        }, // ✅ IMPORTANT
-
+        },
         center: {
           select: {
             id: true,
@@ -3156,12 +3181,11 @@ export const getOrderReports = async (req, res) => {
             mobile: true,
             contactName: true,
             pincode: true,
-            city: { select: { id: true, name: true } }, // ✅ IMPORTANT for city filter
+            city: { select: { id: true, name: true } },
           },
         },
         slot: { select: { id: true, startTime: true, endTime: true } },
         centerSlot: { select: { id: true, startTime: true, endTime: true } },
-
         refCenter: { select: { id: true, name: true } },
         doctor: { select: { id: true, name: true } },
         vendor: { select: { id: true, name: true } },
@@ -3213,93 +3237,65 @@ export const getOrdersExpiringSoon = async (req, res) => {
     const limitNum = Math.max(1, parseInt(limit, 10) || 10);
     const skip = (pageNum - 1) * limitNum;
 
-    const now = dayjs();
-    const next30Min = now.add(30, "minute");
+    const nowIST = dayjs().tz(IST_TIMEZONE);
 
-    // ✅ common where
-    const where = {
+ 
+
+    const baseWhere = {
       vendorId: null,
       status: "pending",
-      source: "app",
       isHomeSample: true,
-
-      // ✅ FIX: slot is a relation -> use isNot / is
-      // slot: { isNot: null },
-      // (Alternative if you have slotId in model: slotId: { not: null })
+  
     };
 
-    // 1️⃣ Count total orders
-    const totalOrders = await prisma.order.count({ where });
-
-    // 2️⃣ Fetch orders with pagination
-    const orders = await prisma.order.findMany({
-      where,
+    // Fetch candidates (today only) then filter by slot time logic
+    const candidates = await prisma.order.findMany({
+      where: baseWhere,
       include: {
-        patient: {
-          select: {
-            id: true,
-            fullName: true,
-            contactNo: true,
-          },
-        },
+        patient: { select: { id: true, fullName: true, contactNo: true } },
         address: true,
-
-        // ✅ include slot if you need time info
         slot: true,
       },
       orderBy: { date: "asc" },
-      skip,
-      take: limitNum,
     });
 
-    // 3️⃣ Calculate mins left (based on slot relation fields)
-    // NOTE: adjust these based on your Slot model fields (startTime/endTime)
-    const ordersWithTimeLeft = orders
-      .map((order) => {
-        // If your Slot has startTime/endTime stored as "hh:mm A" strings
-        const slotLabel =
-          order.slot?.startTime && order.slot?.endTime
-            ? `${order.slot.startTime} - ${order.slot.endTime}`
-            : order.slot?.label || "";
 
-        // We compute using slot.startTime (recommended)
-        const slotStart = order.slot?.startTime || null;
+    // ✅ Filter: within 30 mins of slot start OR overdue (same condition)
+    const filtered = candidates
+      .filter((o) => {
+        if (!o?.slot?.startTime || !o?.slot?.endTime) return false;
 
-        let minsLeft = null;
-        let slotDateTime = null;
+        const { startIST } = buildOrderSlotWindow(o.date, o.slot.startTime, o.slot.endTime);
 
-        if (slotStart) {
-          slotDateTime = dayjs(
-            `${dayjs(order.date).format("YYYY-MM-DD")} ${slotStart}`,
-            "YYYY-MM-DD hh:mm A",
-          );
-          minsLeft = slotDateTime.diff(now, "minute");
-        }
-
-        return {
-          ...order,
-          slotLabel,
-          minsLeft,
-        };
+        return isOrderExpiringSoonOrOverdue({
+          nowIST,
+          startIST,
+          minutesBefore: 30,
+        });
       })
-      // ✅ Optional: only those expiring within next 30 mins (and not negative)
-      .filter(
-        (o) =>
-          typeof o.minsLeft === "number" && o.minsLeft >= 0 && o.minsLeft <= 30,
-      );
+      .sort((a, b) => {
+        // sort by actual slot start (IST) for better ordering
+        const aw = buildOrderSlotWindow(a.date, a.slot.startTime, a.slot.endTime);
+        const bw = buildOrderSlotWindow(b.date, b.slot.startTime, b.slot.endTime);
+        return aw.startUTC.getTime() - bw.startUTC.getTime();
+      });
 
-    res.json({
+    const total = filtered.length;
+    const paged = filtered.slice(skip, skip + limitNum);
+
+    return res.json({
       success: true,
-      orders: ordersWithTimeLeft,
-      total: totalOrders,
+      orders: paged,
+      total,
       page: pageNum,
       limit: limitNum,
-      totalPages: Math.ceil(totalOrders / limitNum),
-      filteredCount: ordersWithTimeLeft.length,
+      totalPages: Math.ceil(total / limitNum),
+      filteredCount: paged.length,
+      nowIST: nowIST.format(), // optional debug
     });
   } catch (error) {
     console.error("Expiring orders error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch expiring orders",
       error: error?.message,
@@ -3307,7 +3303,6 @@ export const getOrdersExpiringSoon = async (req, res) => {
   }
 };
 
-const OPEN_STATUSES = ["NOT_READY", "READY"];
 
 export const fetchReportDue = async (req, res) => {
   try {
