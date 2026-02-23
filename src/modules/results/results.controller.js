@@ -123,26 +123,25 @@ export const ResultController = {
     }
   },
 
-  getPatientReportByOrder: async (req, res) => {
-    try {
-      const { orderId, patientId } = req.params;
-      const { testId } = req.query;
+ getOrderReportsAllPatients: async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { testId } = req.query;
 
-      const data = await ResultService.getPatientReportByOrder({
-        orderId,
-        patientId,
-        testId,
-      });
+    const data = await ResultService.getOrderReportsAllPatients({
+      orderId,
+      testId,
+    });
 
-      return res.json({ success: true, data });
-    } catch (err) {
-      console.error("getPatientReportByOrder error:", err);
-      return res.status(500).json({
-        success: false,
-        error: err?.message || "Failed to fetch report",
-      });
-    }
-  },
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error("getOrderReportsAllPatients error:", err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Failed to fetch reports",
+    });
+  }
+},
 
   getReportDataByTest: async (req, res) => {
     try {

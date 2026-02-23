@@ -108,7 +108,10 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
 
   return `
     <div class="index-only-page">
-
+  <!-- Header image -->
+     <div class="hdr">
+      <img class="hf-img" src="images/_header.png" alt="Header" />
+    </div>
       ${buildPatientStrip({ patient, order, derived })}
 
       <div class="idx-page-header">

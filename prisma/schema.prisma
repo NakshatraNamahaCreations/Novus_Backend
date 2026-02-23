@@ -376,18 +376,21 @@ model Category {
   order              Int?
   type               String?
   bannerUrl          String?
-  createdById        Int? // ⭐ ADDED: Track who created the category
+  createdById        Int?
   createdBy          User?               @relation(fields: [createdById], references: [id])
   isPopular          Boolean             @default(false)
+
   subCategories      SubCategory[]
   tests              Test[]
-  
   otherCategoryTests TestOtherCategory[]
   packages           HealthPackage[]
   centers            CenterCategory[]
 
   centerCategoryCommissions CenterCategoryCommission[]
   centerSlots               CenterSlot[]
+
+  // ✅ NEW reverse relation
+  couponLinks CouponCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -559,11 +562,9 @@ model Coupon {
   isActive       Boolean   @default(true)
   autoApply      Boolean   @default(false)
 
-  // ✅ keep for patient-specific coupons (single user)
   isPatientCoupon Boolean @default(false)
   patientId       Int?
 
-  // ✅ NEW: choose who can use
   audience CouponAudience @default(ALL)
 
   createdById Int?
@@ -573,6 +574,33 @@ model Coupon {
   updatedAt    DateTime      @updatedAt
   orders       Order[]       @relation("OrderCouponRelation")
   couponUsages CouponUsage[]
+
+  // ✅ NEW: category scope
+  categoryScope CouponCategoryScope @default(ALL)
+  categories    CouponCategory[]    // <-- multiple categories
+
+  @@map("Coupon")
+}
+
+model CouponCategory {
+  id         Int @id @default(autoincrement())
+  couponId   Int
+  categoryId Int
+
+  coupon   Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([couponId, categoryId])
+  @@index([couponId])
+  @@index([categoryId])
+  @@map("CouponCategory")
+}
+enum CouponCategoryScope {
+  ALL      // coupon works for all categories
+  INCLUDE  // coupon works only for selected categories
+  EXCLUDE  // coupon works for all except selected categories
 }
 
 model CouponUsage {
@@ -644,12 +672,16 @@ model VendorReview {
   id        Int      @id @default(autoincrement())
   vendorId  Int
   patientId Int?
-  rating    Int // 1–5 stars
+  orderId   Int?
+  rating    Int
   comment   String?
   createdAt DateTime @default(now())
 
   vendor  Vendor   @relation(fields: [vendorId], references: [id])
   patient Patient? @relation(fields: [patientId], references: [id])
+  order   Order?   @relation(fields: [orderId], references: [id])
+
+  @@unique([orderId])
 }
 
 model VendorProfile {
@@ -875,7 +907,7 @@ model Order {
   coupon           Coupon?             @relation("OrderCouponRelation", fields: [couponId], references: [id])
   vendorEarning    OrderVendorEarning?
   diagnosticCenter DiagnosticCenter?   @relation(fields: [diagnosticCenterId], references: [id])
-
+  vendorReview    VendorReview?
   orderCheckups      OrderCheckup[]
   orderTracking      OrderTracking?
   orderMembers       OrderMember[]
@@ -1717,3 +1749,4 @@ model VendorPincode {
   @@index([pincode])
   @@index([vendorId])
 }
+

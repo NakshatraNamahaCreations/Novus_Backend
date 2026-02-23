@@ -402,121 +402,167 @@ export const ResultService = {
   getDefaultLayout: () =>
     prisma.reportLayout.findFirst({ orderBy: { id: "desc" } }),
 
-  getPatientReportByOrder: async ({ orderId, patientId, testId }) => {
-    const oId = Number(orderId);
-    const pId = Number(patientId);
-    const tId =
-      testId != null && String(testId).trim() !== "" ? Number(testId) : null;
+getOrderReportsAllPatients: async ({ orderId, testId }) => {
+  const oId = Number(orderId);
+  const tId =
+    testId != null && String(testId).trim() !== "" ? Number(testId) : null;
 
-    const [patient, order] = await Promise.all([
-      prisma.patient.findUnique({
-        where: { id: pId },
-        select: {
-          id: true,
-          fullName: true,
-          initial: true,
-          dob: true,
-          age: true,
-          gender: true,
-          contactNo: true,
-          email: true,
-        },
-      }),
-      prisma.order.findUnique({
-        where: { id: oId },
-        select: {
-          id: true,
-          orderNumber: true,
-          merchantOrderId: true,
-          date: true,
-          status: true,
-          totalAmount: true,
-          finalAmount: true,
-          patientId: true,
-          doctor: {
-            select: { id: true, name: true, initial: true, qualification: true },
-          },
-          center: { select: { id: true, name: true, address: true } },
-          diagnosticCenter: { select: { id: true, name: true, address: true } },
-          vendor: { select: { id: true, name: true } },
-        },
-      }),
-    ]);
+  if (!Number.isFinite(oId)) throw new Error("Invalid orderId");
+  if (tId != null && !Number.isFinite(tId)) throw new Error("Invalid testId");
 
-    if (!patient) throw new Error("Patient not found");
-    if (!order) throw new Error("Order not found");
-    if (order.patientId !== pId) {
-      throw new Error("This patient is not linked to the given order");
-    }
+  // 1) Order + members
+  const order = await prisma.order.findUnique({
+    where: { id: oId },
+    select: {
+      id: true,
+      orderNumber: true,
+      merchantOrderId: true,
+      date: true,
+      status: true,
+      totalAmount: true,
+      finalAmount: true,
+      patientId: true,
+      doctor: { select: { id: true, name: true, initial: true, qualification: true } },
+      center: { select: { id: true, name: true, address: true } },
+      diagnosticCenter: { select: { id: true, name: true, address: true } },
+      vendor: { select: { id: true, name: true } },
 
-    const gender = normalizeGender(patient.gender);
-
-    const results = await prisma.patientTestResult.findMany({
-      where: {
-        orderId: oId,
-        patientId: pId,
-        ...(tId ? { testId: tId } : {}),
+      // ✅ assuming relation exists
+      orderMembers: {
+        select: { patientId: true },
       },
-      include: {
-        test: {
-          select: {
-            id: true,
-            name: true,
-            testType: true,
-            categoryId: true,
-            subCategoryId: true,
-            departmentItemId: true,
-          },
+    },
+  });
+
+  if (!order) throw new Error("Order not found");
+
+  const patientIds = Array.from(
+    new Set([
+      order.patientId,
+      ...(order.orderMembers || []).map((m) => m.patientId),
+    ].filter(Boolean))
+  );
+
+  if (!patientIds.length) {
+    throw new Error("No patients linked to this order");
+  }
+
+  // 2) Fetch patients
+  const patients = await prisma.patient.findMany({
+    where: { id: { in: patientIds } },
+    select: {
+      id: true,
+      fullName: true,
+      initial: true,
+      dob: true,
+      age: true,
+      gender: true,
+      contactNo: true,
+      email: true,
+    },
+    orderBy: { id: "asc" },
+  });
+
+  const patientById = new Map(patients.map((p) => [p.id, p]));
+
+  // 3) Fetch ALL results for this order + patients
+  const results = await prisma.patientTestResult.findMany({
+    where: {
+      orderId: oId,
+      patientId: { in: patientIds },
+      ...(tId ? { testId: tId } : {}),
+    },
+    include: {
+      test: {
+        select: {
+          id: true,
+          name: true,
+          testType: true,
+          categoryId: true,
+          subCategoryId: true,
+          departmentItemId: true,
         },
-        parameterResults: {
-          orderBy: { parameterId: "asc" },
-          include: {
-            parameter: {
-              include: {
-                ranges: { where: genderWhere(gender), orderBy: { id: "asc" } },
-                resultOpts: { orderBy: { id: "asc" } },
-              },
+      },
+      parameterResults: {
+        orderBy: { parameterId: "asc" },
+        include: {
+          parameter: {
+            include: {
+              ranges: { orderBy: { id: "asc" } }, // filter later by gender
+              resultOpts: { orderBy: { id: "asc" } },
             },
           },
         },
-        leftSignature: true,
-        centerSignature: true,
-        rightSignature: true,
       },
-      orderBy: { id: "asc" },
-    });
+      leftSignature: true,
+      centerSignature: true,
+      rightSignature: true,
+    },
+    orderBy: [{ patientId: "asc" }, { id: "asc" }],
+  });
 
-    if (!results?.length) {
-      throw new Error("No test results found for this patient in this order");
-    }
+  if (!results?.length) {
+    throw new Error("No test results found for this order");
+  }
 
-    const testIds = [...new Set(results.map((r) => r.testId))];
+  // 4) Layout (shared)
+  const layout = await prisma.reportLayout.findFirst({
+    orderBy: { id: "desc" },
+  });
 
-    const reportItemsByTestId = {};
-    await Promise.all(
-      testIds.map(async (tid) => {
-        const items = await prisma.testReportItem.findMany({
-          where: { testId: tid, ...genderWhere(gender) },
-          orderBy: { sortOrder: "asc" },
-          include: {
-            parameter: {
-              include: {
-                ranges: { where: genderWhere(gender), orderBy: { id: "asc" } },
-                resultOpts: { orderBy: { id: "asc" } },
+  // 5) Group results by patient
+  const resultsByPatientId = new Map();
+  for (const r of results) {
+    if (!resultsByPatientId.has(r.patientId)) resultsByPatientId.set(r.patientId, []);
+    resultsByPatientId.get(r.patientId).push(r);
+  }
+
+  // 6) Build patientReports
+  // NOTE: reportItems depend on gender, so we fetch per patient.
+  const patientReports = await Promise.all(
+    patientIds.map(async (pid) => {
+      const patient = patientById.get(pid);
+      if (!patient) return null;
+
+      const gender = normalizeGender(patient.gender);
+      const patientResults = resultsByPatientId.get(pid) || [];
+
+      const testIds = [...new Set(patientResults.map((r) => r.testId))];
+
+      const reportItemsByTestId = {};
+      await Promise.all(
+        testIds.map(async (tid) => {
+          const items = await prisma.testReportItem.findMany({
+            where: { testId: tid, ...genderWhere(gender) },
+            orderBy: { sortOrder: "asc" },
+            include: {
+              parameter: {
+                include: {
+                  ranges: { where: genderWhere(gender), orderBy: { id: "asc" } },
+                  resultOpts: { orderBy: { id: "asc" } },
+                },
               },
             },
-          },
-        });
-        reportItemsByTestId[tid] = items;
-      })
-    );
+          });
+          reportItemsByTestId[tid] = items;
+        })
+      );
 
-    const layout = await prisma.reportLayout.findFirst({
-      orderBy: { id: "desc" },
-    });
+      return {
+        patient,
+        gender,
+        results: patientResults,
+        reportItemsByTestId,
+      };
+    })
+  );
 
-    return { patient, order, gender, layout, results, reportItemsByTestId };
-  },
+  return {
+    order,
+    layout,
+    patientReports: patientReports.filter(Boolean),
+  };
+},
 
   getReportDataByTest: async ({ testId, patientTestResultId, gender }) => {
     const tId = Number(testId);

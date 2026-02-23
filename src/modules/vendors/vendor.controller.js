@@ -1012,61 +1012,117 @@ export const getEarningsHistory = async (req, res) => {
 
 export const addVendorReview = async (req, res) => {
   try {
-    const { vendorId, patientId, rating, comment } = req.body;
+    const { orderId, rating, comment } = req.body;
 
-    if (!vendorId || !rating) {
-      return res
-        .status(400)
-        .json({ error: "vendorId and rating are required" });
+    if (!orderId || rating === undefined || rating === null) {
+      return res.status(400).json({ error: "orderId and rating are required" });
     }
 
-    if (rating < 1 || rating > 5) {
+    const orderIdNum = Number(orderId);
+    const ratingNum = Number(rating);
+
+    if (Number.isNaN(orderIdNum) || orderIdNum <= 0) {
+      return res.status(400).json({ error: "orderId must be a valid number" });
+    }
+    if (Number.isNaN(ratingNum)) {
+      return res.status(400).json({ error: "rating must be a valid number" });
+    }
+    if (ratingNum < 1 || ratingNum > 5) {
       return res.status(400).json({ error: "Rating must be between 1 and 5" });
     }
 
-    // Fetch vendor
-    const vendor = await prisma.vendor.findUnique({
-      where: { id: Number(vendorId) },
+    // 1️⃣ Fetch order (include patientId so we never pass invalid FK)
+    const order = await prisma.order.findUnique({
+      where: { id: orderIdNum },
+      select: {
+        id: true,
+        vendorId: true,
+        status: true,
+        patientId: true,
+      },
     });
 
-    if (!vendor) {
-      return res.status(404).json({ error: "Vendor not found" });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (!order.vendorId) {
+      return res.status(400).json({ error: "No vendor assigned to this order" });
     }
 
-    // 1️⃣ Create Review
-    const review = await prisma.vendorReview.create({
-      data: {
-        vendorId: Number(vendorId),
-        patientId: patientId ? Number(patientId) : null,
-        rating,
-        comment,
-      },
+    // 2️⃣ Only allow review for completed orders
+    if (order.status !== "completed") {
+      return res.status(400).json({ error: "Can only review completed orders" });
+    }
+
+    // 3️⃣ Prevent duplicate review (uses @@unique([orderId]) in VendorReview)
+    const existing = await prisma.vendorReview.findUnique({
+      where: { orderId: orderIdNum },
+      select: { id: true },
     });
 
-    // 2️⃣ Calculate new rating
-    const newTotalReviews = vendor.totalReviews + 1;
+    if (existing) {
+      return res.status(409).json({ error: "Review already submitted for this order" });
+    }
 
-    const newOverallRating =
-      (vendor.overallRating * vendor.totalReviews + rating) / newTotalReviews;
+    // 4️⃣ Create review + update vendor atomically
+    const review = await prisma.$transaction(async (tx) => {
+      const vendor = await tx.vendor.findUnique({
+        where: { id: order.vendorId },
+        select: { overallRating: true, totalReviews: true },
+      });
 
-    // 3️⃣ Update vendor with new rating + review count
-    await prisma.vendor.update({
-      where: { id: Number(vendorId) },
-      data: {
-        overallRating:  Number(newOverallRating.toFixed(2)),
-        totalReviews: newTotalReviews,
-      },
+      if (!vendor) {
+        // in case vendor row missing (should not happen)
+        throw Object.assign(new Error("Vendor not found"), { statusCode: 404 });
+      }
+
+      const newTotalReviews = vendor.totalReviews + 1;
+      const newOverallRating = Number(
+        (
+          (vendor.overallRating * vendor.totalReviews + ratingNum) /
+          newTotalReviews
+        ).toFixed(2)
+      );
+
+      const created = await tx.vendorReview.create({
+        data: {
+          orderId: orderIdNum,
+          vendorId: order.vendorId,
+          patientId: order.patientId, // ✅ always valid FK (prevents P2003)
+          rating: ratingNum,
+          comment: comment?.trim() || null,
+        },
+        include: {
+          patient: { select: { id: true, fullName: true } },
+          order: { select: { id: true, orderNumber: true, date: true } },
+          vendor: { select: { id: true, name: true } },
+        },
+      });
+
+      await tx.vendor.update({
+        where: { id: order.vendorId },
+        data: {
+          totalReviews: { increment: 1 },
+          overallRating: newOverallRating,
+        },
+      });
+
+      return created;
     });
 
     return res.json({
       message: "Review added successfully",
       review,
-      updatedRating: {
-        overallRating: newOverallRating,
-        totalReviews: newTotalReviews,
-      },
     });
   } catch (error) {
+    // race-condition safety: if two requests try same orderId
+    if (error?.code === "P2002") {
+      return res.status(409).json({ error: "Review already submitted for this order" });
+    }
+
+    // custom thrown errors
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+
     console.error("Error adding review:", error);
     return res.status(500).json({ error: "Failed to add review" });
   }
@@ -1076,7 +1132,7 @@ export const getVendorReviews = async (req, res) => {
   try {
     const { vendorId } = req.params;
     if (!vendorId) {
-      return res.status(404).json({ error: "vendorId not found" });
+      return res.status(400).json({ error: "vendorId is required" });
     }
 
     const page = parseInt(req.query.page || "1");
@@ -1085,33 +1141,28 @@ export const getVendorReviews = async (req, res) => {
 
     const vendor = await prisma.vendor.findUnique({
       where: { id: Number(vendorId) },
-      select: { id: true, name: true },
+      select: { id: true, name: true, overallRating: true, totalReviews: true },
     });
 
     if (!vendor) {
       return res.status(404).json({ error: "Vendor not found" });
     }
 
-    const total = await prisma.vendorReview.count({
-      where: { vendorId: Number(vendorId) },
-    });
-
-    const reviews = await prisma.vendorReview.findMany({
-      where: { vendorId: Number(vendorId) },
-      orderBy: { createdAt: "desc" },
-      skip,
-      take: limit,
-      include: {
-        patient: {
-          select: {
-            id: true,
-            fullName: true,
-          },
+    const [total, reviews] = await Promise.all([
+      prisma.vendorReview.count({ where: { vendorId: Number(vendorId) } }),
+      prisma.vendorReview.findMany({
+        where: { vendorId: Number(vendorId) },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+        include: {
+          patient: { select: { id: true, fullName: true } },
+          order: { select: { id: true, orderNumber: true, date: true } },
         },
-      },
-    });
+      }),
+    ]);
 
-    res.json({
+    return res.json({
       vendor,
       pagination: {
         page,
@@ -1124,6 +1175,6 @@ export const getVendorReviews = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching reviews:", error);
-    res.status(500).json({ error: "Failed to fetch reviews" });
+    return res.status(500).json({ error: "Failed to fetch reviews" });
   }
 };

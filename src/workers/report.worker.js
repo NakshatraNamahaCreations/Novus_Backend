@@ -108,8 +108,8 @@ new Worker(
         // ✅ 5) mark OrderMemberPackage items READY (use FK orderMemberId)
         const upd = await prisma.orderMemberPackage.updateMany({
           where: {
-            orderMemberId, // ✅ reliable
-            // dispatchStatus: ReportDispatchStatus.NOT_READY,
+            orderMemberId, 
+            
           },
           data: {
             dispatchStatus: ReportDispatchStatus.DISPATCHED,

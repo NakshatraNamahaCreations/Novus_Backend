@@ -29,7 +29,7 @@ router.post("/logout", logoutVendor);
 // 📌 Send OTP
 router.post("/send-otp", sendOtp);
 router.post("/earnings", addVendorEarning);
-router.post("/reviews", addVendorReview);
+
 router.post("/device-token/:vendorId", updateVendorFcmToken);
 
 
@@ -38,6 +38,7 @@ router.post("/device-token/:vendorId", updateVendorFcmToken);
 router.post("/verify-otp", verifyOtp);
 
 router.get("/earnings-history/:vendorId", getEarningsHistory);
+router.post("/reviews", addVendorReview);
 router.get("/reviews/:vendorId", getVendorReviews);
 
 // CRUD

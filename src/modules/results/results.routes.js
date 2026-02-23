@@ -15,7 +15,6 @@ router.get("/report-data/:testId", ResultController.getReportDataByTest);
 router.put("/:id", ResultController.update);
 router.get("/:id", ResultController.getById);
 
-// ✅ keep this LAST
-router.get("/:orderId/:patientId", ResultController.getPatientReportByOrder);
+router.get("/orders/:orderId", ResultController.getOrderReportsAllPatients);
 
 export default router;

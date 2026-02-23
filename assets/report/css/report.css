@@ -67,8 +67,8 @@
    No running header, patient stripe, or footer.
    =============================== */
 @page indexpage {
-  size: A4;
-  margin: 14mm var(--pad-x) 14mm var(--pad-x);
+ size: A4;
+  margin: 0 var(--pad-x) 14mm var(--pad-x);
 
   @top    { content: none; }
   @bottom { content: none; }
@@ -94,7 +94,7 @@ html, body {
   line-height: 1.4;
 }
 
-p { font-size: 14px; }
+p { font-size: 13; }
 
 /* ===============================
    RUNNING ELEMENTS
@@ -107,6 +107,23 @@ p { font-size: 14px; }
 
 .page-footer {
   position: running(footer-content);
+}
+
+/* ── Index page header image ── */
+/* ── Index page header image — full bleed ── */
+.idx-header-img {
+  width: calc(100% + var(--pad-x) * 2);
+  height: var(--header-h);
+  margin-left: calc(-1 * var(--pad-x));
+  margin-right: calc(-1 * var(--pad-x));
+  margin-bottom: 16px;
+}
+
+.idx-header-img .hf-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 /* ===============================
@@ -385,7 +402,7 @@ p { font-size: 14px; }
   object-fit: contain;
 }
 .idx-notice-icon {
-  font-size: 14px;
+  font-size: 13px;
   color: #d97706;
   flex-shrink: 0;
   margin-top: 1px;
@@ -395,6 +412,9 @@ p { font-size: 14px; }
   font-size: 11px;
   color: #78580a;
   line-height: 1.6;
+}
+.dept-group + .dept-group {
+  page-break-before: always;
 }
 
 /* ===============================
@@ -466,7 +486,7 @@ p { font-size: 14px; }
    =============================== */
 .dept-header {
   margin: 18px 0 6px 0;
-  padding: 6px 14px;
+  padding: 6px 13px;
   background: #eef2ff;
   border-left: 4px solid var(--primary-blue);
   border-radius: 0 4px 4px 0;
@@ -572,8 +592,8 @@ p { font-size: 14px; }
 }
 
 .param-name {
-  font-weight: 600;
-  color: var(--text-dark);
+
+  color: black;
   margin-bottom: 4px;
   font-size: 12px;
   line-height: 1.4;
@@ -656,7 +676,7 @@ p { font-size: 14px; }
 .section.radiology { margin-bottom: 20px; }
 
 .radio-html {
-  border: 1px solid var(--border-light);
+  /* border: 1px solid var(--border-light); */
   padding: 14px;
   font-size: 12px;
   line-height: 1.6;
@@ -694,7 +714,7 @@ p { font-size: 14px; }
   margin-top: 20px;
   padding: 16px 12px;
   page-break-inside: avoid;
-  border-top: 2px solid var(--border-light);
+  /* border-top: 2px solid var(--border-light); */
   background: var(--bg-white);
 }
 
@@ -764,7 +784,7 @@ p { font-size: 14px; }
 }
 
 .trends-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: #fff;
   text-transform: uppercase;

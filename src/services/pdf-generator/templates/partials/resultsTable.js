@@ -358,7 +358,7 @@ function renderPathologyUsingReportItems(result) {
             ${esc(value)}${unit ? " " + esc(unit) : ""}
           </td>
           <td class="ref-range ${refIsHtml ? "ref-html" : ""}">
-            ${refContent || ""}
+            ${refContent || ""}${unit ? " " + esc(unit) : ""}
           </td>
         </tr>
       `;

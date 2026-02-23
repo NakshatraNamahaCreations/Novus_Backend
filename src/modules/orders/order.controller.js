@@ -25,13 +25,17 @@ import ExcelJS from "exceljs";
 import utc from "dayjs/plugin/utc.js";
 import tz from "dayjs/plugin/timezone.js";
 import { markOrderReportReady } from "./order.service.js";
-import { formatTimeIST , getISTDayRange, getISTDateRange, getISTMonthRange } from "../../utils/timezone.js";
+import {
+  formatTimeIST,
+  getISTDayRange,
+  getISTDateRange,
+  getISTMonthRange,
+} from "../../utils/timezone.js";
 
 const prisma = new PrismaClient();
 
 dayjs.extend(utc);
 dayjs.extend(tz);
-
 
 const normalizeUnit = (u = "") => {
   const unit = String(u || "")
@@ -103,7 +107,12 @@ function buildOrderReportWhere(query) {
     const dateKey = String(dateField) === "createdAt" ? "createdAt" : "date";
 
     // ✅ DATE FILTERS (priority: range > month > single date)
-    if (fromDate && toDate && String(fromDate).trim() && String(toDate).trim()) {
+    if (
+      fromDate &&
+      toDate &&
+      String(fromDate).trim() &&
+      String(toDate).trim()
+    ) {
       const range = getISTDateRange(fromDate, toDate);
       if (range) where[dateKey] = range;
     } else if (month && String(month).trim()) {
@@ -231,7 +240,7 @@ export const exportOrderReportsExcel = async (req, res) => {
       { header: "Sl.No", key: "sl", width: 6 },
       { header: "Reg", key: "reg", width: 12 },
       { header: "Lab no", key: "labNo", width: 10 },
-      { header: "IP / OP no", key: "ipop", width: 14 },
+      { header: "source", key: "source", width: 14 },
       { header: "Date", key: "date", width: 18 },
       { header: "Patient Name", key: "patientName", width: 22 },
       { header: "Age", key: "age", width: 8 },
@@ -269,7 +278,7 @@ export const exportOrderReportsExcel = async (req, res) => {
         // ✅ IMPORTANT: map based on what you actually store
         reg: o.patientId ? String(o.patientId) : "", // change if you have "registrationNo"
         labNo: o.orderNumber ? String(o.orderNumber) : "", // change if you have "labNo"
-        ipop: o.merchantOrderId ? String(o.merchantOrderId) : "", // change if you have "ipOpNo"
+        source: o.source ? (o.source) : "", // change if you have "ipOpNo"
         date: formatExcelDateTime(o.date),
 
         patientName: o.patient?.fullName || "",
@@ -1538,7 +1547,8 @@ export const getOrdersByPatientIdTrack = async (req, res) => {
 export const getOrdersByPatientIdCompleted = async (req, res) => {
   try {
     const patientId = Number(req.params.patientId);
-    if (!Number.isFinite(patientId)) {
+
+    if (!Number.isFinite(patientId) || patientId <= 0) {
       return res
         .status(400)
         .json({ success: false, error: "Invalid patientId" });
@@ -1550,24 +1560,39 @@ export const getOrdersByPatientIdCompleted = async (req, res) => {
           {
             OR: [{ patientId }, { orderMembers: { some: { patientId } } }],
           },
-          {
-            status: "completed",
-          },
+          { status: "completed" },
         ],
       },
-
       include: {
         patient: {
           select: { id: true, fullName: true, email: true, contactNo: true },
         },
         address: true,
-        vendor: true,
-        payments: {
+        vendor: {
           select: {
             id: true,
-            invoiceUrl: true,
+            name: true,
+            number: true,
           },
         },
+
+        // ✅ include review (if exists, it will return object; else null)
+        vendorReview: {
+          select: {
+            id: true,
+            rating: true,
+            comment: true,
+            createdAt: true,
+            patientId: true,
+            vendorId: true,
+            orderId: true,
+          },
+        },
+
+        payments: {
+          select: { id: true, invoiceUrl: true },
+        },
+
         orderMembers: {
           where: { patientId },
           include: {
@@ -1599,10 +1624,19 @@ export const getOrdersByPatientIdCompleted = async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    res.json({ success: true, orders });
+    // ✅ optional: add a boolean flag for frontend
+    const ordersWithFlags = orders.map((o) => ({
+      ...o,
+      isReviewed: !!o.vendorReview,
+      canReview: o.status === "completed" && !!o.vendorId && !o.vendorReview,
+    }));
+
+    return res.json({ success: true, orders: ordersWithFlags });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, error: "Failed to fetch orders" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch orders" });
   }
 };
 
@@ -3069,7 +3103,6 @@ export const getOrderPaymentSummary = async (req, res) => {
   }
 };
 
-
 export const getOrderReports = async (req, res) => {
   try {
     let {
@@ -3110,7 +3143,12 @@ export const getOrderReports = async (req, res) => {
     const dateKey = String(dateField) === "createdAt" ? "createdAt" : "date";
 
     // ✅ DATE FILTERS (priority: range > month > single date)
-    if (fromDate && toDate && String(fromDate).trim() && String(toDate).trim()) {
+    if (
+      fromDate &&
+      toDate &&
+      String(fromDate).trim() &&
+      String(toDate).trim()
+    ) {
       const range = getISTDateRange(fromDate, toDate);
       if (range) where[dateKey] = range;
     } else if (month && String(month).trim()) {
@@ -3239,13 +3277,10 @@ export const getOrdersExpiringSoon = async (req, res) => {
 
     const nowIST = dayjs().tz(IST_TIMEZONE);
 
- 
-
     const baseWhere = {
       vendorId: null,
       status: "pending",
       isHomeSample: true,
-  
     };
 
     // Fetch candidates (today only) then filter by slot time logic
@@ -3259,13 +3294,16 @@ export const getOrdersExpiringSoon = async (req, res) => {
       orderBy: { date: "asc" },
     });
 
-
     // ✅ Filter: within 30 mins of slot start OR overdue (same condition)
     const filtered = candidates
       .filter((o) => {
         if (!o?.slot?.startTime || !o?.slot?.endTime) return false;
 
-        const { startIST } = buildOrderSlotWindow(o.date, o.slot.startTime, o.slot.endTime);
+        const { startIST } = buildOrderSlotWindow(
+          o.date,
+          o.slot.startTime,
+          o.slot.endTime,
+        );
 
         return isOrderExpiringSoonOrOverdue({
           nowIST,
@@ -3275,8 +3313,16 @@ export const getOrdersExpiringSoon = async (req, res) => {
       })
       .sort((a, b) => {
         // sort by actual slot start (IST) for better ordering
-        const aw = buildOrderSlotWindow(a.date, a.slot.startTime, a.slot.endTime);
-        const bw = buildOrderSlotWindow(b.date, b.slot.startTime, b.slot.endTime);
+        const aw = buildOrderSlotWindow(
+          a.date,
+          a.slot.startTime,
+          a.slot.endTime,
+        );
+        const bw = buildOrderSlotWindow(
+          b.date,
+          b.slot.startTime,
+          b.slot.endTime,
+        );
         return aw.startUTC.getTime() - bw.startUTC.getTime();
       });
 
@@ -3303,7 +3349,6 @@ export const getOrdersExpiringSoon = async (req, res) => {
   }
 };
 
-
 export const fetchReportDue = async (req, res) => {
   try {
     const beforeMin = Number(req.query.beforeMin ?? 10);
@@ -3329,9 +3374,9 @@ export const fetchReportDue = async (req, res) => {
               testType: true,
               status: true,
               isHomeSample: true,
-              reportReady:true,
-              createdAt:true,
-              updatedAt:true
+              reportReady: true,
+              createdAt: true,
+              updatedAt: true,
             },
           },
         },
