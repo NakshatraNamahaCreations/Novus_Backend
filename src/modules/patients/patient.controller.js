@@ -637,10 +637,7 @@ export const getPatientByMobile = async (req, res) => {
 
     const patient = await prisma.patient.findFirst({
       where: { contactNo: mobile },
-      include: {
-        addresses: true,
-        orders: true,
-      },
+     
     });
 
     return res.json({

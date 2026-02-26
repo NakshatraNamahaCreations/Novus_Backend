@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
-
+import * as XLSX from "xlsx";
 
 const prisma = new PrismaClient();
 
@@ -50,9 +50,6 @@ const parseJsonIfString = (v) => {
   return v;
 };
 
-/* =========================
-   helpers (same as yours)
-========================= */
 const clamp = (n, min, max) => Math.min(Math.max(n, min), max);
 const round2 = (n) => +Number(n || 0).toFixed(2);
 
@@ -100,15 +97,13 @@ const computeDiscountFields = (actualPrice, discountInput) => {
 };
 
 
-/**
- * ✅ Resolve departmentItemId for a test
- * Priority:
- *  1) req.body.departmentItemId (if provided)
- *  2) Category.departmentItemId (auto)
- */
 const resolveDepartmentItemId = async ({ departmentItemId, categoryId }) => {
   // 1) manual override
-  if (departmentItemId !== undefined && departmentItemId !== null && departmentItemId !== "") {
+  if (
+    departmentItemId !== undefined &&
+    departmentItemId !== null &&
+    departmentItemId !== ""
+  ) {
     const depId = Number(departmentItemId);
     if (!depId) throw new Error("Invalid departmentItemId");
 
@@ -136,6 +131,474 @@ const resolveDepartmentItemId = async ({ departmentItemId, categoryId }) => {
   return cat.departmentItemId ? Number(cat.departmentItemId) : null;
 };
 
+function parseFile(buffer, mimetype) {
+  if (mimetype === "text/csv" || mimetype === "application/csv") {
+    const text = buffer.toString("utf-8");
+    return parse(text, { columns: true, skip_empty_lines: true, trim: true });
+  }
+  const workbook = XLSX.read(buffer, { type: "buffer" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { defval: "" });
+}
+
+
+function toNullableFloat(val) {
+  if (val === "" || val === null || val === undefined) return null;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toFloat(val, fallback = 0) {
+  const n = Number(val);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toInt(val) {
+  const n = parseInt(val, 10);
+  return isNaN(n) ? null : n;
+}
+
+function toBoolean(val) {
+  if (typeof val === "boolean") return val;
+  return String(val).toLowerCase() === "true" || val === "1";
+}
+
+
+function validateRow(row, index) {
+  const errors = [];
+  const rowLabel = `Row ${index + 2}`;
+
+  if (!String(row.name ?? "").trim()) errors.push(`${rowLabel}: 'name' is required`);
+  if (!String(row.testType ?? "").trim()) errors.push(`${rowLabel}: 'testType' is required`);
+  if (!row.categoryId) errors.push(`${rowLabel}: 'categoryId' is required`);
+  if (row.actualPrice === "" || row.actualPrice === undefined || row.actualPrice === null)
+    errors.push(`${rowLabel}: 'actualPrice' is required`);
+  if (row.reportWithin === "" || row.reportWithin === undefined || row.reportWithin === null)
+    errors.push(`${rowLabel}: 'reportWithin' is required`);
+  if (!String(row.reportUnit ?? "").trim()) errors.push(`${rowLabel}: 'reportUnit' is required`);
+
+  return errors;
+}
+
+// ─── DOWNLOAD TEMPLATE ───────────────────────────────────────────────────────
+
+export const downloadBulkTemplate = (req, res) => {
+  const headers = [
+    "id", // ✅ Leave blank for CREATE, fill with exported ID for UPDATE
+    "name",
+    "actualPrice",
+    "offerPrice",
+    "discount",
+    "gender",
+    "description",
+    "alsoKnowAs",
+    "preparations",
+    "sampleRequired",
+    "features",
+    "testType",
+    "categoryId",
+    "subCategoryId",
+    "reportWithin",
+    "reportUnit",
+    "showIn",
+    "spotlight", // true / false
+    "sortOrder",
+    "departmentItemId",
+    "otherCategoryIds", // comma-separated e.g. "3,5,7"
+  ];
+
+  const sampleRow = [
+    "", // id — leave blank to CREATE, put existing ID to UPDATE
+    "Complete Blood Count",
+    299,
+    249,
+    16.72,
+    "Both",
+    "A complete blood count test",
+    "CBC",
+    "Fasting not required",
+    "Blood",
+    "Results in 24 hours",
+    "PATHOLOGY",
+    1,
+    "",
+    24,
+    "hours",
+    "TEST",
+    "false", // spotlight — "true" or "false"
+    0,
+    "",
+    "",
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
+
+  ws["!cols"] = headers.map(() => ({ wch: 20 }));
+
+  XLSX.utils.book_append_sheet(wb, ws, "Tests");
+
+  const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="tests_bulk_template.xlsx"',
+  );
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+  res.send(buffer);
+};
+// ─── BULK UPLOAD ─────────────────────────────────────────────────────────────
+
+
+export const bulkUploadTests = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const allowedTypes = [
+      "text/csv",
+      "application/csv",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+    ];
+    if (!allowedTypes.includes(req.file.mimetype)) {
+      return res
+        .status(400)
+        .json({ error: "Only CSV or Excel files are accepted" });
+    }
+
+    // ── Parse file ────────────────────────────────────────────────────────
+    let rows;
+    try {
+      rows = parseFile(req.file.buffer, req.file.mimetype);
+    } catch (e) {
+      return res
+        .status(400)
+        .json({ error: "Failed to parse file: " + e.message });
+    }
+
+    if (!rows.length) {
+      return res
+        .status(400)
+        .json({ error: "File is empty or has no data rows" });
+    }
+
+    // ── Validate all rows first ───────────────────────────────────────────
+    const allErrors = [];
+    rows.forEach((row, i) => {
+      const errs = validateRow(row, i);
+      allErrors.push(...errs);
+    });
+
+    if (allErrors.length) {
+      return res
+        .status(422)
+        .json({ error: "Validation failed", issues: allErrors });
+    }
+
+    // ── Prefetch valid IDs in bulk ────────────────────────────────────────
+
+    // Existing test IDs (for rows that want to UPDATE)
+    const incomingIds = rows
+      .map((r) => parseInt(r.id, 10))
+      .filter((n) => !isNaN(n) && n > 0);
+
+    const existingTests = incomingIds.length
+      ? await prisma.test.findMany({
+          where: { id: { in: incomingIds } },
+          select: { id: true },
+        })
+      : [];
+    const existingIdSet = new Set(existingTests.map((t) => t.id));
+
+    // Categories
+    const categoryIds = [
+      ...new Set(rows.map((r) => Number(r.categoryId)).filter(Boolean)),
+    ];
+    const validCategories = await prisma.category.findMany({
+      where: { id: { in: categoryIds } },
+      select: { id: true },
+    });
+    const validCategoryIdSet = new Set(validCategories.map((c) => c.id));
+
+    // SubCategories
+    const subCategoryIds = [
+      ...new Set(rows.map((r) => Number(r.subCategoryId)).filter(Boolean)),
+    ];
+    const validSubCategories = subCategoryIds.length
+      ? await prisma.subCategory.findMany({
+          where: { id: { in: subCategoryIds } },
+          select: { id: true },
+        })
+      : [];
+    const validSubCategoryIdSet = new Set(validSubCategories.map((s) => s.id));
+
+    // Department items
+    const deptIds = [
+      ...new Set(rows.map((r) => Number(r.departmentItemId)).filter(Boolean)),
+    ];
+    const validDeptItems = deptIds.length
+      ? await prisma.departmentItem.findMany({
+          where: { id: { in: deptIds } },
+          select: { id: true },
+        })
+      : [];
+    const validDeptIdSet = new Set(validDeptItems.map((d) => d.id));
+
+    // ── Process rows ──────────────────────────────────────────────────────
+    const results = { created: 0, updated: 0, failed: 0, errors: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowLabel = `Row ${i + 2}`;
+
+      try {
+        // ── Resolve & validate foreign keys ──────────────────────────────
+        const categoryId = Number(row.categoryId);
+        if (!validCategoryIdSet.has(categoryId)) {
+          results.failed++;
+          results.errors.push(
+            `${rowLabel}: categoryId ${categoryId} does not exist`,
+          );
+          continue;
+        }
+
+        const subCategoryId = row.subCategoryId
+          ? Number(row.subCategoryId)
+          : null;
+        if (subCategoryId && !validSubCategoryIdSet.has(subCategoryId)) {
+          results.failed++;
+          results.errors.push(
+            `${rowLabel}: subCategoryId ${subCategoryId} does not exist`,
+          );
+          continue;
+        }
+
+        const departmentItemId = row.departmentItemId
+          ? Number(row.departmentItemId)
+          : null;
+        if (departmentItemId && !validDeptIdSet.has(departmentItemId)) {
+          results.failed++;
+          results.errors.push(
+            `${rowLabel}: departmentItemId ${departmentItemId} does not exist`,
+          );
+          continue;
+        }
+
+        const otherIds = row.otherCategoryIds
+          ? String(row.otherCategoryIds)
+              .split(",")
+              .map((s) => parseInt(s.trim(), 10))
+              .filter((n) => !isNaN(n) && n !== categoryId)
+          : [];
+
+        // ── Shared scalar fields (no relation fields) ─────────────────────
+        // All values wrapped in String() to handle XLSX numeric cell types
+        const baseData = {
+          name: String(row.name ?? "").trim(),
+          actualPrice: toFloat(row.actualPrice),
+          offerPrice: toNullableFloat(row.offerPrice),
+          discount: toFloat(row.discount, 0),
+          gender: row.gender ? String(row.gender).trim() : null,
+          description: row.description ? String(row.description).trim() : null,
+          alsoKnowAs: row.alsoKnowAs ? String(row.alsoKnowAs).trim() : null,
+          preparations: row.preparations ? String(row.preparations).trim() : null,
+          sampleRequired: row.sampleRequired ? String(row.sampleRequired).trim() : null,
+          features: row.features ? String(row.features).trim() : null,
+          testType: String(row.testType ?? "").trim(),
+          reportWithin: toInt(row.reportWithin),
+          reportUnit: String(row.reportUnit ?? "hours").trim() || "hours",
+          showIn: row.showIn ? String(row.showIn).trim() : null,
+          spotlight: toBoolean(row.spotlight),
+          sortOrder: toInt(row.sortOrder) ?? 0,
+        };
+
+        // ── Decide: UPDATE or CREATE ──────────────────────────────────────
+        const incomingId = parseInt(row.id, 10);
+        const isUpdate = !isNaN(incomingId) && incomingId > 0;
+
+        if (isUpdate) {
+          // ── Row has an ID ─────────────────────────────────────────────
+          if (!existingIdSet.has(incomingId)) {
+            results.failed++;
+            results.errors.push(
+              `${rowLabel}: ID ${incomingId} not found — skipped. Remove the ID column value to create a new test instead.`,
+            );
+            continue;
+          }
+
+          // UPDATE: use nested connect/disconnect syntax for relations
+          await prisma.test.update({
+            where: { id: incomingId },
+            data: {
+              ...baseData,
+              // Required relation — always connect
+              category: { connect: { id: categoryId } },
+              // Optional relations — connect if present, disconnect if null
+              subCategory: subCategoryId
+                ? { connect: { id: subCategoryId } }
+                : { disconnect: true },
+              departmentItem: departmentItemId
+                ? { connect: { id: departmentItemId } }
+                : { disconnect: true },
+              // Replace otherCategories only if provided
+              ...(otherIds.length > 0 && {
+                otherCategories: {
+                  deleteMany: {},
+                  create: otherIds.map((cid) => ({ categoryId: cid })),
+                },
+              }),
+            },
+          });
+
+          results.updated++;
+        } else {
+          // CREATE: connect for required, omit optional if null (no disconnect)
+          await prisma.test.create({
+            data: {
+              ...baseData,
+              createdById: req.user?.id ?? null,
+              // Required relation — always connect
+              category: { connect: { id: categoryId } },
+              // Optional relations — connect only if present, omit entirely if null
+              ...(subCategoryId && {
+                subCategory: { connect: { id: subCategoryId } },
+              }),
+              ...(departmentItemId && {
+                departmentItem: { connect: { id: departmentItemId } },
+              }),
+              ...(otherIds.length > 0 && {
+                otherCategories: {
+                  create: otherIds.map((cid) => ({ categoryId: cid })),
+                },
+              }),
+            },
+          });
+
+          results.created++;
+        }
+      } catch (err) {
+        results.failed++;
+        results.errors.push(`${rowLabel}: ${err.message}`);
+      }
+    }
+
+    return res.status(200).json({
+      message: `Done. ${results.created} created, ${results.updated} updated, ${results.failed} failed.`,
+      ...results,
+    });
+  } catch (error) {
+    console.error("Bulk upload error:", error);
+    return res.status(500).json({ error: "Bulk upload failed" });
+  }
+};
+
+// Add to package.controller.js
+
+export const exportTests = async (req, res) => {
+  try {
+    const { search, categoryId, subCategoryId, testType, departmentItemId } =
+      req.query;
+
+    // ── Build same filters as getAllTests ──────────────────────────────────
+    const where = {};
+
+    if (search?.trim()) {
+      where.OR = [
+        { name: { contains: search.trim(), mode: "insensitive" } },
+        { description: { contains: search.trim(), mode: "insensitive" } },
+        { testType: { contains: search.trim(), mode: "insensitive" } },
+      ];
+    }
+
+    if (categoryId) where.categoryId = parseInt(categoryId, 10);
+    if (subCategoryId) where.subCategoryId = parseInt(subCategoryId, 10);
+    if (testType) where.testType = testType;
+    if (departmentItemId)
+      where.departmentItemId = parseInt(departmentItemId, 10);
+
+    // ── Fetch ALL matching (no pagination) ────────────────────────────────
+    const tests = await prisma.test.findMany({
+      where,
+      orderBy: [{ categoryId: "asc" }, { sortOrder: "asc" }, { name: "asc" }],
+      include: {
+        category: { select: { name: true } },
+        subCategory: { select: { name: true } },
+        departmentItem: { select: { name: true, type: true } },
+        otherCategories: { select: { categoryId: true } },
+      },
+    });
+
+    if (!tests.length) {
+      return res
+        .status(404)
+        .json({ error: "No tests found for the selected filters." });
+    }
+
+    const rows = tests.map((t) => ({
+      id: t.id, // ✅ for UPDATE
+      name: t.name,
+      actualPrice: t.actualPrice,
+      offerPrice: t.offerPrice ?? "",
+      discount: t.discount ?? 0,
+      gender: t.gender ?? "",
+      description: t.description ?? "",
+      alsoKnowAs: t.alsoKnowAs ?? "",
+      preparations: t.preparations ?? "",
+      sampleRequired: t.sampleRequired ?? "",
+      features: t.features ?? "",
+      testType: t.testType ?? "",
+      categoryId: t.categoryId,
+      subCategoryId: t.subCategoryId ?? "",
+      reportWithin: t.reportWithin,
+      reportUnit: t.reportUnit,
+      showIn: t.showIn ?? "",
+      spotlight: t.spotlight ? "true" : "false",
+      sortOrder: t.sortOrder ?? 0,
+      departmentItemId: t.departmentItemId ?? "",
+      otherCategoryIds: (t.otherCategories ?? [])
+        .map((o) => o.categoryId)
+        .join(","),
+    }));
+
+    // ── Build XLSX ────────────────────────────────────────────────────────
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+
+    // Auto column widths
+    const colWidths = Object.keys(rows[0]).map((key) => ({
+      wch:
+        Math.max(key.length, ...rows.map((r) => String(r[key] ?? "").length)) +
+        2,
+    }));
+    ws["!cols"] = colWidths;
+
+    // Freeze header row
+    ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+    XLSX.utils.book_append_sheet(wb, ws, "Tests");
+
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    // ── Send file ─────────────────────────────────────────────────────────
+    const filename = `tests_export_${new Date().toISOString().split("T")[0]}.xlsx`;
+
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Length", buffer.length);
+    res.send(buffer);
+  } catch (error) {
+    console.error("Export tests error:", error);
+    return res.status(500).json({ error: "Failed to export tests" });
+  }
+};
 /* =========================================================
    ADD TEST  ✅ now stores departmentItemId
 ========================================================= */
@@ -170,12 +633,20 @@ export const addTest = async (req, res) => {
       otherCategoryIds,
     } = req.body;
 
-    if (!name?.trim()) return res.status(400).json({ error: "Name is required" });
-    if (!categoryId) return res.status(400).json({ error: "categoryId is required" });
-    if (!testType) return res.status(400).json({ error: "testType is required" });
-    if (reportWithin === undefined || reportWithin === null || reportWithin === "")
+    if (!name?.trim())
+      return res.status(400).json({ error: "Name is required" });
+    if (!categoryId)
+      return res.status(400).json({ error: "categoryId is required" });
+    if (!testType)
+      return res.status(400).json({ error: "testType is required" });
+    if (
+      reportWithin === undefined ||
+      reportWithin === null ||
+      reportWithin === ""
+    )
       return res.status(400).json({ error: "reportWithin is required" });
-    if (!reportUnit) return res.status(400).json({ error: "reportUnit is required" });
+    if (!reportUnit)
+      return res.status(400).json({ error: "reportUnit is required" });
 
     // Upload image (optional)
     let imgUrl = null;
@@ -183,15 +654,18 @@ export const addTest = async (req, res) => {
 
     // Parse numeric values
     const actual = Number(actualPrice);
-    if (!Number.isFinite(actual)) return res.status(400).json({ error: "Invalid actualPrice" });
+    if (!Number.isFinite(actual))
+      return res.status(400).json({ error: "Invalid actualPrice" });
 
-    const finalOffer = offerPrice !== undefined && offerPrice !== null && offerPrice !== ""
-      ? Number(offerPrice)
-      : null;
+    const finalOffer =
+      offerPrice !== undefined && offerPrice !== null && offerPrice !== ""
+        ? Number(offerPrice)
+        : null;
 
-    const finalDiscount = discount !== undefined && discount !== null && discount !== ""
-      ? Number(discount)
-      : 0;
+    const finalDiscount =
+      discount !== undefined && discount !== null && discount !== ""
+        ? Number(discount)
+        : 0;
 
     const parsedCityWisePrice = parseJsonIfString(cityWisePrice);
     const finalSpotlight = parseBoolean(spotlight, false);
@@ -210,7 +684,8 @@ export const addTest = async (req, res) => {
         where: { id: Number(subCategoryId) },
         select: { id: true },
       });
-      if (!subCategory) return res.status(400).json({ error: "Invalid subCategoryId" });
+      if (!subCategory)
+        return res.status(400).json({ error: "Invalid subCategoryId" });
     }
 
     // ✅ Resolve departmentItemId
@@ -226,7 +701,7 @@ export const addTest = async (req, res) => {
 
     // ✅ Parse other categories
     const otherIds = parseIdsArray(otherCategoryIds).filter(
-      (id) => id !== Number(category.id)
+      (id) => id !== Number(category.id),
     );
 
     const test = await prisma.test.create({
@@ -260,9 +735,10 @@ export const addTest = async (req, res) => {
         spotlight: finalSpotlight,
         features: features ?? null,
 
-        sortOrder: sortOrder !== undefined && sortOrder !== null && sortOrder !== ""
-          ? Number(sortOrder)
-          : 0,
+        sortOrder:
+          sortOrder !== undefined && sortOrder !== null && sortOrder !== ""
+            ? Number(sortOrder)
+            : 0,
 
         otherCategories: otherIds.length
           ? {
@@ -477,7 +953,9 @@ export const searchTestsGrouped = async (req, res) => {
     return res.json({ success: true, data: grouped });
   } catch (error) {
     console.error("Error grouping tests:", error);
-    return res.status(500).json({ success: false, message: "Failed to group tests" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to group tests" });
   }
 };
 
@@ -682,18 +1160,24 @@ export const updateTest = async (req, res) => {
         where: { id: Number(categoryId) },
         select: { id: true },
       });
-      if (!category) return res.status(400).json({ error: "Invalid categoryId" });
+      if (!category)
+        return res.status(400).json({ error: "Invalid categoryId" });
       finalCategoryId = category.id;
     }
 
     // subcategory validate
     let finalSubCategoryId = existing.subCategoryId;
-    if (subCategoryId !== undefined && subCategoryId !== null && subCategoryId !== "") {
+    if (
+      subCategoryId !== undefined &&
+      subCategoryId !== null &&
+      subCategoryId !== ""
+    ) {
       const subCategory = await prisma.subCategory.findUnique({
         where: { id: Number(subCategoryId) },
         select: { id: true },
       });
-      if (!subCategory) return res.status(400).json({ error: "Invalid subCategoryId" });
+      if (!subCategory)
+        return res.status(400).json({ error: "Invalid subCategoryId" });
       finalSubCategoryId = subCategory.id;
     }
 
@@ -731,17 +1215,22 @@ export const updateTest = async (req, res) => {
         ? Number(offerPrice)
         : existing.offerPrice;
 
-    const finalSpotlight = spotlight !== undefined ? parseBoolean(spotlight, existing.spotlight) : existing.spotlight;
+    const finalSpotlight =
+      spotlight !== undefined
+        ? parseBoolean(spotlight, existing.spotlight)
+        : existing.spotlight;
 
     // cityWisePrice
     const parsedCityWisePrice =
-      cityWisePrice !== undefined && cityWisePrice !== null && cityWisePrice !== ""
+      cityWisePrice !== undefined &&
+      cityWisePrice !== null &&
+      cityWisePrice !== ""
         ? parseJsonIfString(cityWisePrice)
         : existing.cityWisePrice;
 
     // other categories replace
     const otherIds = parseIdsArray(otherCategoryIds).filter(
-      (cid) => cid !== Number(finalCategoryId)
+      (cid) => cid !== Number(finalCategoryId),
     );
 
     const data = {
@@ -779,7 +1268,11 @@ export const updateTest = async (req, res) => {
 
     if (features !== undefined) data.features = features;
 
-    if (reportWithin !== undefined && reportWithin !== null && reportWithin !== "") {
+    if (
+      reportWithin !== undefined &&
+      reportWithin !== null &&
+      reportWithin !== ""
+    ) {
       data.reportWithin = Number(reportWithin);
     }
 
@@ -839,7 +1332,8 @@ export const deleteTest = async (req, res) => {
     if (error?.code === "P2003") {
       if (error?.meta?.constraint === "PatientTestResult_testId_fkey") {
         return res.status(409).json({
-          error: "You can’t delete this test because patient results are already created for it.",
+          error:
+            "You can’t delete this test because patient results are already created for it.",
           code: "TEST_IN_USE",
         });
       }
@@ -861,7 +1355,8 @@ export const getTestsByCategory = async (req, res) => {
     const { categoryId } = req.params;
     const catId = Number(categoryId);
 
-    if (!catId) return res.status(400).json({ error: "Valid Category ID is required" });
+    if (!catId)
+      return res.status(400).json({ error: "Valid Category ID is required" });
 
     const category = await prisma.category.findUnique({
       where: { id: catId },
@@ -880,7 +1375,10 @@ export const getTestsByCategory = async (req, res) => {
         subCategory: true,
         departmentItem: { select: { id: true, name: true, type: true } }, // ✅
         otherCategories: {
-          select: { categoryId: true, category: { select: { id: true, name: true } } },
+          select: {
+            categoryId: true,
+            category: { select: { id: true, name: true } },
+          },
         },
         _count: { select: { parameters: true } },
       },
@@ -918,7 +1416,9 @@ export const getTestsBySubCategory = async (req, res) => {
     return res.json(tests);
   } catch (error) {
     console.error("Error fetching tests by subcategory:", error);
-    return res.status(500).json({ error: "Failed to fetch tests by subcategory" });
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch tests by subcategory" });
   }
 };
 
@@ -964,9 +1464,6 @@ export const getHomeMostBooked = async (req, res) => {
   }
 };
 
-
-
-
 // ✅ BULK DISCOUNT (Postgres + Prisma) — updates discount% + offerPrice only
 export const bulkDiscount = async (req, res) => {
   try {
@@ -981,7 +1478,11 @@ export const bulkDiscount = async (req, res) => {
     // Build WHERE (any combination)
     const where = {};
 
-    if (departmentItemId !== undefined && departmentItemId !== null && departmentItemId !== "") {
+    if (
+      departmentItemId !== undefined &&
+      departmentItemId !== null &&
+      departmentItemId !== ""
+    ) {
       const depId = Number(departmentItemId);
       if (!Number.isFinite(depId)) {
         return res.status(400).json({ message: "Invalid departmentItemId" });
@@ -997,14 +1498,19 @@ export const bulkDiscount = async (req, res) => {
       where.categoryId = catId;
     }
 
-    if (testType !== undefined && testType !== null && String(testType).trim() !== "") {
+    if (
+      testType !== undefined &&
+      testType !== null &&
+      String(testType).trim() !== ""
+    ) {
       where.testType = String(testType).trim();
     }
 
     // Optional safety: require at least one filter
     if (!where.departmentItemId && !where.categoryId && !where.testType) {
       return res.status(400).json({
-        message: "Please select at least one filter: departmentItemId or categoryId or testType",
+        message:
+          "Please select at least one filter: departmentItemId or categoryId or testType",
       });
     }
 
@@ -1024,8 +1530,8 @@ export const bulkDiscount = async (req, res) => {
       return prisma.test.update({
         where: { id: t.id },
         data: {
-          discount: fields.discount,      // ✅ percent always
-          offerPrice: fields.offerPrice,  // ✅ computed final price
+          discount: fields.discount, // ✅ percent always
+          offerPrice: fields.offerPrice, // ✅ computed final price
         },
       });
     });

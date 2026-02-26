@@ -265,113 +265,159 @@ export const getCouponById = async (req, res) => {
   }
 };
 
-/* ---------------------------------------------------------
-   UPDATE COUPON (✅ updates categories safely)
---------------------------------------------------------- */
 export const updateCoupon = async (req, res) => {
   try {
     const { id } = req.params;
-    const data = req.body;
+    const body = req.body;
+
+    const couponId = Number(id);
+    if (!Number.isFinite(couponId)) {
+      return res.status(400).json({ error: "Invalid coupon id" });
+    }
 
     const old = await prisma.coupon.findUnique({
-      where: { id: Number(id) },
+      where: { id: couponId },
       include: { categories: true },
     });
     if (!old) return res.status(404).json({ error: "Coupon not found" });
 
-    if (data.code && data.code.toUpperCase() !== old.code) {
+    // ✅ code uniqueness
+    if (body.code && body.code.toUpperCase() !== old.code) {
       const exists = await prisma.coupon.findUnique({
-        where: { code: data.code.toUpperCase() },
+        where: { code: body.code.toUpperCase() },
       });
       if (exists) return res.status(400).json({ error: "Coupon code already exists" });
     }
 
-    // Validate dates
+    // ✅ determine patient coupon
     const nextIsPatientCoupon =
-      typeof data.isPatientCoupon === "boolean" ? data.isPatientCoupon : old.isPatientCoupon;
+      typeof body.isPatientCoupon === "boolean" ? body.isPatientCoupon : old.isPatientCoupon;
 
-    if (!nextIsPatientCoupon) {
-      if (data.validFrom && data.validUntil) {
-        if (new Date(data.validUntil) <= new Date(data.validFrom)) {
-          return res.status(400).json({ error: "Valid until must be after valid from" });
-        }
+    // ✅ validate dates for non-patient coupon
+    if (!nextIsPatientCoupon && body.validFrom && body.validUntil) {
+      if (new Date(body.validUntil) <= new Date(body.validFrom)) {
+        return res.status(400).json({ error: "Valid until must be after valid from" });
       }
     }
 
-    // ✅ category update logic
-    const scope = data.categoryScope ? normalizeCategoryScope(data.categoryScope) : old.categoryScope;
-    const catIds = Array.isArray(data.categoryIds)
-      ? data.categoryIds.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0)
+    // ✅ category updates
+    const scope = body.categoryScope
+      ? normalizeCategoryScope(body.categoryScope)
+      : old.categoryScope;
+
+    const catIds = Array.isArray(body.categoryIds)
+      ? body.categoryIds
+          .map((x) => Number(x))
+          .filter((x) => Number.isFinite(x) && x > 0)
       : null; // null => not changing categories
 
-    if (data.categoryScope && scope !== "ALL" && (!catIds || catIds.length === 0)) {
-      return res.status(400).json({ error: "categoryIds required when categoryScope is INCLUDE/EXCLUDE" });
+    // If scope changed to INCLUDE/EXCLUDE => must include categoryIds
+    if (body.categoryScope && scope !== "ALL" && (!catIds || catIds.length === 0)) {
+      return res
+        .status(400)
+        .json({ error: "categoryIds required when categoryScope is INCLUDE/EXCLUDE" });
     }
 
-    // If scope changed to ALL => clear mappings
-    const shouldClearCategories = data.categoryScope && scope === "ALL";
+    // ✅ IMPORTANT: remove categoryIds from update payload (Prisma doesn't know it)
+    const {
+      categoryIds, // eslint-disable-line no-unused-vars
+      categories,  // prevent client sending relation object directly
+      usedCount,   // prevent accidental updates
+      couponUsages,
+      ...safeBody
+    } = body;
 
-    // If categoryIds provided => replace mappings
+    const shouldClearCategories = body.categoryScope && scope === "ALL";
     const shouldReplaceCategories = Array.isArray(catIds);
 
     const updated = await prisma.$transaction(async (tx) => {
-      // delete mappings if needed
+      // 1) delete mappings if needed
       if (shouldClearCategories || shouldReplaceCategories) {
         await tx.couponCategory.deleteMany({
-          where: { couponId: Number(id) },
+          where: { couponId },
         });
       }
 
-      // create new mappings if replacing and scope != ALL
+      // 2) recreate mappings if categoryIds provided and scope != ALL
       if (shouldReplaceCategories && scope !== "ALL") {
         await tx.couponCategory.createMany({
           data: catIds.map((categoryId) => ({
-            couponId: Number(id),
+            couponId,
             categoryId,
           })),
           skipDuplicates: true,
         });
       }
 
-      // update coupon main fields
+      // 3) update coupon fields (no categoryIds here!)
       const up = await tx.coupon.update({
-        where: { id: Number(id) },
+        where: { id: couponId },
         data: {
-          ...data,
+          ...safeBody,
 
-          code: data.code ? data.code.toUpperCase() : old.code,
-          discountValue: data.discountValue != null ? Number(data.discountValue) : old.discountValue,
-          minOrderAmount: data.minOrderAmount != null ? Number(data.minOrderAmount) : old.minOrderAmount,
-          maxDiscount: data.maxDiscount != null ? Number(data.maxDiscount) : old.maxDiscount,
+          code: safeBody.code ? safeBody.code.toUpperCase() : old.code,
+
+          discountValue:
+            safeBody.discountValue != null
+              ? Number(safeBody.discountValue)
+              : old.discountValue,
+
+          minOrderAmount:
+            safeBody.minOrderAmount === "" || safeBody.minOrderAmount == null
+              ? null
+              : Number(safeBody.minOrderAmount),
+
+          maxDiscount:
+            safeBody.maxDiscount === "" || safeBody.maxDiscount == null
+              ? null
+              : Number(safeBody.maxDiscount),
+
+          usageLimit:
+            safeBody.usageLimit === "" || safeBody.usageLimit == null
+              ? null
+              : Number(safeBody.usageLimit),
+
+          perUserLimit:
+            safeBody.perUserLimit === "" || safeBody.perUserLimit == null
+              ? null
+              : Number(safeBody.perUserLimit),
 
           categoryScope: scope,
 
           validFrom: nextIsPatientCoupon
             ? null
-            : data.validFrom
-            ? new Date(data.validFrom)
+            : safeBody.validFrom
+            ? new Date(safeBody.validFrom)
             : old.validFrom,
 
           validUntil: nextIsPatientCoupon
             ? null
-            : data.validUntil
-            ? new Date(data.validUntil)
+            : safeBody.validUntil
+            ? new Date(safeBody.validUntil)
             : old.validUntil,
 
-          patientId: nextIsPatientCoupon ? Number(data.patientId || old.patientId) : null,
+          isPatientCoupon: nextIsPatientCoupon,
+
+          patientId: nextIsPatientCoupon
+            ? Number(safeBody.patientId ?? old.patientId)
+            : null,
         },
         include: {
-          categories: { include: { category: { select: { id: true, name: true } } } },
+          categories: {
+            include: {
+              category: { select: { id: true, name: true } },
+            },
+          },
         },
       });
 
       return up;
     });
 
-    res.json({ message: "Coupon updated", coupon: updated });
+    return res.json({ message: "Coupon updated", coupon: updated });
   } catch (error) {
     console.error("Error updating coupon:", error);
-    res.status(500).json({ error: "Failed to update coupon" });
+    return res.status(500).json({ error: "Failed to update coupon" });
   }
 };
 

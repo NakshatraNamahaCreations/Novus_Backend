@@ -14,7 +14,16 @@ import {
   getAllCentersforadmin,
   getCenterCategories,
   getCenterCategoryCommissions,
-  upsertCenterCategoryCommissions
+  upsertCenterCategoryCommissions,
+
+  upsertCenterSlotDayConfig,
+  bulkUpsertCenterSlotDayConfig,
+  getCenterSlotDayConfigs,
+  deleteCenterSlotDayConfig,
+  upsertCenterSlotDateOverride,
+  bulkUpsertCenterSlotDateOverride,
+  getCenterSlotDateOverrides,
+  deleteCenterSlotDateOverride,
 } from "./center.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -26,10 +35,22 @@ router.get("/nearby", getNearbyCenters);
 router.post("/", authenticateUser, createCenter);
 router.post("/:id/categories", assignCategoriesToCenter);
 router.get("/:id/categories", getCenterCategories);
+
 router.post("/:id/slots", createCenterSlot);
 router.get("/:id/slots", getCenterSlots);
 router.put("/slot/:slotId", updateCenterSlot);
 router.delete("/slot/:slotId", deleteCenterSlot);
+// weekly config
+router.post("/slot/:slotId/day-config", upsertCenterSlotDayConfig);
+router.post("/slot/:slotId/day-config/bulk", bulkUpsertCenterSlotDayConfig);
+router.get("/slot/:slotId/day-config", getCenterSlotDayConfigs);
+router.delete("/slot/:slotId/day-config/:dayOfWeek", deleteCenterSlotDayConfig);
+
+// date override
+router.post("/slot/:slotId/date-override", upsertCenterSlotDateOverride);
+router.post("/slot/:slotId/date-override/bulk", bulkUpsertCenterSlotDateOverride);
+router.get("/slot/:slotId/date-override", getCenterSlotDateOverrides);
+router.delete("/slot/:slotId/date-override/:date", deleteCenterSlotDateOverride);
 
 // READ ALL
 router.get("/", getAllCenters);

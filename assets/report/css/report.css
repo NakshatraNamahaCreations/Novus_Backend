@@ -7,7 +7,7 @@
   --patient-strip-h: 140px;
   --pad-x: 14mm;
 
-  --primary-blue: #2c5f8d;
+
   --accent-orange: #ff6b35;
   --text-dark: #1a1a1a;
   --text-gray: #666666;
@@ -64,10 +64,9 @@
 
 /* ===============================
    PAGE SETUP — INDEX ONLY PAGE
-   No running header, patient stripe, or footer.
    =============================== */
 @page indexpage {
- size: A4;
+  size: A4;
   margin: 0 var(--pad-x) 14mm var(--pad-x);
 
   @top    { content: none; }
@@ -110,7 +109,6 @@ p { font-size: 13; }
 }
 
 /* ── Index page header image ── */
-/* ── Index page header image — full bleed ── */
 .idx-header-img {
   width: calc(100% + var(--pad-x) * 2);
   height: var(--header-h);
@@ -165,16 +163,14 @@ p { font-size: 13; }
 
 /* ===============================
    INDEX ONLY PAGE
-   @page indexpage — no running header/footer
    =============================== */
 .index-only-page {
   page: indexpage;
-  /* No page-break-before — named page transition is automatic in PrinceXML */
 }
 
 /* ── Patient strip on index page ── */
 .idx-patient-strip {
-  border: 1.5px solid var(--primary-blue);
+  border: 1.5px solid var(--text-dark);
   border-radius: 6px;
   padding: 10px 14px 12px;
   margin-bottom: 18px;
@@ -185,7 +181,7 @@ p { font-size: 13; }
 .idx-patient-title {
   font-size: 11px;
   font-weight: 700;
-  color: var(--primary-blue);
+  color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding-bottom: 6px;
@@ -233,7 +229,7 @@ p { font-size: 13; }
   justify-content: space-between;
   margin-bottom: 16px;
   padding-bottom: 10px;
-  border-bottom: 2px solid var(--primary-blue);
+  border-bottom: 2px solid var(--text-dark);
 }
 
 .idx-page-title {
@@ -248,7 +244,7 @@ p { font-size: 13; }
   color: #888;
 }
 
-.idx-page-sub strong { color: var(--primary-blue); }
+.idx-page-sub strong { color: var(--text-dark); }
 
 /* ── Department section ── */
 .idx-section { margin-bottom: 18px; }
@@ -259,7 +255,7 @@ p { font-size: 13; }
   gap: 8px;
   padding: 7px 14px;
   background: #eef2ff;
-  border-left: 4px solid var(--primary-blue);
+ 
   border-radius: 0 4px 4px 0;
   margin-bottom: 0;
 }
@@ -268,14 +264,14 @@ p { font-size: 13; }
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--primary-blue);
+  background: var(--text-dark);
   flex-shrink: 0;
 }
 
 .idx-dept-name {
   font-size: 11px;
   font-weight: 700;
-  color: var(--primary-blue);
+  color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.6px;
   flex: 1;
@@ -321,7 +317,7 @@ p { font-size: 13; }
 .th-num  { width: 36px; }
 .th-name { width: auto; }
 .th-type { width: 110px; }
-.th-page       { width: 40px; text-align: center; }
+.th-page { width: 40px; text-align: center; }
 
 .idx-num {
   color: #bbb;
@@ -329,7 +325,6 @@ p { font-size: 13; }
   font-weight: 600;
 }
 
-/* Clickable test name */
 .idx-name-cell { color: #1a1a2e; }
 
 .idx-test-link {
@@ -342,7 +337,7 @@ p { font-size: 13; }
 }
 
 .idx-test-link:hover {
-  color: var(--primary-blue);
+  color: var(--text-dark);
   text-decoration: underline;
 }
 
@@ -368,7 +363,6 @@ p { font-size: 13; }
 .badge-radiology { background: #e8f4fd; color: #1a6fa8; }
 .badge-pathology  { background: #eafaf1; color: #1a7a4a; }
 
-/* Page number column */
 .idx-page-cell { text-align: center; width: 40px; }
 
 .idx-page-link {
@@ -378,29 +372,32 @@ p { font-size: 13; }
   color: #aaa;
   text-decoration: none;
 }
-.idx-page-link:hover { color: var(--primary-blue); }
+.idx-page-link:hover { color: var(--text-dark); }
 .idx-link-icon { width: 13px; height: 13px; display: block; }
+
 /* ── Notice box ── */
 .idx-notice {
   margin-top: 20px;
   padding: 10px 14px;
   background: #fffbf0;
   border: 1px solid #fde68a;
-  border-left: 4px solid #f59e0b;
+
   border-radius: 0 6px 6px 0;
   display: flex;
   align-items: flex-start;
   gap: 10px;
 }
+
 .radio-html img {
   max-width: 100%;
-  max-height: 500px;      /* optional height cap */
+  max-height: 500px;
   width: auto;
   height: auto;
   display: block;
-  margin: 0 auto;         /* center it */
+  margin: 0 auto;
   object-fit: contain;
 }
+
 .idx-notice-icon {
   font-size: 13px;
   color: #d97706;
@@ -413,17 +410,19 @@ p { font-size: 13; }
   color: #78580a;
   line-height: 1.6;
 }
+
 .dept-group + .dept-group {
   page-break-before: always;
 }
 
+/* ✅ Radiology: hide department name banner and test name title */
+.dept-group-radiology .dept-header { display: none; }
+.dept-group-radiology .section-title { display: none; }
+
 /* ===============================
    RESULTS PAGE
-   @page default — header+footer run here
    =============================== */
-.results-page {
-  /* No page-break-before — named page transition is automatic */
-}
+.results-page { }
 
 .results-page .content {
   padding-top: 4px;
@@ -433,7 +432,7 @@ p { font-size: 13; }
    PATIENT STRIP (running header)
    =============================== */
 .patient-strip {
-  border: 1.5px solid var(--primary-blue);
+  border: 1.5px solid var(--text-dark);
   border-radius: 4px;
   padding: 8px 12px 10px;
   margin: 0;
@@ -445,7 +444,7 @@ p { font-size: 13; }
   font-weight: 700;
   font-size: 11px;
   margin-bottom: 6px;
-  color: var(--primary-blue);
+  color: var(--text-dark);
   padding-bottom: 5px;
   border-bottom: 1px solid var(--border-light);
   text-transform: uppercase;
@@ -487,17 +486,20 @@ p { font-size: 13; }
 .dept-header {
   margin: 18px 0 6px 0;
   padding: 6px 13px;
-  background: #eef2ff;
-  border-left: 4px solid var(--primary-blue);
+  background: transparent;         /* ✅ removed #eef2ff bg */
+ 
   border-radius: 0 4px 4px 0;
 }
 
 .dept-header-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--primary-blue);
+  color: var(--text-dark);        /* ✅ was var(--text-dark) */
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  text-align: center;             /* ✅ centered */
+  display: block;                 /* ✅ needed for text-align to work */
+  width: 100%;
 }
 
 /* ===============================
@@ -506,6 +508,7 @@ p { font-size: 13; }
 .section { margin-bottom: 20px; }
 .section.keep-together { page-break-inside: avoid; }
 
+/* ✅ FIXED: removed background color and left border from test title row */
 .test-title-row {
   display: flex;
   justify-content: space-between;
@@ -513,8 +516,8 @@ p { font-size: 13; }
   margin-top: 12px;
   margin-bottom: 0;
   padding: 12px 14px;
-  background: var(--bg-light);
-  border-left: 3px solid var(--accent-orange);
+  background: transparent;        /* ✅ was var(--bg-light) */
+  border-left: none;               /* ✅ was 3px solid var(--accent-orange) */
   border-bottom: 1px solid var(--border-light);
   page-break-after: avoid;
   page-break-inside: avoid;
@@ -535,7 +538,7 @@ p { font-size: 13; }
   color: var(--text-dark);
   padding: 10px 14px;
   background: var(--bg-light);
-  border-left: 3px solid var(--accent-orange);
+
   border-bottom: 1px solid var(--border-light);
   page-break-after: avoid;
   page-break-inside: avoid;
@@ -554,10 +557,10 @@ p { font-size: 13; }
   background: var(--bg-white);
 }
 
-.tbl thead { background: var(--bg-light); }
+.tbl thead { background: transparent; } /* ✅ removed bg */
 
 .tbl th {
-  padding: 10px 12px;
+  padding: 6px 12px;               /* ✅ reduced from 10px */
   text-align: left;
   font-weight: 700;
   font-size: 11px;
@@ -575,7 +578,7 @@ p { font-size: 13; }
 .tbl tbody tr:hover { background: #f0f7ff; }
 
 .tbl td {
-  padding: 10px 12px;
+  padding: 6px 12px;               /* ✅ reduced from 10px */
   font-size: 12px;
   vertical-align: middle;
   color: var(--text-dark);
@@ -588,11 +591,10 @@ p { font-size: 13; }
 /* ── Parameter name cell ── */
 .param-name-cell {
   vertical-align: top;
-  padding: 10px 12px !important;
+  padding: 6px 12px !important;    /* ✅ reduced from 10px */
 }
 
 .param-name {
-
   color: black;
   margin-bottom: 4px;
   font-size: 12px;
@@ -676,7 +678,6 @@ p { font-size: 13; }
 .section.radiology { margin-bottom: 20px; }
 
 .radio-html {
-  /* border: 1px solid var(--border-light); */
   padding: 14px;
   font-size: 12px;
   line-height: 1.6;
@@ -714,7 +715,6 @@ p { font-size: 13; }
   margin-top: 20px;
   padding: 16px 12px;
   page-break-inside: avoid;
-  /* border-top: 2px solid var(--border-light); */
   background: var(--bg-white);
 }
 
@@ -767,26 +767,28 @@ p { font-size: 13; }
 
 /* ===============================
    TRENDS SECTION
+   ✅ FIXED: always starts on a new page
    =============================== */
 .trends-section {
   margin-top: 28px;
   margin-bottom: 22px;
   page-break-inside: avoid;
+  page-break-before: always;   /* ✅ NEW: force new page before trends */
 }
 
 .trends-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 14px;
-  background: linear-gradient(135deg, #2c5f8d 0%, #3a7bb8 100%);
-  border-radius: 6px 6px 0 0;
+  padding: 10px 14px;
+  background: transparent;                        /* ✅ removed blue gradient */
+  border-bottom: 2px solid var(--text-dark);   /* ✅ just a bottom border */
 }
 
 .trends-title {
   font-size: 13px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-dark);                     /* ✅ was white */
   text-transform: uppercase;
   letter-spacing: 0.6px;
   display: flex;
@@ -794,16 +796,19 @@ p { font-size: 13; }
   gap: 8px;
 }
 
-.trends-title::before { content: "📊"; font-size: 16px; }
+.trends-title::before { content: ""; font-size: 0; } /* ✅ removed emoji icon */
 
-.trends-subtitle { font-size: 11px; color: rgba(255,255,255,.85); font-weight: 500; }
+.trends-subtitle {
+  font-size: 11px;
+  color: var(--text-gray);                        /* ✅ was white/transparent */
+  font-weight: 500;
+}
 
 .trends-table-wrapper {
   border: 1px solid var(--border-light);
-  border-top: none;
   border-radius: 0 0 6px 6px;
   overflow: hidden;
-  background: var(--bg-white);
+  background: transparent;          /* ✅ removed bg-white */
 }
 
 .trends-table {
@@ -813,14 +818,14 @@ p { font-size: 13; }
   margin: 0;
 }
 
-.trends-table thead { background: var(--trend-bg); }
+.trends-table thead { background: transparent; } /* ✅ removed #f8f9fa */
 
 .trends-table th {
   padding: 10px 12px;
   text-align: left;
   font-weight: 700;
   font-size: 10px;
-  color: var(--primary-blue);
+  color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
@@ -829,22 +834,23 @@ p { font-size: 13; }
 .trends-table th:not(:first-child) { text-align: center; width: 20%; }
 
 .trends-table tbody tr.trend-test-header {
-  background: var(--bg-light);
-  border-top: 2px solid var(--primary-blue);
+  background: transparent;           /* ✅ removed var(--bg-light) */
+  border-top: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
 }
 
 .trends-table tbody tr.trend-test-header td {
   padding: 8px 12px;
   font-weight: 700;
   font-size: 11px;
-  color: var(--primary-blue);
+  color: var(--text-dark);           /* ✅ was primary-blue */
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
 
 .trends-table tbody tr:last-child { border-bottom: none; }
-.trends-table tbody tr:nth-child(even):not(.trend-test-header) { background: #fafafa; }
-.trends-table tbody tr:hover:not(.trend-test-header) { background: #f0f7ff; }
+.trends-table tbody tr:nth-child(even):not(.trend-test-header) { background: transparent; } /* ✅ removed #fafafa */
+.trends-table tbody tr:hover:not(.trend-test-header) { background: transparent; }
 
 .trends-table td {
   padding: 9px 12px;
@@ -882,7 +888,7 @@ p { font-size: 13; }
   text-align: center;
   margin-bottom: 14px;
   padding-bottom: 10px;
-  border-bottom: 2px solid var(--primary-blue);
+  border-bottom: 2px solid var(--text-dark);
   letter-spacing: 0.6px;
   text-transform: uppercase;
 }

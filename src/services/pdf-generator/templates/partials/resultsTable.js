@@ -1,5 +1,5 @@
 // ============================================================
-//  resultsTableHtml.js  —  Complete results renderer
+//  templates/partials/resultsTable.js  —  PDF results renderer
 // ============================================================
 
 function esc(s) {
@@ -37,26 +37,69 @@ function formatUnit(pr) {
   return pr?.unit ?? pr?.parameter?.unit ?? pr?.uom ?? "";
 }
 
+// ✅ FIXED: Priority order for reference range display:
+//   1. Numeric lowerLimit / upperLimit  → e.g. "9 - 10"
+//   2. normalValueHtml                  → rendered as HTML
+//   3. specialConditionHtml             → rendered as HTML
+//
+// ❌ REMOVED: r0.referenceRange is the AGE KEY (e.g. "2_years_to_10_years")
+//             used only for filtering — NEVER show it as display text.
+// ❌ REMOVED: pr?.normalRangeText — was storing age key, not display text.
 function formatRefFromPRorItem(pr, itemParam) {
-  const prRef = pr?.normalRangeText ?? pr?.referenceRange ?? "";
-  if (prRef && String(prRef).trim()) return String(prRef);
-
   const ranges = itemParam?.ranges || [];
-  if (ranges?.length) {
+
+  if (ranges.length) {
     const r0 = ranges[0];
-    if (r0?.referenceRange && String(r0.referenceRange).trim())
-      return String(r0.referenceRange);
+
+    // Priority 1: numeric limits
     const hasLower = r0?.lowerLimit !== null && r0?.lowerLimit !== undefined;
     const hasUpper = r0?.upperLimit !== null && r0?.upperLimit !== undefined;
+
     if (hasLower || hasUpper) {
       const lower = hasLower ? String(r0.lowerLimit) : "";
       const upper = hasUpper ? String(r0.upperLimit) : "";
-      return `${lower}${lower && upper ? " - " : ""}${upper}`.trim();
+      const text = `${lower}${lower && upper ? " - " : ""}${upper}`.trim();
+      if (text && text !== "-") return text;
     }
-    if (r0?.normalValueHtml && String(r0.normalValueHtml).trim())
+
+    // Priority 2: normalValueHtml
+    if (r0?.normalValueHtml && String(r0.normalValueHtml).trim()) {
       return String(r0.normalValueHtml);
+    }
+
+    // Priority 3: specialConditionHtml
+    if (r0?.specialConditionHtml && String(r0.specialConditionHtml).trim()) {
+      return String(r0.specialConditionHtml);
+    }
   }
+
   return "";
+}
+
+// ✅ Inject inline styles into HTML tables inside ref-range cells
+//    so they render correctly in PDF without external CSS dependency
+function injectRefHtmlStyles(html) {
+  if (!html) return "";
+  return html
+    // table
+    .replace(
+      /<table([^>]*)>/gi,
+      `<table$1 style="border-collapse:collapse;font-size:11px;width:100%;margin:0;">`
+    )
+    // td / th
+    .replace(
+      /<td([^>]*)>/gi,
+      `<td$1 style="border:1px solid #cbd5e1;padding:4px 6px;vertical-align:top;font-size:11px;font-style:normal;">`
+    )
+    .replace(
+      /<th([^>]*)>/gi,
+      `<th$1 style="border:1px solid #cbd5e1;padding:4px 6px;background:#f1f5f9;font-size:11px;font-weight:600;">`
+    )
+    // p inside ref cells — remove extra margin
+    .replace(
+      /<p([^>]*)>/gi,
+      `<p$1 style="margin:2px 0;font-size:11px;font-style:normal;">`
+    );
 }
 
 function renderNotesBlock(notes) {
@@ -235,6 +278,33 @@ function generateAllTrendsSection(pathologyResults, trendMap) {
   `;
 }
 
+// ── Helper: build result cell content ────────────────────────
+// ✅ FIX: only show unit when value is non-empty
+function buildResultCell(value, unit, valueClass) {
+  const hasValue = value !== null && value !== undefined && String(value).trim() !== "";
+  if (!hasValue) {
+    return `<td class="${valueClass}">—</td>`;
+  }
+  return `<td class="${valueClass}">${esc(value)}${unit ? " " + esc(unit) : ""}</td>`;
+}
+
+// ── Helper: build reference range cell content ────────────────
+// ✅ FIX: inject inline styles into HTML so tables render properly in PDF
+function buildRefCell(refRaw) {
+  if (!refRaw || !String(refRaw).trim()) {
+    return `<td class="ref-range"></td>`;
+  }
+
+  const refIsHtml = /<\/?[a-z][\s\S]*>/i.test(refRaw);
+
+  if (refIsHtml) {
+    const styledHtml = injectRefHtmlStyles(sanitizeHtml(refRaw));
+    return `<td class="ref-range ref-html">${styledHtml}</td>`;
+  }
+
+  return `<td class="ref-range">${esc(refRaw)}</td>`;
+}
+
 // ── Pathology table (reportItems-driven) ─────────────────────
 function renderPathologyUsingReportItems(result) {
   const testName     = result?.test?.name || "Lab Test";
@@ -253,13 +323,13 @@ function renderPathologyUsingReportItems(result) {
       const method     = pr?.parameter?.method ?? pr?.method ?? "";
       const value      = formatValue(pr);
       const unit       = formatUnit(pr);
-      const refRaw     = pr?.normalRangeText ?? "";
-      const refIsHtml  = refRaw && /<\/?[a-z][\s\S]*>/i.test(refRaw);
-      const refContent = refIsHtml ? sanitizeHtml(refRaw) : esc(refRaw);
       const flag       = pr?.flag;
       const isHigh     = flag && (flag === "HIGH" || flag === "HH");
       const isLow      = flag && (flag === "LOW"  || flag === "LL");
       const valueClass = isHigh ? "abnormal-value high" : isLow ? "abnormal-value low" : "";
+
+      // ✅ FIXED: use ranges from parameter, not normalRangeText (age key)
+      const refRaw = formatRefFromPRorItem(pr, pr?.parameter);
 
       return `
         <tr>
@@ -267,12 +337,8 @@ function renderPathologyUsingReportItems(result) {
             <div class="param-name">${esc(pname)}</div>
             ${method ? `<div class="param-method">${esc(method)}</div>` : ""}
           </td>
-          <td class="${valueClass}">
-            ${esc(value)}${unit ? " " + esc(unit) : ""}
-          </td>
-          <td class="ref-range ${refIsHtml ? "ref-html" : ""}">
-            ${refContent || ""}
-          </td>
+          ${buildResultCell(value, unit, valueClass)}
+          ${buildRefCell(refRaw)}
         </tr>
       `;
     }).join("");
@@ -333,19 +399,31 @@ function renderPathologyUsingReportItems(result) {
     }
 
     if (type === "PARAMETER") {
-      const pr         = it?.parameterId != null ? prMap.get(it.parameterId) : null;
-      const pname      = it?.parameter?.name   || pr?.parameter?.name   || "";
-      const method     = it?.parameter?.method || pr?.parameter?.method || "";
-      const notes      = it?.parameter?.notes  || pr?.parameter?.notes  || "";
-      const value      = pr ? formatValue(pr) : "";
-      const unit       = pr ? formatUnit(pr)  : (it?.parameter?.unit || "");
-      const refRaw     = formatRefFromPRorItem(pr, it?.parameter);
-      const refIsHtml  = refRaw && /<\/?[a-z][\s\S]*>/i.test(refRaw);
-      const refContent = refIsHtml ? sanitizeHtml(refRaw) : esc(refRaw);
-      const flag       = pr?.flag;
-      const isHigh     = flag && (flag === "HIGH" || flag === "HH");
-      const isLow      = flag && (flag === "LOW"  || flag === "LL");
+      const pr = it?.parameterId != null ? prMap.get(it.parameterId) : null;
+
+      // ✅ Skip if no result was saved for this parameter.
+      // This happens when the frontend filtered the parameter out due to
+      // age/gender mismatch, so the user never entered a value for it.
+      // Without this check, parameters like "H!" (referenceRange: null)
+      // appear as empty rows in the PDF even though they weren't shown.
+      if (!pr) return "";
+
+      const value = formatValue(pr);
+      // Also skip if value is genuinely empty (nothing entered)
+      if (value === "" || value === null || value === undefined) return "";
+
+      const pname  = it?.parameter?.name   || pr?.parameter?.name   || "";
+      const method = it?.parameter?.method || pr?.parameter?.method || "";
+      const notes  = it?.parameter?.notes  || pr?.parameter?.notes  || "";
+      const unit   = pr ? formatUnit(pr)  : (it?.parameter?.unit || "");
+      const flag   = pr?.flag;
+      const isHigh = flag && (flag === "HIGH" || flag === "HH");
+      const isLow  = flag && (flag === "LOW"  || flag === "LL");
       const valueClass = isHigh ? "abnormal-value high" : isLow ? "abnormal-value low" : "";
+
+      // ✅ FIXED: it?.parameter has age-filtered ranges from patient.service.js
+      //    Priority: lowerLimit/upperLimit → normalValueHtml → specialConditionHtml
+      const refRaw = formatRefFromPRorItem(pr, it?.parameter);
 
       return `
         <tr>
@@ -354,12 +432,8 @@ function renderPathologyUsingReportItems(result) {
             ${method ? `<div class="param-method">${esc(method)}</div>` : ""}
             ${notes  ? `<div class="param-notes">${sanitizeHtml(notes)}</div>` : ""}
           </td>
-          <td class="${valueClass}">
-            ${esc(value)}${unit ? " " + esc(unit) : ""}
-          </td>
-          <td class="ref-range ${refIsHtml ? "ref-html" : ""}">
-            ${refContent || ""}${unit ? " " + esc(unit) : ""}
-          </td>
+          ${buildResultCell(value, unit, valueClass)}
+          ${buildRefCell(refRaw)}
         </tr>
       `;
     }
@@ -432,11 +506,10 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
       `;
     }).join("");
 
-    // ✅ Signature once per department group
     const signaturesHtml = generateTestSignatures(group.results[0]);
 
     return `
-      <div class="dept-group">
+      <div class="dept-group dept-group-radiology">
         ${renderDeptHeader(group.deptName)}
         ${testsHtml}
         ${signaturesHtml}
@@ -470,7 +543,6 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
       `;
     }).join("");
 
-    // ✅ Signature once per department group
     const signaturesHtml = generateTestSignatures(group.results[0]);
 
     return `
@@ -499,6 +571,5 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
   }
 
   const html = radiologyHtml + pathologyHtml + allTrendsHtml;
-
   return returnMeta ? { html, indexItems } : html;
 }

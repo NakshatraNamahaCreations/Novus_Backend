@@ -2,9 +2,48 @@ import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
 const prisma = new PrismaClient();
 
+
+
+const TZ = "Asia/Kolkata";
+const startOfDayDate = (dateStr) => dayjs.tz(dateStr, "YYYY-MM-DD", TZ).startOf("day").toDate();
+const dayOfWeekFromDate = (dateStr) => dayjs.tz(dateStr, "YYYY-MM-DD", TZ).day(); // 0..6
+
+const resolveCenterSlotCapacity = async (tx, slot, dateStr) => {
+  const date = startOfDayDate(dateStr);
+  const dayOfWeek = dayOfWeekFromDate(dateStr);
+
+  // 1) date override
+  const ov = await tx.centerSlotDateOverride.findUnique({
+    where: { centerSlotId_date: { centerSlotId: slot.id, date } },
+  });
+  if (ov) return ov.isActive ? Number(ov.capacity || 0) : 0;
+
+  // 2) day config
+  const dc = await tx.centerSlotDayConfig.findUnique({
+    where: { centerSlotId_dayOfWeek: { centerSlotId: slot.id, dayOfWeek } },
+  });
+  if (dc) return dc.isActive ? Number(dc.capacity || 0) : 0;
+
+  // 3) default
+  return Number(slot.capacity || 0);
+};
+const DAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
 const toBool = (v, fallback = false) => {
-  if (v === true || v === false) return v;
-  if (typeof v === "string") return v.toLowerCase() === "true";
+  if (typeof v === "boolean") return v;            // ✅ IMPORTANT
+  if (typeof v === "number") return v === 1;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    if (["true", "1", "yes", "y", "on"].includes(s)) return true;
+    if (["false", "0", "no", "n", "off", ""].includes(s)) return false;
+  }
   return fallback;
 };
 
@@ -28,7 +67,8 @@ export const createCenter = async (req, res) => {
       long,
       cityId,
       isSelf,
-        showApp,  
+      showApp,
+      recommended, // ✅ NEW
       testIds = [],
     } = req.body;
 
@@ -42,8 +82,9 @@ export const createCenter = async (req, res) => {
     // ✅ Email unique check
     if (email) {
       const exists = await prisma.center.findUnique({ where: { email } });
-      if (exists)
+      if (exists) {
         return res.status(400).json({ error: "Email already registered" });
+      }
     }
 
     // ✅ Validate cityId
@@ -68,6 +109,7 @@ export const createCenter = async (req, res) => {
 
       const validSet = new Set(validTests.map((t) => t.id));
       const invalidIds = testIdNums.filter((t) => !validSet.has(t));
+
       if (invalidIds.length) {
         return res
           .status(400)
@@ -83,10 +125,14 @@ export const createCenter = async (req, res) => {
         email: email || null,
         alternativeEmail: alternativeEmail || null,
         mobile: mobile || null,
-         showApp: toBool(showApp, false),
-        isSelf: toBool(isSelf, false), // ✅ FIXED
-        lat:
-          lat !== undefined && lat !== null && lat !== "" ? Number(lat) : null,
+
+        showApp: toBool(showApp, false),
+        isSelf: toBool(isSelf, false),
+
+        // ✅ NEW FIELD SAVE
+        recommended: toBool(recommended, false),
+
+        lat: lat !== undefined && lat !== null && lat !== "" ? Number(lat) : null,
         long:
           long !== undefined && long !== null && long !== ""
             ? Number(long)
@@ -291,6 +337,7 @@ export const updateCenter = async (req, res) => {
     });
     if (!existing) return res.status(404).json({ error: "Center not found" });
 
+
     const {
       name,
       contactName,
@@ -302,18 +349,19 @@ export const updateCenter = async (req, res) => {
       long,
       cityId,
       isSelf,
-       showApp,
+      showApp,
+      recommended, // ✅ NEW
       testIds = [],
     } = req.body;
 
-    // Email unique check
+
+    // ✅ Email unique check
     if (email && email !== existing.email) {
       const exists = await prisma.center.findUnique({ where: { email } });
-      if (exists)
-        return res.status(400).json({ error: "Email already in use" });
+      if (exists) return res.status(400).json({ error: "Email already in use" });
     }
 
-    // Validate cityId if provided
+    // ✅ Validate cityId if provided
     let cityData = {};
     if (cityId === "" || cityId === null) {
       cityData = { cityId: null };
@@ -325,15 +373,19 @@ export const updateCenter = async (req, res) => {
       cityData = { cityId: Number(cityId) };
     }
 
-    // Validate testIds
-    if (Array.isArray(testIds) && testIds.length > 0) {
+    // ✅ Normalize + validate testIds
+    const testIdNums = Array.isArray(testIds)
+      ? testIds.map(Number).filter((n) => Number.isFinite(n) && n > 0)
+      : [];
+
+    if (testIdNums.length > 0) {
       const validTests = await prisma.test.findMany({
-        where: { id: { in: testIds.map(Number) } },
+        where: { id: { in: testIdNums } },
         select: { id: true },
       });
 
       const validIds = new Set(validTests.map((t) => t.id));
-      const invalidIds = testIds.filter((tid) => !validIds.has(Number(tid)));
+      const invalidIds = testIdNums.filter((tid) => !validIds.has(tid));
 
       if (invalidIds.length > 0) {
         return res.status(400).json({
@@ -357,31 +409,42 @@ export const updateCenter = async (req, res) => {
           ? { alternativeEmail: alternativeEmail || null }
           : {}),
         ...(mobile !== undefined ? { mobile: mobile || null } : {}),
-          ...(showApp !== undefined ? { showApp: toBool(showApp, existing.showApp) } : {}), 
+
+        ...(showApp !== undefined
+          ? { showApp: toBool(showApp, existing.showApp) }
+          : {}),
+
         ...(isSelf !== undefined
           ? { isSelf: toBool(isSelf, existing.isSelf) }
-          : {}), // ✅ FIXED
+          : {}),
+
+        // ✅ NEW FIELD UPDATE
+        ...(recommended !== undefined
+          ? { recommended: toBool(recommended, existing.recommended) }
+          : {}),
+
         ...(lat !== undefined
           ? { lat: lat === "" || lat === null ? null : Number(lat) }
           : {}),
         ...(long !== undefined
           ? { long: long === "" || long === null ? null : Number(long) }
           : {}),
+
         ...cityData,
       },
     });
 
-    // Update tests mapping (replace all)
+    // ✅ Update tests mapping (replace all)
     if (Array.isArray(testIds)) {
       await prisma.centerPackage.deleteMany({
         where: { centerId: Number(id) },
       });
 
-      if (testIds.length > 0) {
+      if (testIdNums.length > 0) {
         await prisma.centerPackage.createMany({
-          data: testIds.map((tid) => ({
+          data: testIdNums.map((tid) => ({
             centerId: Number(id),
-            testId: Number(tid),
+            testId: tid,
           })),
         });
       }
@@ -394,6 +457,8 @@ export const updateCenter = async (req, res) => {
         centerPackages: { include: { test: true } },
       },
     });
+
+   
 
     return res.json({
       message: "Center updated successfully",
@@ -649,81 +714,101 @@ export const getCenterSlots = async (req, res) => {
     const { categoryId, includeGlobal = "true", date } = req.query;
 
     const centerId = Number(id);
-    if (!centerId) return res.status(400).json({ error: "Invalid centerId" });
+    if (!Number.isFinite(centerId)) return res.status(400).json({ error: "Invalid centerId" });
 
     const catId =
       categoryId !== undefined && categoryId !== null && categoryId !== ""
         ? Number(categoryId)
         : null;
 
-    // ✅ date handling (default today)
-    const target = date ? dayjs(date) : dayjs();
-    if (!target.isValid()) {
-      return res.status(400).json({ error: "Invalid date. Use YYYY-MM-DD" });
-    }
+    const target = date ? dayjs.tz(date, "YYYY-MM-DD", TZ) : dayjs().tz(TZ);
+    if (!target.isValid()) return res.status(400).json({ error: "Invalid date. Use YYYY-MM-DD" });
+
+    const dateStr = target.format("YYYY-MM-DD");
+    const dayOfWeek = target.day();
+    const dbDate = target.startOf("day").toDate();
 
     const startOfDay = target.startOf("day").toDate();
     const endOfDay = target.endOf("day").toDate();
 
-    // ✅ build where condition for slots
-    let where = { centerId };
+    // where filter
+    let where = { centerId, isActive: true };
 
     if (catId !== null) {
       const useGlobal = String(includeGlobal) === "true";
       where = useGlobal
-        ? { centerId, OR: [{ categoryId: catId }, { categoryId: null }] }
-        : { centerId, categoryId: catId };
+        ? { centerId, isActive: true, OR: [{ categoryId: catId }, { categoryId: null }] }
+        : { centerId, isActive: true, categoryId: catId };
     }
 
-    // 1) fetch slots
+    // 1) slots + configs for that date/day
     const slots = await prisma.centerSlot.findMany({
       where,
       orderBy: { startTime: "asc" },
-  
       include: {
         category: { select: { id: true, name: true } },
+
+        // IMPORTANT: include config even if inactive
+        dayConfigs: { where: { dayOfWeek } },
+        dateOverrides: { where: { date: dbDate } },
       },
     });
 
-   
+    // 2) bookings grouped for that date
     const grouped = await prisma.centerSlotBooking.groupBy({
       by: ["centerSlotId"],
       where: {
         centerId,
         slotDate: { gte: startOfDay, lte: endOfDay },
-       
       },
       _count: { _all: true },
-      _sum: { quantity: true }, 
+      _sum: { quantity: true },
     });
 
     const bookedMap = new Map(
       grouped.map((g) => [
         g.centerSlotId,
-        // prefer quantity sum if present, else fallback to count
         Number(g._sum?.quantity ?? 0) || g._count._all,
       ])
     );
 
-    // 3) attach availability
-    const data = slots.map((slot) => {
-      const capacity = Number(slot.capacity || 0);
-      const booked = bookedMap.get(slot.id) || 0;
-      const remaining = Math.max(capacity - booked, 0);
+    // 3) compute effective capacity and hide closed
+    const data = slots
+      .map((slot) => {
+        const ov = slot.dateOverrides?.[0] || null;
+        const dc = slot.dayConfigs?.[0] || null;
 
-      return {
-        ...slot,
-        date: target.format("YYYY-MM-DD"),
-        booked,
-        remaining,
-        isFull: capacity > 0 ? booked >= capacity : false,
-      };
-    });
+        let effectiveCapacity = Number(slot.capacity || 0);
+        let capacitySource = "default";
 
-    return res.json({
-      date: target.format("YYYY-MM-DD"),
-      slots: data,
-    });
+        if (ov) {
+          effectiveCapacity = ov.isActive ? Number(ov.capacity || 0) : 0;
+          capacitySource = "date_override";
+        } else if (dc) {
+          effectiveCapacity = dc.isActive ? Number(dc.capacity || 0) : 0;
+          capacitySource = "day_config";
+        }
+
+        // ✅ CLOSED: don't show
+        if (effectiveCapacity <= 0) return null;
+
+        const booked = bookedMap.get(slot.id) || 0;
+        const remaining = Math.max(effectiveCapacity - booked, 0);
+
+        return {
+          ...slot,
+          date: dateStr,
+          defaultCapacity: Number(slot.capacity || 0),
+          effectiveCapacity,
+          capacitySource,
+          booked,
+          remaining,
+          isFull: booked >= effectiveCapacity,
+        };
+      })
+      .filter(Boolean);
+
+    return res.json({ date: dateStr, dayOfWeek, slots: data });
   } catch (error) {
     console.error("Error fetching center slots:", error);
     return res.status(500).json({ error: "Failed to fetch slots" });
@@ -781,6 +866,239 @@ export const deleteCenterSlot = async (req, res) => {
   } catch (error) {
     console.error("Error deleting slot:", error);
     return res.status(500).json({ error: "Failed to delete slot" });
+  }
+};
+export const upsertCenterSlotDayConfig = async (req, res) => {
+  try {
+    const centerSlotId = Number(req.params.slotId);
+    const { dayOfWeek, capacity, isActive = true } = req.body;
+
+    if (!Number.isFinite(centerSlotId)) return res.status(400).json({ error: "Invalid slotId" });
+    if (dayOfWeek === undefined) return res.status(400).json({ error: "dayOfWeek required (0..6)" });
+    if (Number(dayOfWeek) < 0 || Number(dayOfWeek) > 6) return res.status(400).json({ error: "dayOfWeek must be 0..6" });
+    if (capacity === undefined || capacity === null) return res.status(400).json({ error: "capacity required" });
+
+    const slot = await prisma.centerSlot.findUnique({ where: { id: centerSlotId } });
+    if (!slot) return res.status(404).json({ error: "Slot not found" });
+
+    const cfg = await prisma.centerSlotDayConfig.upsert({
+      where: { centerSlotId_dayOfWeek: { centerSlotId, dayOfWeek: Number(dayOfWeek) } },
+      create: { centerSlotId, dayOfWeek: Number(dayOfWeek), capacity: Number(capacity), isActive: !!isActive },
+      update: { capacity: Number(capacity), isActive: !!isActive },
+    });
+
+    return res.json({ message: "Day config saved", config: cfg });
+  } catch (e) {
+    console.error("upsertCenterSlotDayConfig:", e);
+    return res.status(500).json({ error: "Failed to save day config" });
+  }
+};
+
+export const bulkUpsertCenterSlotDayConfig = async (req, res) => {
+  try {
+    const centerSlotId = Number(req.params.slotId);
+    const { configs } = req.body;
+
+    if (!Number.isFinite(centerSlotId)) return res.status(400).json({ error: "Invalid slotId" });
+    if (!Array.isArray(configs) || configs.length === 0) return res.status(400).json({ error: "configs required" });
+
+    const slot = await prisma.centerSlot.findUnique({ where: { id: centerSlotId } });
+    if (!slot) return res.status(404).json({ error: "Slot not found" });
+
+    const results = await prisma.$transaction(
+      configs.map((c) =>
+        prisma.centerSlotDayConfig.upsert({
+          where: { centerSlotId_dayOfWeek: { centerSlotId, dayOfWeek: Number(c.dayOfWeek) } },
+          create: {
+            centerSlotId,
+            dayOfWeek: Number(c.dayOfWeek),
+            capacity: Number(c.capacity),
+            isActive: c.isActive !== undefined ? !!c.isActive : true,
+          },
+          update: {
+            capacity: Number(c.capacity),
+            isActive: c.isActive !== undefined ? !!c.isActive : true,
+          },
+        })
+      )
+    );
+
+    return res.json({ message: "Bulk day configs saved", configs: results });
+  } catch (e) {
+    console.error("bulkUpsertCenterSlotDayConfig:", e);
+    return res.status(500).json({ error: "Failed to save day configs" });
+  }
+};
+
+export const getCenterSlotDayConfigs = async (req, res) => {
+  
+  try {
+    const centerSlotId = Number(req.params.slotId);
+    if (!Number.isFinite(centerSlotId)) return res.status(400).json({ error: "Invalid slotId" });
+
+    const slot = await prisma.centerSlot.findUnique({ where: { id: centerSlotId } });
+    if (!slot) return res.status(404).json({ error: "Slot not found" });
+
+    const configs = await prisma.centerSlotDayConfig.findMany({
+      where: { centerSlotId },
+      orderBy: { dayOfWeek: "asc" },
+    });
+
+    const weekView = Array.from({ length: 7 }, (_, i) => {
+      const cfg = configs.find((c) => c.dayOfWeek === i);
+      return {
+        dayOfWeek: i,
+        dayName: DAY_NAMES[i],
+        hasConfig: !!cfg,
+        capacity: cfg?.capacity ?? slot.capacity,
+        isActive: cfg?.isActive ?? null,
+      };
+    });
+
+    return res.json({ centerSlotId, defaultCapacity: slot.capacity, weekView, rawConfigs: configs });
+  } catch (e) {
+    console.error("getCenterSlotDayConfigs:", e);
+    return res.status(500).json({ error: "Failed to fetch day configs" });
+  }
+};
+
+export const upsertCenterSlotDateOverride = async (req, res) => {
+  try {
+    const centerSlotId = Number(req.params.slotId);
+    const { date, capacity, isActive = true, note } = req.body;
+
+    if (!Number.isFinite(centerSlotId)) return res.status(400).json({ error: "Invalid slotId" });
+    if (!date) return res.status(400).json({ error: "date required (YYYY-MM-DD)" });
+    if (capacity === undefined || capacity === null) return res.status(400).json({ error: "capacity required" });
+
+    const parsed = dayjs.tz(date, "YYYY-MM-DD", TZ);
+    if (!parsed.isValid()) return res.status(400).json({ error: "Invalid date format" });
+
+    const slot = await prisma.centerSlot.findUnique({ where: { id: centerSlotId } });
+    if (!slot) return res.status(404).json({ error: "Slot not found" });
+
+    const dbDate = parsed.startOf("day").toDate();
+
+    const ov = await prisma.centerSlotDateOverride.upsert({
+      where: { centerSlotId_date: { centerSlotId, date: dbDate } },
+      create: { centerSlotId, date: dbDate, capacity: Number(capacity), isActive: !!isActive, note: note ?? null },
+      update: { capacity: Number(capacity), isActive: !!isActive, note: note ?? null },
+    });
+
+    return res.json({ message: "Date override saved", override: ov });
+  } catch (e) {
+    console.error("upsertCenterSlotDateOverride:", e);
+    return res.status(500).json({ error: "Failed to save override" });
+  }
+};
+
+export const bulkUpsertCenterSlotDateOverride = async (req, res) => {
+  try {
+    const centerSlotId = Number(req.params.slotId);
+    const { overrides } = req.body;
+
+    if (!Number.isFinite(centerSlotId)) return res.status(400).json({ error: "Invalid slotId" });
+    if (!Array.isArray(overrides) || overrides.length === 0) return res.status(400).json({ error: "overrides required" });
+
+    const slot = await prisma.centerSlot.findUnique({ where: { id: centerSlotId } });
+    if (!slot) return res.status(404).json({ error: "Slot not found" });
+
+    const results = await prisma.$transaction(
+      overrides.map((o) => {
+        const parsed = dayjs.tz(o.date, "YYYY-MM-DD", TZ);
+        if (!parsed.isValid()) throw new Error(`Invalid date: ${o.date}`);
+
+        const dbDate = parsed.startOf("day").toDate();
+        return prisma.centerSlotDateOverride.upsert({
+          where: { centerSlotId_date: { centerSlotId, date: dbDate } },
+          create: {
+            centerSlotId,
+            date: dbDate,
+            capacity: Number(o.capacity),
+            isActive: o.isActive !== undefined ? !!o.isActive : true,
+            note: o.note ?? null,
+          },
+          update: {
+            capacity: Number(o.capacity),
+            isActive: o.isActive !== undefined ? !!o.isActive : true,
+            note: o.note ?? null,
+          },
+        });
+      })
+    );
+
+    return res.json({ message: "Bulk overrides saved", overrides: results });
+  } catch (e) {
+    console.error("bulkUpsertCenterSlotDateOverride:", e);
+    return res.status(500).json({ error: "Failed to save overrides" });
+  }
+};
+
+export const getCenterSlotDateOverrides = async (req, res) => {
+  try {
+    const centerSlotId = Number(req.params.slotId);
+    const upcoming = req.query.upcoming === "true";
+    if (!Number.isFinite(centerSlotId)) return res.status(400).json({ error: "Invalid slotId" });
+
+    const where = { centerSlotId };
+    if (upcoming) where.date = { gte: new Date() };
+
+    const list = await prisma.centerSlotDateOverride.findMany({
+      where,
+      orderBy: { date: "asc" },
+    });
+
+    const mapped = list.map((o) => {
+      const d = dayjs(o.date).tz(TZ);
+      return {
+        ...o,
+        dateLabel: d.format("YYYY-MM-DD"),
+        dayName: DAY_NAMES[d.day()],
+      };
+    });
+
+    return res.json({ centerSlotId, overrides: mapped, count: mapped.length });
+  } catch (e) {
+    console.error("getCenterSlotDateOverrides:", e);
+    return res.status(500).json({ error: "Failed to fetch overrides" });
+  }
+};
+
+export const deleteCenterSlotDateOverride = async (req, res) => {
+  try {
+    const centerSlotId = Number(req.params.slotId);
+    const { date } = req.params;
+
+    if (!Number.isFinite(centerSlotId)) return res.status(400).json({ error: "Invalid slotId" });
+
+    const parsed = dayjs.tz(date, "YYYY-MM-DD", TZ);
+    if (!parsed.isValid()) return res.status(400).json({ error: "Invalid date format" });
+
+    const dbDate = parsed.startOf("day").toDate();
+
+    const del = await prisma.centerSlotDateOverride.deleteMany({
+      where: { centerSlotId, date: dbDate },
+    });
+
+    if (!del.count) return res.status(404).json({ error: "Override not found" });
+
+    return res.json({ message: "Override deleted" });
+  } catch (e) {
+    console.error("deleteCenterSlotDateOverride:", e);
+    return res.status(500).json({ error: "Failed to delete override" });
+  }
+};
+export const deleteCenterSlotDayConfig = async (req, res) => {
+  try {
+    const centerSlotId = Number(req.params.slotId);
+    const dayOfWeek = Number(req.params.dayOfWeek);
+    if (!Number.isFinite(centerSlotId) || !Number.isFinite(dayOfWeek)) return res.status(400).json({ error: "Invalid params" });
+
+    await prisma.centerSlotDayConfig.deleteMany({ where: { centerSlotId, dayOfWeek } });
+    return res.json({ message: "Day config removed" });
+  } catch (e) {
+    console.error("deleteCenterSlotDayConfig:", e);
+    return res.status(500).json({ error: "Failed to delete day config" });
   }
 };
 

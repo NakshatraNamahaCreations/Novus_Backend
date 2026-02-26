@@ -186,75 +186,111 @@ export const ParameterService = {
     });
   },
 
-
-listByTest: async (testId, gender = "Both") => {
+listByTest: async (testId, gender = "Both", age = "any") => {
   const tId = Number(testId);
   const g = String(gender || "Both").trim();
+  const a = String(age || "any").trim().toLowerCase();
 
-  // If user passes Male/Female/Kids, also include "Both" rows.
-  const genderFilter = g === "Both" ? ["Both"] : [g, "Both"];
+  // ✅ Helper: is this range's referenceRange = "any" (case-insensitive)
+  const isAnyAge = (val) => String(val || "").trim().toLowerCase() === "any";
 
-  const includeWithGender = {
-    ranges: {
-      where: { gender: { in: genderFilter } },
-      orderBy: { id: "asc" },
-    },
-    resultOpts: {
-      where: { gender: { in: genderFilter } },
-      orderBy: { id: "asc" },
-    },
-  };
+  // ✅ Core filter logic per parameter
+  const applyFilters = (p) => {
+    let ranges = [...(p.ranges || [])];
+    let resultOpts = [...(p.resultOpts || [])];
 
-  const includeNoGender = {
-    ranges: { orderBy: { id: "asc" } },
-    resultOpts: { orderBy: { id: "asc" } },
-  };
-
-  try {
-    return await prisma.testParameter.findMany({
-      where: { testId: tId },
-      orderBy: { order: "asc" },
-      include: includeWithGender,
-    });
-  } catch (err) {
-    // ✅ Prisma schema/client on server likely doesn't know `gender`
-    const msg = String(err?.message || "");
-    const isGenderSchemaProblem =
-      msg.includes("Unknown argument `gender`") ||
-      msg.includes("Unknown field") ||
-      msg.includes("Available options are marked with ?");
-
-    if (!isGenderSchemaProblem) throw err;
-
-    // Fallback: fetch without gender filtering
-    const rows = await prisma.testParameter.findMany({
-      where: { testId: tId },
-      orderBy: { order: "asc" },
-      include: includeNoGender,
-    });
-
-    // Filter in JS only if the returned items actually have a gender field
-    if (g !== "Both") {
-      for (const p of rows) {
-        if (Array.isArray(p.ranges) && p.ranges.some(r => "gender" in r)) {
-          const hasSpecific = p.ranges.some(r => r.gender === g);
-          p.ranges = hasSpecific
-            ? p.ranges.filter(r => r.gender === g)
-            : p.ranges.filter(r => r.gender === "Both");
-        }
-
-        if (Array.isArray(p.resultOpts) && p.resultOpts.some(o => "gender" in o)) {
-          const hasSpecific = p.resultOpts.some(o => o.gender === g);
-          p.resultOpts = hasSpecific
-            ? p.resultOpts.filter(o => o.gender === g)
-            : p.resultOpts.filter(o => o.gender === "Both");
-        }
+    // ---------- GENDER FILTER ----------
+    if (ranges.length > 0) {
+      if (g !== "Both") {
+        // prefer specific gender, fallback to Both
+        const specific = ranges.filter((r) => r.gender === g);
+        ranges = specific.length > 0
+          ? specific
+          : ranges.filter((r) => r.gender === "Both");
+      } else {
+        ranges = ranges.filter((r) => r.gender === "Both");
       }
     }
 
-    return rows;
+    if (resultOpts.length > 0) {
+      if (g !== "Both") {
+        const specific = resultOpts.filter((o) => o.gender === g);
+        resultOpts = specific.length > 0
+          ? specific
+          : resultOpts.filter((o) => o.gender === "Both");
+      } else {
+        resultOpts = resultOpts.filter((o) => o.gender === "Both");
+      }
+    }
+
+    // ---------- AGE FILTER ----------
+    // "any" referenceRange always matches all ages
+    // specific age key only matches if age matches
+    if (a !== "any" && ranges.length > 0) {
+      const specificAge = ranges.filter(
+        (r) => !isAnyAge(r.referenceRange) && r.referenceRange === a
+      );
+      const anyAge = ranges.filter((r) => isAnyAge(r.referenceRange));
+
+      // ✅ If specific age match exists → use it, else fallback to "any"
+      ranges = specificAge.length > 0 ? specificAge : anyAge;
+    } else if (a === "any" && ranges.length > 0) {
+      // requested any → only return "any" ranges
+      ranges = ranges.filter((r) => isAnyAge(r.referenceRange));
+    }
+
+    // Same for resultOpts
+    if (a !== "any" && resultOpts.length > 0) {
+      const specificAge = resultOpts.filter(
+        (o) => !isAnyAge(o.referenceRange) && o.referenceRange === a
+      );
+      const anyAge = resultOpts.filter((o) => isAnyAge(o.referenceRange));
+      resultOpts = specificAge.length > 0 ? specificAge : anyAge;
+    } else if (a === "any" && resultOpts.length > 0) {
+      resultOpts = resultOpts.filter((o) => isAnyAge(o.referenceRange));
+    }
+
+    return { ...p, ranges, resultOpts };
+  };
+
+  // ✅ Post filter: only drop parameter if it HAD ranges/opts but NONE survived
+  const applyPostFilter = (rows, originalCounts) => {
+    return rows.filter((p) => {
+      const orig = originalCounts.get(p.id) || { ranges: 0, resultOpts: 0 };
+      // No ranges configured at all → always keep (no reference range to show, still a valid parameter)
+      if (orig.ranges === 0 && orig.resultOpts === 0) return true;
+      // Had ranges, some survived → keep
+      if (p.ranges.length > 0 || p.resultOpts.length > 0) return true;
+      // Had ranges, none survived → drop
+      return false;
+    });
+  };
+
+  try {
+    // Fetch ALL ranges (no WHERE filter) — we filter in JS
+    const rows = await prisma.testParameter.findMany({
+      where: { testId: tId },
+      orderBy: { order: "asc" },
+      include: {
+        ranges: { orderBy: { id: "asc" } },
+        resultOpts: { orderBy: { id: "asc" } },
+      },
+    });
+
+    // Save original counts before filtering
+    const originalCounts = new Map(
+      rows.map((p) => [
+        p.id,
+        { ranges: p.ranges.length, resultOpts: p.resultOpts.length },
+      ])
+    );
+
+    const filtered = rows.map(applyFilters);
+    return applyPostFilter(filtered, originalCounts);
+  } catch (err) {
+    console.error("listByTest error:", err);
+    throw err;
   }
-  
 },
 backfillReportItems: async (testId, createdById = null) => {
   const tId = Number(testId);

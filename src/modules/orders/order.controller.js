@@ -668,9 +668,7 @@ export const createOrder = async (req, res) => {
   }
 };
 
-/* ==========================================================
-   ✅ CREATE ADMIN ORDER (single patient + selected items)
-========================================================== */
+
 export const createAdminOrder = async (req, res) => {
   try {
     const {
@@ -692,7 +690,7 @@ export const createAdminOrder = async (req, res) => {
 
       centerId,
       collectionCenterId,
-      centerSlotId,
+      centerSlotId, // (kept if you use it elsewhere)
       slotId,
 
       totalAmount: bodyTotalAmount,
@@ -704,6 +702,7 @@ export const createAdminOrder = async (req, res) => {
       homeCollectionDate,
     } = req.body;
 
+    /* -------------------- helpers -------------------- */
     const castInt = (v) =>
       v === undefined || v === null || v === "" || Number.isNaN(Number(v))
         ? null
@@ -720,11 +719,8 @@ export const createAdminOrder = async (req, res) => {
       return "test";
     };
 
-    if (
-      !patientId ||
-      !Array.isArray(selectedTests) ||
-      selectedTests.length === 0
-    ) {
+    /* -------------------- validations -------------------- */
+    if (!patientId || !Array.isArray(selectedTests) || selectedTests.length === 0) {
       return res
         .status(400)
         .json({ success: false, message: "Patient & items required" });
@@ -733,30 +729,32 @@ export const createAdminOrder = async (req, res) => {
     // If home collection => address required + slotId required
     if (Boolean(homeCollection)) {
       const addr = castInt(addressId);
-      if (!addr)
+      if (!addr) {
         return res.status(400).json({
           success: false,
           message: "addressId is required for home collection",
         });
+      }
       const sId = castInt(slotId);
-      if (!sId)
+      if (!sId) {
         return res.status(400).json({
           success: false,
           message: "slotId is required for home collection",
         });
+      }
     }
 
-    // order number
+    /* -------------------- order number -------------------- */
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const count = await prisma.order.count({
       where: { orderNumber: { startsWith: `ORD${todayStr}` } },
     });
     const orderNumber = `ORD${todayStr}${String(count + 1).padStart(4, "0")}`;
 
-    // totals
+    /* -------------------- totals -------------------- */
     const computedTotal = selectedTests.reduce(
       (sum, t) => sum + toNumber(t?.price ?? t?.amount ?? t?.total),
-      0,
+      0
     );
 
     const total =
@@ -766,18 +764,22 @@ export const createAdminOrder = async (req, res) => {
       discountAmount != null
         ? toNumber(discountAmount)
         : discount != null
-          ? toNumber(discount)
-          : 0;
+        ? toNumber(discount)
+        : 0;
 
     const finalAmt =
       bodyFinalAmount != null
         ? toNumber(bodyFinalAmount)
         : Math.max(0, total - discountAmt);
 
-    // date
+    // ✅ IMPORTANT: if finalAmount is 0 => treat as paid
+    const isFreeOrder = Number(finalAmt) <= 0;
+
+    /* -------------------- date -------------------- */
     const pickedDate = date || homeCollectionDate || null;
     const orderDate = parseISTDateTime(pickedDate);
 
+    /* -------------------- ids split -------------------- */
     const testIds = selectedTests
       .filter((i) => normalizeType(i) === "test")
       .map((i) => castInt(i?.id ?? i?.testId))
@@ -788,39 +790,32 @@ export const createAdminOrder = async (req, res) => {
       .map((i) => castInt(i?.id ?? i?.packageId))
       .filter(Boolean);
 
+    /* -------------------- fetch test/package info for due -------------------- */
     const tests = testIds.length
       ? await prisma.test.findMany({
           where: { id: { in: testIds } },
-          select: {
-            id: true,
-            name: true,
-            reportWithin: true,
-            reportUnit: true,
-          },
+          select: { id: true, name: true, reportWithin: true, reportUnit: true },
         })
       : [];
 
     const packages = packageIds.length
       ? await prisma.healthPackage.findMany({
           where: { id: { in: packageIds } },
-          select: {
-            id: true,
-            name: true,
-            reportWithin: true,
-            reportUnit: true,
-          },
+          select: { id: true, name: true, reportWithin: true, reportUnit: true },
         })
       : [];
 
     const testMap = new Map(tests.map((t) => [t.id, t]));
     const pkgMap = new Map(packages.map((p) => [p.id, p]));
 
+    /* -------------------- build order create payload -------------------- */
     const dataToCreate = {
       orderNumber,
       createdBy: { connect: { id: castInt(req.user?.id) } },
       patient: { connect: { id: castInt(patientId) } },
 
       orderType: registrationType ?? null,
+
       ...(castInt(diagnosticCenterId)
         ? { diagnosticCenter: { connect: { id: castInt(diagnosticCenterId) } } }
         : {}),
@@ -830,14 +825,16 @@ export const createAdminOrder = async (req, res) => {
       discountAmount: Number(discountAmt),
       finalAmount: Number(finalAmt),
 
-      source: source ?? undefined,
+      // ✅ ADD/KEEP THIS IF YOUR ORDER MODEL HAS paymentStatus
+      // If your field name differs (isPaid/paidStatus/etc), rename accordingly.
+      paymentStatus: isFreeOrder ? "PAID" : "PENDING",
 
+      source: source ?? undefined,
       date: orderDate,
 
       isHomeSample: Boolean(homeCollection),
-      remarks: [provisionalDiagnosis, notes, remark]
-        .filter(Boolean)
-        .join(" | "),
+
+      remarks: [provisionalDiagnosis, notes, remark].filter(Boolean).join(" | "),
     };
 
     const sId = castInt(slotId);
@@ -850,9 +847,7 @@ export const createAdminOrder = async (req, res) => {
 
     if (!Boolean(homeCollection)) {
       const finalCenterId = castInt(centerId ?? collectionCenterId);
-
-      if (finalCenterId)
-        dataToCreate.center = { connect: { id: finalCenterId } };
+      if (finalCenterId) dataToCreate.center = { connect: { id: finalCenterId } };
     }
 
     const dId = castInt(doctorId);
@@ -869,6 +864,38 @@ export const createAdminOrder = async (req, res) => {
         data: { orderId: order.id, patientId: castInt(patientId) },
       });
 
+      // ✅ If finalAmount is 0, ensure PAID is set + create a zero payment record
+      // NOTE: If your payment table/fields differ, adjust only this block.
+      if (isFreeOrder) {
+        // if you already set paymentStatus in create, this is optional.
+        // keep it to be safe (especially if create doesn't include paymentStatus in your schema).
+        try {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { paymentStatus: "PAID" },
+          });
+        } catch (e) {
+          // ignore if your order model doesn't have paymentStatus
+        }
+
+        // Create a payment row (recommended for reports/history)
+        try {
+          await tx.payment.create({
+            data: {
+              orderId: order.id,
+              amount: 0,
+              status: "paid",
+              paymentMethod: "Discount", // or "Free"
+              providerRef: `FREE-${order.orderNumber}`,
+              createdById: castInt(req.user?.id) || null,
+              note: "Auto paid (finalAmount = 0)",
+            },
+          });
+        } catch (e) {
+          // ignore if your schema doesn't have payment table/fields
+        }
+      }
+
       await Promise.all(
         selectedTests.map((item) => {
           const id = castInt(item?.id ?? item?.testId ?? item?.packageId);
@@ -878,6 +905,7 @@ export const createAdminOrder = async (req, res) => {
           const unit = sourceObj?.reportUnit
             ? normalizeUnit(sourceObj.reportUnit)
             : null;
+
           const dueAt = sourceObj
             ? computeDueAt(orderDate, sourceObj.reportWithin, unit)
             : null;
@@ -895,12 +923,13 @@ export const createAdminOrder = async (req, res) => {
               dispatchStatus: "NOT_READY",
             },
           });
-        }),
+        })
       );
 
       return { orderId: order.id };
     });
 
+    /* -------------------- fetch created order -------------------- */
     const createdOrder = await prisma.order.findUnique({
       where: { id: result.orderId },
       include: {
@@ -908,19 +937,19 @@ export const createAdminOrder = async (req, res) => {
         address: true,
         orderMembers: {
           include: {
-            orderMemberPackages: {
-              include: { test: true, package: true },
-            },
+            orderMemberPackages: { include: { test: true, package: true } },
           },
         },
         doctor: true,
         refCenter: true,
         center: true,
-
         slot: true,
+        // ✅ include payments if you want to show paid info in response
+        // payments: true,
       },
     });
 
+    /* -------------------- whatsapp queue -------------------- */
     try {
       await whatsappQueue.add(
         "whatsapp.sendOrderConfirmed",
@@ -930,7 +959,7 @@ export const createAdminOrder = async (req, res) => {
           backoff: { type: "exponential", delay: 2000 },
           removeOnComplete: true,
           removeOnFail: false,
-        },
+        }
       );
     } catch (e) {
       console.warn("WhatsApp queue failed:", e?.message);
@@ -2038,6 +2067,7 @@ export const getOrderById = async (req, res) => {
                 fullName: true,
                 contactNo: true,
                 gender: true,
+                age: true,
               },
             },
             orderMemberPackages: {
@@ -2139,6 +2169,7 @@ export const getOrderResultsById = async (req, res) => {
                 fullName: true,
                 contactNo: true,
                 gender: true,
+                age: true,
               },
             },
             orderMemberPackages: {
@@ -3359,24 +3390,29 @@ export const fetchReportDue = async (req, res) => {
     const now = new Date();
     const soonEnd = new Date(now.getTime() + beforeMin * 60 * 1000);
 
-    // common includes
+    // ✅ include payments + payment.createdBy + order.createdBy
     const include = {
       test: { select: { id: true, name: true } },
       package: { select: { id: true, name: true } },
+
       orderMember: {
         include: {
           patient: { select: { id: true, fullName: true, contactNo: true } },
+
           order: {
-            select: {
-              id: true,
-              orderNumber: true,
-              date: true,
-              testType: true,
-              status: true,
-              isHomeSample: true,
-              reportReady: true,
-              createdAt: true,
-              updatedAt: true,
+            include: {
+              createdBy: {
+                select: { id: true, name: true, email: true, phone: true, role: true },
+              },
+
+              payments: {
+                orderBy: { paymentDate: "desc" },
+                include: {
+                  createdBy: {
+                    select: { id: true, name: true, email: true, phone: true, role: true },
+                  },
+                },
+              },
             },
           },
         },
@@ -3388,12 +3424,14 @@ export const fetchReportDue = async (req, res) => {
       const diffMs = dueAt ? dueAt.getTime() - now.getTime() : null;
       const diffMin = diffMs != null ? Math.ceil(diffMs / 60000) : null;
 
+      const order = x.orderMember?.order || null;
+
       return {
         id: x.id,
         dispatchStatus: x.dispatchStatus,
         itemType: x.testId ? "TEST" : "PACKAGE",
         item: x.testId ? x.test : x.package,
-
+        dispatchedAt: x.dispatchedAt,
         reportDueAt: dueAt,
         reportDueAtIST: dueAt
           ? dayjs(dueAt).tz("Asia/Kolkata").format("YYYY-MM-DD hh:mm A")
@@ -3401,29 +3439,65 @@ export const fetchReportDue = async (req, res) => {
 
         minutesLeft: diffMin,
 
-        order: x.orderMember?.order,
-        patient: x.orderMember?.patient,
+        // ✅ order + createdBy (user)
+        order: order
+          ? {
+              id: order.id,
+              orderNumber: order.orderNumber,
+              date: order.date,
+              testType: order.testType,
+              status: order.status,
+              isHomeSample: order.isHomeSample,
+              reportReady: order.reportReady,
+              createdAt: order.createdAt,
+              updatedAt: order.updatedAt,
+              createdBy: order.createdBy || null,
+            }
+          : null,
+
+        // ✅ payments + payment.createdBy (user)
+        payments:
+          order?.payments?.map((p) => ({
+            id: p.id,
+            paymentId: p.paymentId,
+            paymentMethod: p.paymentMethod,
+            paymentMode: p.paymentMode,
+            paymentStatus: p.paymentStatus,
+            amount: p.amount,
+            currency: p.currency,
+            paymentDate: p.paymentDate,
+            transactionNote: p.transactionNote,
+            referenceId: p.referenceId,
+            invoiceUrl: p.invoiceUrl,
+            capturedAmount: p.capturedAmount,
+            refundAmount: p.refundAmount,
+            refundDate: p.refundDate,
+            refundReason: p.refundReason,
+            refundReference: p.refundReference,
+            createdAt: p.createdAt,
+            updatedAt: p.updatedAt,
+            createdBy: p.createdBy || null,
+          })) ?? [],
+
+        patient: x.orderMember?.patient || null,
       };
     };
 
-    // Build where for each tab
     const whereDueSoon = {
       reportDueAt: { gte: now, lte: soonEnd },
-      // dispatchStatus: { in: OPEN_STATUSES },
+  
     };
 
     const whereOverdue = {
       reportDueAt: { lt: now },
-      // dispatchStatus: { in: OPEN_STATUSES },
+     
     };
 
-    // totals (for pagination)
     const [totalDueSoon, totalOverdue] = await Promise.all([
       prisma.orderMemberPackage.count({ where: whereDueSoon }),
       prisma.orderMemberPackage.count({ where: whereOverdue }),
     ]);
 
-    // only fetch one list based on tab (faster)
     const skip = (page - 1) * pageSize;
 
     let rows = [];
@@ -3442,7 +3516,6 @@ export const fetchReportDue = async (req, res) => {
         take: pageSize,
       });
     } else {
-      // default overdue
       total = totalOverdue;
       totalPages = Math.ceil(total / pageSize);
 
@@ -3462,9 +3535,7 @@ export const fetchReportDue = async (req, res) => {
       window: {
         beforeMin,
         soonEndUTC: soonEnd.toISOString(),
-        soonEndIST: dayjs(soonEnd)
-          .tz("Asia/Kolkata")
-          .format("YYYY-MM-DD hh:mm A"),
+        soonEndIST: dayjs(soonEnd).tz("Asia/Kolkata").format("YYYY-MM-DD hh:mm A"),
       },
       totals: {
         overdue: totalOverdue,
