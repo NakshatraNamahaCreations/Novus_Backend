@@ -37,14 +37,10 @@ function formatUnit(pr) {
   return pr?.unit ?? pr?.parameter?.unit ?? pr?.uom ?? "";
 }
 
-// ✅ FIXED: Priority order for reference range display:
+// ✅ Priority order for reference range display:
 //   1. Numeric lowerLimit / upperLimit  → e.g. "9 - 10"
 //   2. normalValueHtml                  → rendered as HTML
 //   3. specialConditionHtml             → rendered as HTML
-//
-// ❌ REMOVED: r0.referenceRange is the AGE KEY (e.g. "2_years_to_10_years")
-//             used only for filtering — NEVER show it as display text.
-// ❌ REMOVED: pr?.normalRangeText — was storing age key, not display text.
 function formatRefFromPRorItem(pr, itemParam) {
   const ranges = itemParam?.ranges || [];
 
@@ -77,28 +73,24 @@ function formatRefFromPRorItem(pr, itemParam) {
 }
 
 // ✅ Inject inline styles into HTML tables inside ref-range cells
-//    so they render correctly in PDF without external CSS dependency
 function injectRefHtmlStyles(html) {
   if (!html) return "";
   return html
-    // table
     .replace(
       /<table([^>]*)>/gi,
-      `<table$1 style="border-collapse:collapse;font-size:11px;width:100%;margin:0;">`
+      `<table$1 style="border-collapse:collapse;font-size:11px;width:100%;margin:0;">`,
     )
-    // td / th
     .replace(
       /<td([^>]*)>/gi,
-      `<td$1 style="border:1px solid #cbd5e1;padding:4px 6px;vertical-align:top;font-size:11px;font-style:normal;">`
+      `<td$1 style="border:1px solid #cbd5e1;padding:4px 6px;vertical-align:top;font-size:11px;font-style:normal;">`,
     )
     .replace(
       /<th([^>]*)>/gi,
-      `<th$1 style="border:1px solid #cbd5e1;padding:4px 6px;background:#f1f5f9;font-size:11px;font-weight:600;">`
+      `<th$1 style="border:1px solid #cbd5e1;padding:4px 6px;background:#f1f5f9;font-size:11px;font-weight:600;">`,
     )
-    // p inside ref cells — remove extra margin
     .replace(
       /<p([^>]*)>/gi,
-      `<p$1 style="margin:2px 0;font-size:11px;font-style:normal;">`
+      `<p$1 style="margin:2px 0;font-size:11px;font-style:normal;">`,
     );
 }
 
@@ -114,7 +106,9 @@ function renderNotesBlock(notes) {
 }
 
 function isRadiology(r) {
-  return !!r?.reportHtml && (!r?.parameterResults || r.parameterResults.length === 0);
+  return (
+    !!r?.reportHtml && (!r?.parameterResults || r.parameterResults.length === 0)
+  );
 }
 
 function isPathology(r) {
@@ -124,7 +118,11 @@ function isPathology(r) {
 function formatDate(date) {
   if (!date) return "";
   const d = new Date(date);
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  });
 }
 
 function slugify(s) {
@@ -146,9 +144,9 @@ function buildParamResultMap(parameterResults = []) {
 // ── Signature block — once per department group ──────────────
 function generateTestSignatures(result) {
   const signatures = {
-    left:   result?.leftSignature   || null,
+    left: result?.leftSignature || null,
     center: result?.centerSignature || null,
-    right:  result?.rightSignature  || null,
+    right: result?.rightSignature || null,
   };
   if (!signatures.left && !signatures.center && !signatures.right) return "";
 
@@ -156,12 +154,14 @@ function generateTestSignatures(result) {
     if (!sig) return '<div class="sig-card sig-empty"></div>';
     return `
       <div class="sig-card">
-        ${sig.signatureImg
-          ? `<img class="sig-img" src="${esc(sig.signatureImg)}" alt="Signature" />`
-          : '<div class="muted">No signature</div>'}
+        ${
+          sig.signatureImg
+            ? `<img class="sig-img" src="${esc(sig.signatureImg)}" alt="Signature" />`
+            : '<div class="muted">No signature</div>'
+        }
         <div class="sig-name">${esc(sig.name)}</div>
         ${sig.qualification ? `<div class="sig-sub">${esc(sig.qualification)}</div>` : ""}
-        ${sig.designation   ? `<div class="sig-sub">${esc(sig.designation)}</div>`   : ""}
+        ${sig.designation ? `<div class="sig-sub">${esc(sig.designation)}</div>` : ""}
       </div>
     `;
   };
@@ -195,7 +195,7 @@ function groupByDepartment(arr) {
       const g = {
         key,
         deptName: r?.test?.departmentItem?.name || null,
-        results:  [],
+        results: [],
       };
       map.set(key, g);
       groups.push(g);
@@ -206,15 +206,16 @@ function groupByDepartment(arr) {
 }
 
 // ── Historical trends ────────────────────────────────────────
+// ✅ Only rendered when showTrends = true (i.e. "full" variant only)
 function generateAllTrendsSection(pathologyResults, trendMap) {
   if (!trendMap || pathologyResults.length === 0) return "";
 
   const testsWithTrends = [];
   pathologyResults.forEach((result) => {
-    const testId       = result?.testId ?? result?.test?.id;
-    const testName     = result?.test?.name || "Lab Test";
+    const testId = result?.testId ?? result?.test?.id;
+    const testName = result?.test?.name || "Lab Test";
     const paramResults = result.parameterResults || [];
-    const hasTrends    = paramResults.some((pr) => {
+    const hasTrends = paramResults.some((pr) => {
       const trends = trendMap.get(`${testId}:${pr.parameterId}`) || [];
       return trends.some((t) => t.value && t.value !== "—");
     });
@@ -227,19 +228,24 @@ function generateAllTrendsSection(pathologyResults, trendMap) {
   if (testsWithTrends[0]) {
     const firstParam = testsWithTrends[0].paramResults[0];
     if (firstParam) {
-      const trends = trendMap.get(`${testsWithTrends[0].testId}:${firstParam.parameterId}`) || [];
-      trendDates   = trends.map((t) => formatDate(t.date));
+      const trends =
+        trendMap.get(
+          `${testsWithTrends[0].testId}:${firstParam.parameterId}`,
+        ) || [];
+      trendDates = trends.map((t) => formatDate(t.date));
     }
   }
 
-  const allRows = testsWithTrends.map((test) => {
-    const rows = test.paramResults.map((pr) => {
-      const pname  = pr?.parameter?.name ?? pr?.parameterName ?? "";
-      const trends = trendMap.get(`${test.testId}:${pr.parameterId}`) || [];
-      const t1 = trends[0]?.value || "—";
-      const t2 = trends[1]?.value || "—";
-      const t3 = trends[2]?.value || "—";
-      return `
+  const allRows = testsWithTrends
+    .map((test) => {
+      const rows = test.paramResults
+        .map((pr) => {
+          const pname = pr?.parameter?.name ?? pr?.parameterName ?? "";
+          const trends = trendMap.get(`${test.testId}:${pr.parameterId}`) || [];
+          const t1 = trends[0]?.value || "—";
+          const t2 = trends[1]?.value || "—";
+          const t3 = trends[2]?.value || "—";
+          return `
         <tr>
           <td>${esc(pname)}</td>
           <td class="trend-value-cell ${t1 === "—" ? "trend-no-data" : ""}">${esc(t1)}</td>
@@ -247,13 +253,15 @@ function generateAllTrendsSection(pathologyResults, trendMap) {
           <td class="trend-value-cell ${t3 === "—" ? "trend-no-data" : ""}">${esc(t3)}</td>
         </tr>
       `;
-    }).join("");
+        })
+        .join("");
 
-    return `
+      return `
       <tr class="trend-test-header"><td colspan="4">${esc(test.testName)}</td></tr>
       ${rows}
     `;
-  }).join("");
+    })
+    .join("");
 
   return `
     <div class="trends-section keep-together">
@@ -278,19 +286,18 @@ function generateAllTrendsSection(pathologyResults, trendMap) {
   `;
 }
 
-// ── Helper: build result cell content ────────────────────────
-// ✅ FIX: only show unit when value is non-empty
 function buildResultCell(value, unit, valueClass) {
-  const hasValue = value !== null && value !== undefined && String(value).trim() !== "";
+  const hasValue =
+    value !== null && value !== undefined && String(value).trim() !== "";
   if (!hasValue) {
     return `<td class="${valueClass}">—</td>`;
   }
-  return `<td class="${valueClass}">${esc(value)}${unit ? " " + esc(unit) : ""}</td>`;
+  const content = `${esc(value)}${unit ? " " + esc(unit) : ""}`;
+  return `<td class="${valueClass}">${content}</td>`;
 }
 
 // ── Helper: build reference range cell content ────────────────
-// ✅ FIX: inject inline styles into HTML so tables render properly in PDF
-function buildRefCell(refRaw) {
+function buildRefCell(refRaw, unit) {
   if (!refRaw || !String(refRaw).trim()) {
     return `<td class="ref-range"></td>`;
   }
@@ -302,46 +309,56 @@ function buildRefCell(refRaw) {
     return `<td class="ref-range ref-html">${styledHtml}</td>`;
   }
 
-  return `<td class="ref-range">${esc(refRaw)}</td>`;
+  const unitSuffix = unit ? ` <span class="ref-unit">${esc(unit)}</span>` : "";
+  return `<td class="ref-range">${esc(refRaw)}${unitSuffix}</td>`;
 }
 
 // ── Pathology table (reportItems-driven) ─────────────────────
 function renderPathologyUsingReportItems(result) {
-  const testName     = result?.test?.name || "Lab Test";
-  const items        = Array.isArray(result?.reportItems) ? result.reportItems : [];
-  const paramResults = Array.isArray(result?.parameterResults) ? result.parameterResults : [];
-  const prMap        = buildParamResultMap(paramResults);
+  const testName = result?.test?.name || "Lab Test";
+  const items = Array.isArray(result?.reportItems) ? result.reportItems : [];
+  const paramResults = Array.isArray(result?.parameterResults)
+    ? result.parameterResults
+    : [];
+  const prMap = buildParamResultMap(paramResults);
 
   const currentDate = new Date().toLocaleDateString("en-GB", {
-    day: "2-digit", month: "2-digit", year: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
   });
 
   // ── Fallback: no reportItems — render raw parameterResults ──
   if (!items.length) {
-    const fallbackRows = paramResults.map((pr) => {
-      const pname      = pr?.parameter?.name ?? pr?.parameterName ?? "";
-      const method     = pr?.parameter?.method ?? pr?.method ?? "";
-      const value      = formatValue(pr);
-      const unit       = formatUnit(pr);
-      const flag       = pr?.flag;
-      const isHigh     = flag && (flag === "HIGH" || flag === "HH");
-      const isLow      = flag && (flag === "LOW"  || flag === "LL");
-      const valueClass = isHigh ? "abnormal-value high" : isLow ? "abnormal-value low" : "";
+    const fallbackRows = paramResults
+      .map((pr) => {
+        const pname = pr?.parameter?.name ?? pr?.parameterName ?? "";
+        const method = pr?.parameter?.method ?? pr?.method ?? "";
+        const value = formatValue(pr);
+        const unit = formatUnit(pr);
+        const flag = pr?.flag;
+        const isHigh = flag && (flag === "HIGH" || flag === "HH");
+        const isLow = flag && (flag === "LOW" || flag === "LL");
+        const valueClass = isHigh
+          ? "abnormal-value high"
+          : isLow
+            ? "abnormal-value low"
+            : "";
 
-      // ✅ FIXED: use ranges from parameter, not normalRangeText (age key)
-      const refRaw = formatRefFromPRorItem(pr, pr?.parameter);
+        const refRaw = formatRefFromPRorItem(pr, pr?.parameter);
 
-      return `
+        return `
         <tr>
           <td class="param-name-cell">
             <div class="param-name">${esc(pname)}</div>
             ${method ? `<div class="param-method">${esc(method)}</div>` : ""}
           </td>
           ${buildResultCell(value, unit, valueClass)}
-          ${buildRefCell(refRaw)}
+        ${buildRefCell(refRaw, unit)}
         </tr>
       `;
-    }).join("");
+      })
+      .join("");
 
     return `
       <div class="section pathology keep-together">
@@ -365,81 +382,80 @@ function renderPathologyUsingReportItems(result) {
   }
 
   // ── Render using reportItems ───────────────────────────────
-  const rows = items.map((it) => {
-    const type = String(it?.type || "").toUpperCase();
+  const rows = items
+    .map((it) => {
+      const type = String(it?.type || "").toUpperCase();
 
-    if (type === "HEADING") {
-      const title = (it?.title || it?.text || "").trim();
-      if (!title) return "";
-      return `
+      if (type === "HEADING") {
+        const title = (it?.title || it?.text || "").trim();
+        if (!title) return "";
+        return `
         <tr class="row-heading">
           <td colspan="3" class="heading-cell">${esc(title)}</td>
         </tr>
       `;
-    }
+      }
 
-    if (type === "RICH_TEXT") {
-      const html = sanitizeHtml(it?.html || it?.text || "");
-      if (!html.trim()) return "";
-      return `
+      if (type === "RICH_TEXT") {
+        const html = sanitizeHtml(it?.html || it?.text || "");
+        if (!html.trim()) return "";
+        return `
         <tr class="row-richtext">
           <td colspan="3" class="richtext-cell ql-scope">${html}</td>
         </tr>
       `;
-    }
+      }
 
-    if (type === "NOTES") {
-      const html = sanitizeHtml(it?.text || it?.html || "");
-      if (!html.trim()) return "";
-      return `
+      if (type === "NOTES") {
+        const html = sanitizeHtml(it?.text || it?.html || "");
+        if (!html.trim()) return "";
+        return `
         <tr class="row-notes">
           <td colspan="3" class="notes-cell ql-scope">${html}</td>
         </tr>
       `;
-    }
+      }
 
-    if (type === "PARAMETER") {
-      const pr = it?.parameterId != null ? prMap.get(it.parameterId) : null;
+      if (type === "PARAMETER") {
+        const pr = it?.parameterId != null ? prMap.get(it.parameterId) : null;
 
-      // ✅ Skip if no result was saved for this parameter.
-      // This happens when the frontend filtered the parameter out due to
-      // age/gender mismatch, so the user never entered a value for it.
-      // Without this check, parameters like "H!" (referenceRange: null)
-      // appear as empty rows in the PDF even though they weren't shown.
-      if (!pr) return "";
+        // ✅ Skip if no result was saved for this parameter
+        if (!pr) return "";
 
-      const value = formatValue(pr);
-      // Also skip if value is genuinely empty (nothing entered)
-      if (value === "" || value === null || value === undefined) return "";
+        const value = formatValue(pr);
+        if (value === "" || value === null || value === undefined) return "";
 
-      const pname  = it?.parameter?.name   || pr?.parameter?.name   || "";
-      const method = it?.parameter?.method || pr?.parameter?.method || "";
-      const notes  = it?.parameter?.notes  || pr?.parameter?.notes  || "";
-      const unit   = pr ? formatUnit(pr)  : (it?.parameter?.unit || "");
-      const flag   = pr?.flag;
-      const isHigh = flag && (flag === "HIGH" || flag === "HH");
-      const isLow  = flag && (flag === "LOW"  || flag === "LL");
-      const valueClass = isHigh ? "abnormal-value high" : isLow ? "abnormal-value low" : "";
+        const pname = it?.parameter?.name || pr?.parameter?.name || "";
+        const method = it?.parameter?.method || pr?.parameter?.method || "";
+        const notes = it?.parameter?.notes || pr?.parameter?.notes || "";
+        const unit = pr ? formatUnit(pr) : it?.parameter?.unit || "";
+        const flag = pr?.flag;
+        const isHigh = flag && (flag === "HIGH" || flag === "HH");
+        const isLow = flag && (flag === "LOW" || flag === "LL");
+        const valueClass = isHigh
+          ? "abnormal-value high"
+          : isLow
+            ? "abnormal-value low"
+            : "";
 
-      // ✅ FIXED: it?.parameter has age-filtered ranges from patient.service.js
-      //    Priority: lowerLimit/upperLimit → normalValueHtml → specialConditionHtml
-      const refRaw = formatRefFromPRorItem(pr, it?.parameter);
+        const refRaw = formatRefFromPRorItem(pr, it?.parameter);
 
-      return `
+        return `
         <tr>
           <td class="param-name-cell">
             <div class="param-name">${esc(pname)}</div>
             ${method ? `<div class="param-method">${esc(method)}</div>` : ""}
-            ${notes  ? `<div class="param-notes">${sanitizeHtml(notes)}</div>` : ""}
+            ${notes ? `<div class="param-notes">${sanitizeHtml(notes)}</div>` : ""}
           </td>
           ${buildResultCell(value, unit, valueClass)}
-          ${buildRefCell(refRaw)}
+        ${buildRefCell(refRaw, unit)}
         </tr>
       `;
-    }
+      }
 
-    return "";
-  }).join("");
+      return "";
+    })
+    .join("");
 
   const sectionClass =
     (result?.parameterResults?.length || 0) > 20
@@ -470,8 +486,17 @@ function renderPathologyUsingReportItems(result) {
 // ══════════════════════════════════════════════════════════════
 //  MAIN EXPORT
 // ══════════════════════════════════════════════════════════════
-export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
-  const all       = Array.isArray(results) ? results : [];
+
+// ✅ FIX: Added `showTrends` param — defaults true.
+//         Pass showTrends: false from letterhead/plain variants
+//         to suppress Historical Trends section entirely.
+export function resultsTableHtml({
+  results,
+  trendMap,
+  returnMeta = false,
+  showTrends = true,
+}) {
+  const all = Array.isArray(results) ? results : [];
   const radiology = all.filter(isRadiology);
   const pathology = all.filter(isPathology);
 
@@ -481,21 +506,23 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
   // ── 1) RADIOLOGY grouped by department ──────────────────────
   const radiologyGroups = groupByDepartment(radiology);
 
-  const radiologyHtml = radiologyGroups.map((group) => {
-    const testsHtml = group.results.map((r) => {
-      seq += 1;
-      const testName = r?.test?.name || "Radiology Report";
-      const id       = `test-${seq}-${slugify(testName)}`;
+  const radiologyHtml = radiologyGroups
+    .map((group) => {
+      const testsHtml = group.results
+        .map((r) => {
+          seq += 1;
+          const testName = r?.test?.name || "Radiology Report";
+          const id = `test-${seq}-${slugify(testName)}`;
 
-      indexItems.push({
-        id,
-        title:      testName,
-        dept:       group.deptName || "General",
-        paramCount: 0,
-        type:       "Radiology",
-      });
+          indexItems.push({
+            id,
+            title: testName,
+            dept: group.deptName || "General",
+            paramCount: 0,
+            type: "Radiology",
+          });
 
-      return `
+          return `
         <div class="section radiology" id="${esc(id)}">
           <div class="section-title">${esc(testName)}</div>
           <div class="radio-html ql-scope">
@@ -504,58 +531,69 @@ export function resultsTableHtml({ results, trendMap, returnMeta = false }) {
           ${renderNotesBlock(r?.notes)}
         </div>
       `;
-    }).join("");
+        })
+        .join("");
 
-    const signaturesHtml = generateTestSignatures(group.results[0]);
+      const signaturesHtml = generateTestSignatures(group.results[0]);
 
-    return `
+      return `
       <div class="dept-group dept-group-radiology">
         ${renderDeptHeader(group.deptName)}
         ${testsHtml}
         ${signaturesHtml}
       </div>
     `;
-  }).join("");
+    })
+    .join("");
 
   // ── 2) PATHOLOGY grouped by department ──────────────────────
   const pathologyGroups = groupByDepartment(pathology);
 
-  const pathologyHtml = pathologyGroups.map((group) => {
-    const testsHtml = group.results.map((r) => {
-      seq += 1;
-      const testName   = r?.test?.name || "Lab Test";
-      const id         = `test-${seq}-${slugify(testName)}`;
-      const paramCount = Array.isArray(r?.parameterResults) ? r.parameterResults.length : 0;
+  const pathologyHtml = pathologyGroups
+    .map((group) => {
+      const testsHtml = group.results
+        .map((r) => {
+          seq += 1;
+          const testName = r?.test?.name || "Lab Test";
+          const id = `test-${seq}-${slugify(testName)}`;
+          const paramCount = Array.isArray(r?.parameterResults)
+            ? r.parameterResults.length
+            : 0;
 
-      indexItems.push({
-        id,
-        title:      testName,
-        dept:       group.deptName || "General",
-        paramCount,
-        type:       "Pathology",
-      });
+          indexItems.push({
+            id,
+            title: testName,
+            dept: group.deptName || "General",
+            paramCount,
+            type: "Pathology",
+          });
 
-      return `
+          return `
         <div id="${esc(id)}">
           ${renderPathologyUsingReportItems(r)}
           ${renderNotesBlock(r?.notes)}
         </div>
       `;
-    }).join("");
+        })
+        .join("");
 
-    const signaturesHtml = generateTestSignatures(group.results[0]);
+      const signaturesHtml = generateTestSignatures(group.results[0]);
 
-    return `
+      return `
       <div class="dept-group">
         ${renderDeptHeader(group.deptName)}
         ${testsHtml}
         ${signaturesHtml}
       </div>
     `;
-  }).join("");
+    })
+    .join("");
 
-  // ── 3) TRENDS ────────────────────────────────────────────────
-  const allTrendsHtml = generateAllTrendsSection(pathology, trendMap);
+  // ── 3) TRENDS — only when showTrends is true ─────────────────
+  // ✅ FIX: Suppressed for letterhead and plain variants
+  const allTrendsHtml = showTrends
+    ? generateAllTrendsSection(pathology, trendMap)
+    : "";
 
   // ── No results at all ────────────────────────────────────────
   if (!radiologyHtml && !pathologyHtml) {

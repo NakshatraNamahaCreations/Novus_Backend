@@ -25,7 +25,6 @@ function buildPatientStrip({ patient, order, derived }) {
   const gender    = esc(patient?.gender || "—");
   const patientId = esc(String(patient?.id || "—"));
 
-
   return `
     <div class="idx-patient-strip">
       <div class="idx-patient-title">PATIENT DETAILS</div>
@@ -42,7 +41,6 @@ function buildPatientStrip({ patient, order, derived }) {
           <span class="idx-patient-label">Patient ID</span>
           <span class="idx-patient-value">${patientId}</span>
         </div>
-      
       </div>
     </div>
   `;
@@ -108,10 +106,11 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
 
   return `
     <div class="index-only-page">
-  <!-- Header image -->
-     <div class="hdr">
-      <img class="hf-img" src="images/_header.png" alt="Header" />
-    </div>
+      <!-- Header image -->
+      <div class="hdr">
+        <img class="hf-img" src="images/_header.png" alt="Header" />
+      </div>
+
       ${buildPatientStrip({ patient, order, derived })}
 
       <div class="idx-page-header">
@@ -157,6 +156,7 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
   const patientStripContent = patientStripHtml({ order, patient, derived });
 
   // ── FULL variant ─────────────────────────────────────────────
+  // ✅ Only "full" renders Historical Trends (showTrends defaults to true)
   if (variant === "full") {
     const hasFrontPage = layout?.frontPageLastImg;
     const hasLastPage  = layout?.lastPageImg;
@@ -165,6 +165,7 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
       results,
       trendMap,
       returnMeta: true,
+      showTrends: true,   // ✅ Trends shown only in full variant
     });
 
     const indexPageContent = buildIndexPage(indexItems, { patient, order, derived });
@@ -227,9 +228,14 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
   }
 
   // ── LETTERHEAD variant ───────────────────────────────────────
-  const resultsContent = resultsTableHtml({ results, trendMap });
-
+  // ✅ FIX: showTrends: false — no Historical Trends in letterhead
   if (variant === "letterhead") {
+    const resultsContent = resultsTableHtml({
+      results,
+      trendMap,
+      showTrends: false,
+    });
+
     return `
 <!DOCTYPE html>
 <html lang="en">
@@ -264,6 +270,13 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
   }
 
   // ── PLAIN variant ────────────────────────────────────────────
+  // ✅ FIX: showTrends: false — no Historical Trends in plain
+  const resultsContent = resultsTableHtml({
+    results,
+    trendMap,
+    showTrends: false,
+  });
+
   return `
 <!DOCTYPE html>
 <html lang="en">

@@ -6,7 +6,7 @@
   --footer-h: 50px;
   --patient-strip-h: 140px;
   --pad-x: 14mm;
-
+  --header-top-gap: 8px;
 
   --accent-orange: #ff6b35;
   --text-dark: #1a1a1a;
@@ -22,7 +22,7 @@
    =============================== */
 @page {
   size: A4;
-  margin-top: calc(var(--header-h) + var(--patient-strip-h) + 8px);
+  margin-top: calc(var(--header-h) + var(--patient-strip-h) + 8px + 8px);
   margin-bottom: calc(var(--footer-h) + 8px);
   margin-left: var(--pad-x);
   margin-right: var(--pad-x);
@@ -93,7 +93,7 @@ html, body {
   line-height: 1.4;
 }
 
-p { font-size: 13; }
+p { font-size: 13px; }
 
 /* ===============================
    RUNNING ELEMENTS
@@ -132,6 +132,7 @@ p { font-size: 13; }
   width: 100%;
   margin: 0;
   padding: 0;
+  margin-top: 8px;
 }
 
 .hf-img {
@@ -255,7 +256,6 @@ p { font-size: 13; }
   gap: 8px;
   padding: 7px 14px;
   background: #eef2ff;
- 
   border-radius: 0 4px 4px 0;
   margin-bottom: 0;
 }
@@ -381,7 +381,6 @@ p { font-size: 13; }
   padding: 10px 14px;
   background: #fffbf0;
   border: 1px solid #fde68a;
-
   border-radius: 0 6px 6px 0;
   display: flex;
   align-items: flex-start;
@@ -483,42 +482,42 @@ p { font-size: 13; }
 /* ===============================
    DEPARTMENT HEADER (in results)
    =============================== */
+/* ✅ FIX: minimal margin — no gap between dept header and test title */
 .dept-header {
-  margin: 18px 0 6px 0;
-  padding: 6px 13px;
-  background: transparent;         /* ✅ removed #eef2ff bg */
- 
+  margin: 4px 0 0 0;
+  padding: 0 13px 2px;
+  background: transparent;
   border-radius: 0 4px 4px 0;
 }
 
 .dept-header-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--text-dark);        /* ✅ was var(--text-dark) */
+  color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  text-align: center;             /* ✅ centered */
-  display: block;                 /* ✅ needed for text-align to work */
+  text-align: center;
+  display: block;
   width: 100%;
 }
 
 /* ===============================
    SECTION & TEST TITLE
    =============================== */
-.section { margin-bottom: 20px; }
+.section { margin-bottom: 14px; }   /* ✅ FIX: reduced from 20px */
 .section.keep-together { page-break-inside: avoid; }
 
-/* ✅ FIXED: removed background color and left border from test title row */
+/* ✅ FIX: zero margin-top, minimal padding so test title sits right under dept header */
 .test-title-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 12px;
+  margin-top: 0;
   margin-bottom: 0;
-  padding: 12px 14px;
-  background: transparent;        /* ✅ was var(--bg-light) */
-  border-left: none;               /* ✅ was 3px solid var(--accent-orange) */
-  border-bottom: 1px solid var(--border-light);
+  padding: 2px 14px 4px;
+  background: transparent;
+  border-left: none;
+
   page-break-after: avoid;
   page-break-inside: avoid;
 }
@@ -537,9 +536,7 @@ p { font-size: 13; }
   margin-bottom: 10px;
   color: var(--text-dark);
   padding: 10px 14px;
-  background: var(--bg-light);
 
- 
   page-break-after: avoid;
   page-break-inside: avoid;
   text-transform: uppercase;
@@ -552,18 +549,18 @@ p { font-size: 13; }
 .tbl {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 11px;          /* ✅ FIX: reduced from 12px */
   margin: 0;
   background: var(--bg-white);
 }
 
-.tbl thead { background: transparent; } /* ✅ removed bg */
+.tbl thead { background: transparent; }
 
 .tbl th {
-  padding: 6px 12px;               /* ✅ reduced from 10px */
+  padding: 5px 12px;        /* ✅ FIX: reduced from 6px */
   text-align: left;
   font-weight: 700;
-  font-size: 11px;
+  font-size: 10px;          /* ✅ FIX: reduced from 11px */
   color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.4px;
@@ -578,26 +575,28 @@ p { font-size: 13; }
 .tbl tbody tr:hover { background: #f0f7ff; }
 
 .tbl td {
-  padding: 6px 12px;               /* ✅ reduced from 10px */
-  font-size: 12px;
+  padding: 5px 12px;        /* ✅ FIX: reduced from 6px */
+  font-size: 11px;          /* ✅ FIX: reduced from 12px */
   vertical-align: middle;
   color: var(--text-dark);
 }
 
 .tbl tbody td:nth-child(1) { padding-left: 14px; }
-.tbl tbody td:nth-child(2) { text-align: left; font-weight: 600; }
+
+/* ✅ FIX: result column default is normal weight — only .abnormal-value gets bold */
+.tbl tbody td:nth-child(2) { text-align: left; font-weight: 400; }
 .tbl tbody td:nth-child(3) { text-align: left; }
 
 /* ── Parameter name cell ── */
 .param-name-cell {
   vertical-align: top;
-  padding: 6px 12px !important;    /* ✅ reduced from 10px */
+  padding: 5px 12px !important;   /* ✅ FIX: reduced from 6px */
 }
 
 .param-name {
   color: black;
   margin-bottom: 4px;
-  font-size: 12px;
+  font-size: 11px;          /* ✅ FIX: reduced from 12px */
   line-height: 1.4;
 }
 
@@ -609,7 +608,7 @@ p { font-size: 13; }
 }
 
 .param-notes {
-  font-size: 11px;
+  font-size: 10px;          /* ✅ FIX: reduced from 11px */
   color: #666;
   font-style: italic;
   margin-top: 3px;
@@ -618,7 +617,7 @@ p { font-size: 13; }
 /* ── Reference range ── */
 .ref-range {
   color: var(--text-gray);
-  font-size: 11px;
+  font-size: 10px;          /* ✅ FIX: reduced from 11px */
   font-style: italic;
 }
 
@@ -628,13 +627,13 @@ p { font-size: 13; }
 .ref-range.ref-html p + p { margin-top: 2px !important; }
 
 /* ── Abnormal values ── */
+/* ✅ These stay bold + coloured; normal values have font-weight:400 from td rule */
 .abnormal-value { color: #c53030; font-weight: 700; }
 .abnormal-value.high::before { content: '▲'; margin-right: 6px; }
 .abnormal-value.low::before  { content: '▼'; margin-right: 6px; }
 
 /* ── Row types ── */
 .row-heading .heading-cell {
-  background: var(--bg-light);
   font-weight: 700;
   font-size: 13px;
   padding: 7px 10px;
@@ -642,7 +641,7 @@ p { font-size: 13; }
 
 .richtext-cell,
 .notes-cell {
-  font-size: 12px;
+  font-size: 11px;          /* ✅ FIX: reduced from 12px */
   color: #444;
   padding: 8px 12px;
 }
@@ -661,8 +660,8 @@ p { font-size: 13; }
 .notes-cell table td,
 .notes-cell table th {
   border: 1px solid #9aa4b2 !important;
-  padding: 6px 8px !important;
-  font-size: 12px !important;
+  padding: 5px 8px !important;  /* ✅ FIX: reduced from 6px */
+  font-size: 11px !important;   /* ✅ FIX: reduced from 12px */
   color: #1f2937 !important;
 }
 
@@ -675,11 +674,16 @@ p { font-size: 13; }
 /* ===============================
    RADIOLOGY SECTION
    =============================== */
-.section.radiology { margin-bottom: 20px; }
+/* The section inside also adds space */
+.section.radiology {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
 
 .radio-html {
   padding: 14px;
-  font-size: 12px;
+  font-size: 11px;          /* ✅ FIX: reduced from 12px */
   line-height: 1.6;
   background: var(--bg-white);
 }
@@ -699,7 +703,7 @@ p { font-size: 13; }
 
 .test-notes-title { font-weight: 700; margin-bottom: 6px; }
 
-.test-notes-body { font-size: 12px; line-height: 1.4; }
+.test-notes-body { font-size: 11px; line-height: 1.4; }   /* ✅ FIX: reduced from 12px */
 .test-notes-body,
 .test-notes-body * { line-height: 1.35 !important; }
 .test-notes-body p { margin: 0 !important; }
@@ -728,14 +732,14 @@ p { font-size: 13; }
   min-width: 120px;
   max-width: 180px;
   text-align: center;
-  padding: 8px;
+  padding: 5px;
 }
 
 .sig-card.sig-empty { visibility: hidden; }
 
 .sig-img {
-  max-height: 55px;
-  max-width: 150px;
+  max-height: 45px;
+  max-width: 100px;
   width: auto;
   height: auto;
   display: block;
@@ -767,13 +771,13 @@ p { font-size: 13; }
 
 /* ===============================
    TRENDS SECTION
-   ✅ FIXED: always starts on a new page
+   ✅ Always starts on a new page — only shown in "full" variant
    =============================== */
 .trends-section {
   margin-top: 28px;
   margin-bottom: 22px;
   page-break-inside: avoid;
-  page-break-before: always;   /* ✅ NEW: force new page before trends */
+  page-break-before: always;
 }
 
 .trends-header {
@@ -781,14 +785,14 @@ p { font-size: 13; }
   justify-content: space-between;
   align-items: center;
   padding: 10px 14px;
-  background: transparent;                        /* ✅ removed blue gradient */
-  border-bottom: 2px solid var(--text-dark);   /* ✅ just a bottom border */
+  background: transparent;
+  border-bottom: 2px solid var(--text-dark);
 }
 
 .trends-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--text-dark);                     /* ✅ was white */
+  color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.6px;
   display: flex;
@@ -796,11 +800,11 @@ p { font-size: 13; }
   gap: 8px;
 }
 
-.trends-title::before { content: ""; font-size: 0; } /* ✅ removed emoji icon */
+.trends-title::before { content: ""; font-size: 0; }
 
 .trends-subtitle {
   font-size: 11px;
-  color: var(--text-gray);                        /* ✅ was white/transparent */
+  color: var(--text-gray);
   font-weight: 500;
 }
 
@@ -808,7 +812,7 @@ p { font-size: 13; }
   border: 1px solid var(--border-light);
   border-radius: 0 0 6px 6px;
   overflow: hidden;
-  background: transparent;          /* ✅ removed bg-white */
+  background: transparent;
 }
 
 .trends-table {
@@ -818,7 +822,7 @@ p { font-size: 13; }
   margin: 0;
 }
 
-.trends-table thead { background: transparent; } /* ✅ removed #f8f9fa */
+.trends-table thead { background: transparent; }
 
 .trends-table th {
   padding: 10px 12px;
@@ -834,7 +838,7 @@ p { font-size: 13; }
 .trends-table th:not(:first-child) { text-align: center; width: 20%; }
 
 .trends-table tbody tr.trend-test-header {
-  background: transparent;           /* ✅ removed var(--bg-light) */
+  background: transparent;
   border-top: 1px solid var(--border-light);
   border-bottom: 1px solid var(--border-light);
 }
@@ -843,13 +847,13 @@ p { font-size: 13; }
   padding: 8px 12px;
   font-weight: 700;
   font-size: 11px;
-  color: var(--text-dark);           /* ✅ was primary-blue */
+  color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
 
 .trends-table tbody tr:last-child { border-bottom: none; }
-.trends-table tbody tr:nth-child(even):not(.trend-test-header) { background: transparent; } /* ✅ removed #fafafa */
+.trends-table tbody tr:nth-child(even):not(.trend-test-header) { background: transparent; }
 .trends-table tbody tr:hover:not(.trend-test-header) { background: transparent; }
 
 .trends-table td {
