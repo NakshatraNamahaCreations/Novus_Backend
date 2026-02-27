@@ -2844,6 +2844,8 @@ export const addOrderPayment = async (req, res) => {
       ipAddress,
     } = req.body;
 
+    console.log("paymentMode",paymentMode)
+
     // Get order with payments
     const order = await prisma.order.findUnique({
       where: { id: parseInt(orderId) },

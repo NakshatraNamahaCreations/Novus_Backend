@@ -814,6 +814,123 @@ export const getCenterSlots = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch slots" });
   }
 };
+
+export const getCenterSlotsForCategories = async (req, res) => {
+  try {
+    const centerId = Number(req.params.centerId);
+    const { date, categoryIds } = req.query;
+
+    if (!Number.isFinite(centerId)) {
+      return res.status(400).json({ success: false, error: "Invalid centerId" });
+    }
+    if (!date) {
+      return res.status(400).json({ success: false, error: "date is required (YYYY-MM-DD)" });
+    }
+
+    const ids = String(categoryIds || "")
+      .split(",")
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n));
+
+    if (ids.length === 0) {
+      return res.status(400).json({ success: false, error: "categoryIds required" });
+    }
+
+    const slotDate = new Date(date);
+    slotDate.setHours(0, 0, 0, 0);
+
+    const dayOfWeek = slotDate.getDay(); // 0-6
+
+    const centerSlots = await prisma.centerSlot.findMany({
+      where: {
+        centerId,
+        isActive: true,
+        categoryId: { in: ids },
+      },
+      include: {
+        dayConfigs: {
+          where: { dayOfWeek, isActive: true },
+          orderBy: { dayOfWeek: "asc" },
+        },
+        dateOverrides: {
+          where: { date: slotDate, isActive: true },
+          orderBy: { date: "asc" },
+        },
+        bookings: {
+          where: { slotDate },
+          select: { quantity: true },
+        },
+        category: { select: { id: true, name: true } },
+      },
+      orderBy: [{ startTime: "asc" }],
+    });
+
+    // compute per centerSlot remaining
+    const computed = centerSlots.map((s) => {
+      const effectiveCapacity =
+        s.dateOverrides?.[0]?.capacity ??
+        s.dayConfigs?.[0]?.capacity ??
+        s.capacity;
+
+      const booked = (s.bookings ?? []).reduce((sum, b) => sum + (b?.quantity || 0), 0);
+      const remaining = Math.max(0, Number(effectiveCapacity || 0) - booked);
+
+      return {
+        centerSlotId: s.id,
+        categoryId: s.categoryId,
+        categoryName: s.category?.name,
+        name: s.name || "",
+        startTime: s.startTime,
+        endTime: s.endTime,
+        effectiveCapacity,
+        booked,
+        remaining,
+      };
+    });
+
+    // group by time window
+    const map = new Map();
+    for (const s of computed) {
+      const key = `${s.name}|${s.startTime}|${s.endTime}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(s);
+    }
+
+    // keep only "common" slots that exist for all selected categories
+    const requiredCount = ids.length;
+
+    const commonSlots = [];
+    for (const [key, list] of map.entries()) {
+      const present = new Set(list.map((x) => x.categoryId));
+      if (present.size !== requiredCount) continue;
+
+      const remainingCommon = Math.min(...list.map((x) => x.remaining));
+      if (remainingCommon <= 0) continue;
+
+      const any = list[0];
+      commonSlots.push({
+        name: any.name,
+        id: any.centerSlotId,
+        startTime: any.startTime,
+        endTime: any.endTime,
+        remaining: remainingCommon,
+        perCategory: list.map((x) => ({
+          categoryId: x.categoryId,
+          categoryName: x.categoryName,
+          centerSlotId: x.centerSlotId,
+          remaining: x.remaining,
+        })),
+      });
+    }
+
+    commonSlots.sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+
+    return res.json({ success: true, date, centerId, categoryIds: ids, slots: commonSlots });
+  } catch (err) {
+    console.error("getCenterSlotsForCategories error:", err);
+    return res.status(500).json({ success: false, error: "Internal Server Error" });
+  }
+};
 export const updateCenterSlot = async (req, res) => {
   try {
     const { slotId } = req.params;

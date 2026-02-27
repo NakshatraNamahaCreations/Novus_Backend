@@ -186,109 +186,93 @@ export const ParameterService = {
     });
   },
 
-listByTest: async (testId, gender = "Both", age = "any") => {
-  const tId = Number(testId);
-  const g = String(gender || "Both").trim();
-  const a = String(age || "any").trim().toLowerCase();
-
-  // ✅ Helper: is this range's referenceRange = "any" (case-insensitive)
-  const isAnyAge = (val) => String(val || "").trim().toLowerCase() === "any";
-
-  // ✅ Core filter logic per parameter
-  const applyFilters = (p) => {
-    let ranges = [...(p.ranges || [])];
-    let resultOpts = [...(p.resultOpts || [])];
-
-    // ---------- GENDER FILTER ----------
-    if (ranges.length > 0) {
-      if (g !== "Both") {
-        // prefer specific gender, fallback to Both
-        const specific = ranges.filter((r) => r.gender === g);
-        ranges = specific.length > 0
-          ? specific
-          : ranges.filter((r) => r.gender === "Both");
-      } else {
-        ranges = ranges.filter((r) => r.gender === "Both");
-      }
-    }
-
-    if (resultOpts.length > 0) {
-      if (g !== "Both") {
-        const specific = resultOpts.filter((o) => o.gender === g);
-        resultOpts = specific.length > 0
-          ? specific
-          : resultOpts.filter((o) => o.gender === "Both");
-      } else {
-        resultOpts = resultOpts.filter((o) => o.gender === "Both");
-      }
-    }
-
-    // ---------- AGE FILTER ----------
-    // "any" referenceRange always matches all ages
-    // specific age key only matches if age matches
-    if (a !== "any" && ranges.length > 0) {
-      const specificAge = ranges.filter(
-        (r) => !isAnyAge(r.referenceRange) && r.referenceRange === a
-      );
-      const anyAge = ranges.filter((r) => isAnyAge(r.referenceRange));
-
-      // ✅ If specific age match exists → use it, else fallback to "any"
-      ranges = specificAge.length > 0 ? specificAge : anyAge;
-    } else if (a === "any" && ranges.length > 0) {
-      // requested any → only return "any" ranges
-      ranges = ranges.filter((r) => isAnyAge(r.referenceRange));
-    }
-
-    // Same for resultOpts
-    if (a !== "any" && resultOpts.length > 0) {
-      const specificAge = resultOpts.filter(
-        (o) => !isAnyAge(o.referenceRange) && o.referenceRange === a
-      );
-      const anyAge = resultOpts.filter((o) => isAnyAge(o.referenceRange));
-      resultOpts = specificAge.length > 0 ? specificAge : anyAge;
-    } else if (a === "any" && resultOpts.length > 0) {
-      resultOpts = resultOpts.filter((o) => isAnyAge(o.referenceRange));
-    }
-
-    return { ...p, ranges, resultOpts };
-  };
-
-  // ✅ Post filter: only drop parameter if it HAD ranges/opts but NONE survived
-  const applyPostFilter = (rows, originalCounts) => {
-    return rows.filter((p) => {
-      const orig = originalCounts.get(p.id) || { ranges: 0, resultOpts: 0 };
-      // No ranges configured at all → always keep (no reference range to show, still a valid parameter)
-      if (orig.ranges === 0 && orig.resultOpts === 0) return true;
-      // Had ranges, some survived → keep
-      if (p.ranges.length > 0 || p.resultOpts.length > 0) return true;
-      // Had ranges, none survived → drop
-      return false;
-    });
-  };
-
+listByTest: async (testId, gender = "Both", ageKey = "any") => {
   try {
-    // Fetch ALL ranges (no WHERE filter) — we filter in JS
+    const tId = Number(testId);
+    const g = String(gender || "Both").trim();
+    const a = String(ageKey || "any").trim().toLowerCase();
+
+    console.log(a,g)
+
+    const isAnyAge = (val) => String(val || "").trim().toLowerCase() === "any";
+
     const rows = await prisma.testParameter.findMany({
       where: { testId: tId },
       orderBy: { order: "asc" },
       include: {
         ranges: { orderBy: { id: "asc" } },
-        resultOpts: { orderBy: { id: "asc" } },
+        resultOpts: { orderBy: { id: "asc" } }, // ✅ always fetch all
       },
     });
 
-    // Save original counts before filtering
+
+    // ✅ store original counts so we don't wrongly drop parameters
     const originalCounts = new Map(
       rows.map((p) => [
         p.id,
-        { ranges: p.ranges.length, resultOpts: p.resultOpts.length },
+        { ranges: p.ranges?.length || 0, resultOpts: p.resultOpts?.length || 0 },
       ])
     );
 
-    const filtered = rows.map(applyFilters);
-    return applyPostFilter(filtered, originalCounts);
+    const filtered = rows.map((p) => {
+      let ranges = [...(p.ranges || [])];
+
+      /* ---------------- GENDER FILTER (ranges only) ---------------- */
+      if (ranges.length > 0) {
+        if (g !== "Both") {
+          const specific = ranges.filter((r) => r.gender === g);
+          ranges = specific.length > 0 ? specific : ranges.filter((r) => r.gender === "Both");
+        } else {
+          ranges = ranges.filter((r) => r.gender === "Both");
+        }
+      }
+
+      /* ---------------- AGE FILTER (ranges only) ---------------- */
+      if (ranges.length > 0) {
+        if (a === "any") {
+          ranges = ranges.filter((r) => isAnyAge(r.referenceRange));
+        } else {
+
+       
+          const specificAge = ranges.filter(
+            (r) =>
+              !isAnyAge(r.referenceRange) &&
+              String(r.referenceRange || "").trim().toLowerCase() === a
+          );
+
+
+          
+          const anyAge = ranges.filter((r) => isAnyAge(r.referenceRange));
+
+          ranges = specificAge.length > 0 ? specificAge : anyAge;
+        }
+      }
+
+      // ✅ resultOpts untouched, return all
+      return { ...p, ranges, resultOpts: p.resultOpts || [] };
+    });
+
+    /* ✅ POST FILTER RULES
+       - If parameter originally had neither ranges nor resultOpts -> keep (still valid)
+       - If it originally had ranges/resultOpts, keep if at least one survived:
+           ranges survived OR resultOpts exists
+       - Since we never filter resultOpts, this will keep OPTIONS parameters always.
+    */
+    return filtered.filter((p) => {
+      const orig = originalCounts.get(p.id) || { ranges: 0, resultOpts: 0 };
+
+      // no config at all -> keep
+      if (orig.ranges === 0 && orig.resultOpts === 0) return true;
+
+      // keep if ranges survived OR has resultOpts
+      if ((p.ranges?.length || 0) > 0) return true;
+      if ((p.resultOpts?.length || 0) > 0) return true;
+
+      // else drop
+      return false;
+    });
   } catch (err) {
-    console.error("listByTest error:", err);
+    console.error("ParameterService.listByTest error:", err);
     throw err;
   }
 },

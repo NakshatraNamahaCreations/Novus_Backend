@@ -24,6 +24,7 @@ import {
   bulkUpsertCenterSlotDateOverride,
   getCenterSlotDateOverrides,
   deleteCenterSlotDateOverride,
+  getCenterSlotsForCategories
 } from "./center.controller.js";
 import { authenticateUser } from "../../middlewares/auth.js";
 
@@ -38,6 +39,8 @@ router.get("/:id/categories", getCenterCategories);
 
 router.post("/:id/slots", createCenterSlot);
 router.get("/:id/slots", getCenterSlots);
+// ✅ NEW: Option A common slots
+router.get("/:centerId/slots/common", getCenterSlotsForCategories);
 router.put("/slot/:slotId", updateCenterSlot);
 router.delete("/slot/:slotId", deleteCenterSlot);
 // weekly config

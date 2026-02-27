@@ -539,7 +539,7 @@ p { font-size: 13; }
   padding: 10px 14px;
   background: var(--bg-light);
 
-  border-bottom: 1px solid var(--border-light);
+ 
   page-break-after: avoid;
   page-break-inside: avoid;
   text-transform: uppercase;

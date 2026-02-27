@@ -1,33 +1,11 @@
+import { PrismaClient } from "@prisma/client";
 import { ParameterService } from "./parameter.service.js";
-const ageToKey = (ageStr) => {
-  const s = String(ageStr ?? "").trim().toLowerCase();
-  if (!s) return "any";
+import { ageToKeyFromDob } from "../../utils/ageToKeyFromDob.js";
 
-  // If frontend already sends key (like "1_year_to_2_years"), keep it
-  const allowedKeys = new Set([
-    "any",
-    "newborn_upto_1_month",
-    "1_month_to_1_year",
-    "1_year_to_2_years",
-    "2_years_to_10_years",
-    "10_years_to_17_years",
-  ]);
-  if (allowedKeys.has(s)) return s;
+const prisma = new PrismaClient();
 
-  // Try number (years)
-  const years = Number(s);
-  if (!Number.isFinite(years) || years < 0) return "any";
 
-  // Map years -> key
-  if (years < 1 / 12) return "newborn_upto_1_month"; // < ~0.0833 years
-  if (years < 1) return "1_month_to_1_year";
-  if (years < 2) return "1_year_to_2_years";
-  if (years < 10) return "2_years_to_10_years";
-  if (years < 18) return "10_years_to_17_years";
 
-  // Outside supported range
-  return "any";
-};
 export const ParameterController = {
   addParameter: async (req, res) => {
     try {
@@ -60,31 +38,59 @@ export const ParameterController = {
     }
   },
 
-
-
 listByTest: async (req, res) => {
-  try {
-    const { testId } = req.params;
+    try {
+      const { testId } = req.params;
+      const patientId = req.query.patientId
+        ? Number(req.query.patientId)
+        : null;
 
-    const gender = (req.query.gender || "Both").toString().trim();
-    const ageKey = ageToKey(req.query.age || "any"); // ✅ convert here
+      let gender = "Both";
+      let ageKey = "any";
 
-    console.log("ageKey",ageKey)
-    const allowedGender = new Set(["Male", "Female", "Both", "Kids"]);
-    if (!allowedGender.has(gender)) {
-      return res.status(400).json({
+      // ✅ If patientId provided → derive gender + ageKey
+      if (patientId && Number.isFinite(patientId)) {
+        const patient = await prisma.patient.findUnique({
+          where: { id: patientId }, // 🔥 change model name if needed
+          select: { gender: true, dob: true },
+        });
+
+        if (patient) {
+          gender = patient.gender || "Both";
+          ageKey = ageToKeyFromDob(patient.dob);
+        }
+      }
+
+      const allowedGender = new Set(["Male", "Female", "Both", "Kids"]);
+      if (!allowedGender.has(gender)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid gender",
+        });
+      }
+
+      console.log("ageKey---",ageKey)
+
+      const list = await ParameterService.listByTest(
+        testId,
+        gender,
+        ageKey
+      );
+
+      return res.json({
+        success: true,
+        data: list,
+        meta: { gender, ageKey }, // helpful for debugging
+      });
+    } catch (err) {
+      console.error("listByTest error:", err);
+      return res.status(500).json({
         success: false,
-        error: "Invalid gender. Use Male, Female, Both, or Kids.",
+        error: "Failed to fetch parameters",
       });
     }
+  },
 
-    const list = await ParameterService.listByTest(testId, gender, ageKey);
-    return res.json({ success: true, data: list });
-  } catch (err) {
-    console.error("listByTest error:", err);
-    return res.status(500).json({ success: false, error: "Failed to fetch parameters" });
-  }
-},
 
 
    listByTest1: async (req, res) => {

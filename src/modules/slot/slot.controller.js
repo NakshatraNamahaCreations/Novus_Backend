@@ -214,49 +214,63 @@ export const deleteSlot = async (req, res) => {
  */
 export const getSlots = async (req, res) => {
   try {
+    const today = new Date();
+
     const slots = await prisma.slot.findMany({
       where: { isActive: true },
       orderBy: { startTime: "asc" },
       include: {
-        dayConfigs: { orderBy: { dayOfWeek: "asc" } }, // ✅ correct
+        dayConfigs: { orderBy: { dayOfWeek: "asc" } },
         dateOverrides: {
-          where: { date: { gte: new Date() } },
+          where: { date: { gte: today } },
           orderBy: { date: "asc" },
-        }, // ✅ correct
+        },
+
+        // ✅ IMPORTANT: include orderSlots so slot.orderSlots exists
+        orderSlots: {
+          // optional: if your orderSlot has a date field, filter to today/future
+          // where: { date: { gte: today } },
+          select: { count: true }, // keep it light
+        },
       },
     });
 
-   const formatted = slots
-  .map((slot) => {
-    const effectiveCapacity =
-      slot.dateOverrides[0]?.capacity ??
-      slot.dayConfigs[0]?.capacity ??
-      slot.capacity;
+    const formatted = slots
+      .map((slot) => {
+        const effectiveCapacity =
+          slot.dateOverrides?.[0]?.capacity ??
+          slot.dayConfigs?.[0]?.capacity ??
+          slot.capacity;
 
-    if (Number(effectiveCapacity || 0) <= 0) return null; // ✅ hide closed slots
+        if (Number(effectiveCapacity || 0) <= 0) return null;
 
-    const booked = slot.orderSlots.reduce((sum, os) => sum + (os.count || 0), 0);
-    const remaining = Math.max(0, effectiveCapacity - booked);
+        const booked = (slot.orderSlots ?? []).reduce(
+          (sum, os) => sum + (os?.count || 0),
+          0
+        );
 
-    return {
-      id: slot.id,
-      name: slot.name,
-      startTimeLabel: formatTime(slot.startTime),
-      endTimeLabel: formatTime(slot.endTime),
-      defaultCapacity: slot.capacity,
-      effectiveCapacity,
-      capacitySource:
-        slot.dateOverrides[0]
-          ? "date_override"
-          : slot.dayConfigs[0]
-          ? "day_config"
-          : "default",
-      booked,
-      remaining,
-      isFull: booked >= effectiveCapacity,
-    };
-  })
-  .filter(Boolean);
+        const remaining = Math.max(0, effectiveCapacity - booked);
+
+        return {
+          id: slot.id,
+          name: slot.name,
+          startTimeLabel: formatTime(slot.startTime),
+          endTimeLabel: formatTime(slot.endTime),
+          defaultCapacity: slot.capacity,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          effectiveCapacity,
+          capacitySource: slot.dateOverrides?.[0]
+            ? "date_override"
+            : slot.dayConfigs?.[0]
+            ? "day_config"
+            : "default",
+          booked,
+          remaining,
+          isFull: booked >= effectiveCapacity,
+        };
+      })
+      .filter(Boolean);
 
     return res.status(200).json({ slots: formatted });
   } catch (err) {
@@ -321,6 +335,8 @@ export const getSlotsByDate = async (req, res) => {
           name: slot.name,
           startTimeLabel: formatTime(slot.startTime),
           endTimeLabel: formatTime(slot.endTime),
+          startTime: formatTime(slot.startTime),
+          endTime: formatTime(slot.endTime),
           defaultCapacity: slot.capacity,
           effectiveCapacity,
           capacitySource,

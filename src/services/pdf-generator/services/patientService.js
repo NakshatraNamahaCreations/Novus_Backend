@@ -2,49 +2,42 @@
 import { PrismaClient } from "@prisma/client";
 import { safeTrim } from "../utils/stringUtils.js";
 import { SignatureService } from "./signatureService.js";
+import { ageToKeyFromDob } from "../../../utils/ageToKeyFromDob.js";
 
 const prisma = new PrismaClient();
 
+
 const normalizeGender = (g) => {
   const x = String(g || "").trim().toUpperCase();
-  if (!x) return "BOTH";
+  if (!x) return "Both";
   if (x === "M" || x === "MALE") return "Male";
   if (x === "F" || x === "FEMALE") return "Female";
-  return "BOTH";
+  if (x === "K" || x === "KID" || x === "KIDS") return "Kids";
+  return "Both";
 };
 
 const genderWhere = (gender) => {
   const g = normalizeGender(gender);
-  return { OR: [{ gender: "Both" }, { gender: "BOTH" }, { gender: g }] };
+
+  if (g === "Kids") {
+    return {
+      OR: [
+        { gender: "Kids" },
+        { gender: "KIDS" },
+        { gender: "Both" },
+        { gender: "BOTH" },
+      ],
+    };
+  }
+
+  return {
+    OR: [{ gender: "Both" }, { gender: "BOTH" }, { gender: g }],
+  };
 };
 
-// ✅ Convert patient age (number) → age key used in ParameterRange.referenceRange
-// Matches the same logic as the frontend ageToKey()
-const ageToKey = (age) => {
-  const years = Number(age);
-  if (!Number.isFinite(years) || years < 0) return null; // null = no age filter
-
-  if (years < 1 / 12) return "newborn_upto_1_month";
-  if (years < 1)       return "1_month_to_1_year";
-  if (years < 2)       return "1_year_to_2_years";
-  if (years < 10)      return "2_years_to_10_years";
-  if (years < 18)      return "10_years_to_17_years";
-
-  return null; // adult / out of range → no age filter, show "any" only
-};
-
-// ✅ Build the ranges WHERE clause:
-//    - Always filter by gender
-//    - If specific age key exists → include [ageKey, "any", "Any"]
-//    - If no age key (adult/unknown) → only show "any" / "Any"
-const rangesWhere = (gender, ageKey) => {
-  const gWhere = genderWhere(gender);
-
-  const ageFilter = ageKey
-    ? { referenceRange: { in: [ageKey, "any", "Any"] } }
-    : { referenceRange: { in: ["any", "Any"] } };
-
-  return { AND: [gWhere, ageFilter] };
+// ✅ ONLY gender filter for ranges (NO age logic anymore)
+const rangesWhereByGenderOnly = (gender) => {
+  return genderWhere(gender);
 };
 
 export class PatientService {
@@ -56,23 +49,23 @@ export class PatientService {
         this.getLayoutData(),
       ]);
 
-      if (!order)   throw new Error("Order not found");
+      if (!order) throw new Error("Order not found");
       if (!patient) throw new Error("Patient not found");
 
-      // ✅ Pass both gender AND age to getPatientResults
+      // ✅ age removed from signature
       const results = await this.getPatientResults(
         orderId,
         patientId,
         patient.gender,
-        patient.age       // ✅ NEW: pass age for range filtering
+        patient.dob
       );
 
       const derived = {
-        reportRefId:      this.getReportRefId(order),
-        patientIdentifier: this.getPatientIdentifier(patient, order),
-        refDoctorInfo:    this.getRefDoctorInfo(order),
-        partnerInfo:      this.getPartnerInfo(order),
-        orderDates:       this.getOrderDates(order),
+        reportRefId: this.getReportRefId(order),
+        patientIdentifier: this.getPatientIdentifier(patient),
+        refDoctorInfo: this.getRefDoctorInfo(order),
+        partnerInfo: this.getPartnerInfo(order),
+        orderDates: this.getOrderDates(order),
       };
 
       return { order, patient, layout, results, derived };
@@ -83,85 +76,102 @@ export class PatientService {
   }
 
   static async getPatientData(patientId) {
-    return await prisma.patient.findUnique({
-      where: { id: Number(patientId) },
-      select: {
-        id: true,
-        fullName: true,
-        initial: true,
-        dob: true,
-        age: true,
-        gender: true,
-        contactNo: true,
-        email: true,
-        height: true,
-        weight: true,
-        smokingHabit: true,
-        alcoholConsumption: true,
-        exerciseFrequency: true,
-        bloodType: true,
-        aadharNo: true,
-        address: true,
-        passportNo: true,
-        relationship: true,
-        isPrimary: true,
-        primaryId: true,
-      },
-    });
+    try {
+      return await prisma.patient.findUnique({
+        where: { id: Number(patientId) },
+        select: {
+          id: true,
+          fullName: true,
+          initial: true,
+          dob: true,
+          age: true,
+          gender: true,
+          contactNo: true,
+          email: true,
+          height: true,
+          weight: true,
+          smokingHabit: true,
+          alcoholConsumption: true,
+          exerciseFrequency: true,
+          bloodType: true,
+          aadharNo: true,
+          address: true,
+          passportNo: true,
+          relationship: true,
+          isPrimary: true,
+          primaryId: true,
+        },
+      });
+    } catch (err) {
+      console.error("PatientService.getPatientData error:", err);
+      throw err;
+    }
   }
 
   static async getOrderData(orderId) {
-    return await prisma.order.findUnique({
-      where: { id: Number(orderId) },
-      include: {
-        doctor: {
-          select: {
-            id: true,
-            name: true,
-            initial: true,
-            qualification: true,
-            speciality: true,
-            mobile: true,
-            email: true,
+    try {
+      return await prisma.order.findUnique({
+        where: { id: Number(orderId) },
+        include: {
+          doctor: {
+            select: {
+              id: true,
+              name: true,
+              initial: true,
+              qualification: true,
+              speciality: true,
+              mobile: true,
+              email: true,
+            },
+          },
+          patient: {
+            select: {
+              id: true,
+              fullName: true,
+              initial: true,
+              dob: true,
+              age: true,
+              gender: true,
+              contactNo: true,
+            },
+          },
+          center: { select: { id: true, name: true, address: true } },
+          vendor: { select: { id: true, name: true } },
+          orderMembers: {
+            include: {
+              patient: true,
+              orderMemberPackages: { include: { package: true, test: true } },
+            },
           },
         },
-        patient: {
-          select: {
-            id: true,
-            fullName: true,
-            initial: true,
-            dob: true,
-            age: true,
-            gender: true,
-            contactNo: true,
-          },
-        },
-        center: { select: { id: true, name: true, address: true } },
-        vendor: { select: { id: true, name: true } },
-        orderMembers: {
-          include: {
-            patient: true,
-            orderMemberPackages: { include: { package: true, test: true } },
-          },
-        },
-      },
-    });
+      });
+    } catch (err) {
+      console.error("PatientService.getOrderData error:", err);
+      throw err;
+    }
   }
 
   static async getLayoutData() {
-    return await prisma.reportLayout.findFirst({ orderBy: { id: "desc" } });
+    try {
+      return await prisma.reportLayout.findFirst({ orderBy: { id: "desc" } });
+    } catch (err) {
+      console.error("PatientService.getLayoutData error:", err);
+      throw err;
+    }
   }
 
-  // ✅ results + reportItems + department signatures
-  // ✅ NOW accepts patientAge for proper range filtering
-  static async getPatientResults(orderId, patientId, patientGender, patientAge) {
+  // ✅ Age-wise filter removed
+ static async getPatientResults(orderId, patientId, patientGender, patientDob) {
+  try {
     const gender = normalizeGender(patientGender);
-    const ageKey = ageToKey(patientAge); // e.g. "2_years_to_10_years" or null
+    const ageKey = ageToKeyFromDob(patientDob);
 
-    // 1) Results (with test.departmentItemId)
+    console.log("ageKey--",ageKey)
+
+    // 1) Results
     const results = await prisma.patientTestResult.findMany({
       where: {
-        orderId:   Number(orderId),
+        orderId: Number(orderId),
         patientId: Number(patientId),
       },
       include: {
@@ -172,29 +182,24 @@ export class PatientService {
             categoryId: true,
             departmentItemId: true,
             testType: true,
-            departmentItem: {
-              select: { id: true, name: true },
-            },
+            departmentItem: { select: { id: true, name: true } },
           },
         },
         parameterResults: {
-          include: {
-            parameter: true,
-          },
+          include: { parameter: true },
           orderBy: { parameterId: "asc" },
         },
-        leftSignature:   true,
+        leftSignature: true,
         centerSignature: true,
-        rightSignature:  true,
+        rightSignature: true,
       },
       orderBy: { id: "asc" },
     });
 
-    if (!results.length) throw new Error("No results found for this patient");
+    if (!results.length)
+      throw new Error("No results found for this patient");
 
-    // 2) ReportItems by testId — gender filtered
     const testIds = [...new Set(results.map((r) => r.testId))];
-
     const reportItemsByTestId = new Map();
 
     const items = await prisma.testReportItem.findMany({
@@ -206,59 +211,106 @@ export class PatientService {
       include: {
         parameter: {
           include: {
-            // ✅ FIXED: filter ranges by BOTH gender AND age
             ranges: {
-              where: rangesWhere(gender, ageKey),
+              orderBy: { id: "asc" }, // fetch all first
+            },
+            resultOpts: {
               orderBy: { id: "asc" },
             },
-            resultOpts: { orderBy: { id: "asc" } },
           },
         },
       },
     });
 
+
+    /* ---------------- APPLY GENDER + AGE FILTER ON RANGES ---------------- */
+    const isAnyAge = (val) =>
+      String(val || "").trim().toLowerCase() === "any";
+
     for (const it of items) {
+      if (it.parameter?.ranges?.length) {
+        let ranges = [...it.parameter.ranges];
+
+        // 🔹 Gender filter
+        const genderFiltered =
+          gender !== "Both"
+            ? ranges.filter((r) => r.gender === gender)
+            : ranges.filter((r) => r.gender === "Both");
+
+        ranges =
+          genderFiltered.length > 0
+            ? genderFiltered
+            : ranges.filter((r) => r.gender === "Both");
+
+        // 🔹 Age filter
+        if (ageKey === "any") {
+          ranges = ranges.filter((r) => isAnyAge(r.referenceRange));
+        } else {
+
+          console.log("ranges=-=",ranges)
+          const specific = ranges.filter(
+            (r) =>
+              !isAnyAge(r.referenceRange) &&
+              String(r.referenceRange || "")
+                .trim()
+                .toLowerCase() === ageKey
+          );
+console.log("specific",specific)
+          const anyAge = ranges.filter((r) =>
+            isAnyAge(r.referenceRange)
+          );
+
+          ranges = specific.length > 0 ? specific : anyAge;
+        }
+
+        it.parameter.ranges = ranges;
+      }
+
       if (!reportItemsByTestId.has(it.testId))
         reportItemsByTestId.set(it.testId, []);
+
       reportItemsByTestId.get(it.testId).push(it);
     }
 
-    // 3) Department default signatures
+    // Department signatures
     const depIds = [
-      ...new Set(
-        results.map((r) => r?.test?.departmentItemId).filter(Boolean)
-      ),
+      ...new Set(results.map((r) => r?.test?.departmentItemId).filter(Boolean)),
     ];
+
     const defaultByDept =
       await SignatureService.getDefaultSignaturesByDepartment(depIds);
 
-    // 4) Attach reportItems + resolve signatures
     const resultsWithReportItems = results.map((r) => ({
       ...r,
       reportItems: reportItemsByTestId.get(r.testId) || [],
     }));
 
-    const finalResults =
-      SignatureService.augmentResultsWithDepartmentSignatures(
-        resultsWithReportItems,
-        defaultByDept
-      );
-
-    return finalResults;
+    return SignatureService.augmentResultsWithDepartmentSignatures(
+      resultsWithReportItems,
+      defaultByDept
+    );
+  } catch (err) {
+    console.error("PatientService.getPatientResults error:", err);
+    throw err;
   }
+}
 
-  // ---- existing derived helpers (kept same) ----
+  // ---- derived helpers ----
   static getPatientIdentifier(patientData) {
-    if (!patientData) return "—";
-    const identifiers = [
-      patientData.initial,
-      patientData.contactNo,
-      patientData.aadharNo,
-      patientData.passportNo,
-      `PID-${patientData.id}`,
-    ];
-    const identifier = identifiers.find((id) => id && safeTrim(id) !== "");
-    return identifier ? safeTrim(identifier) : `PID-${patientData.id}`;
+    try {
+      if (!patientData) return "—";
+      const identifiers = [
+        patientData.initial,
+        patientData.contactNo,
+        patientData.aadharNo,
+        patientData.passportNo,
+        `PID-${patientData.id}`,
+      ];
+      const identifier = identifiers.find((id) => id && safeTrim(id) !== "");
+      return identifier ? safeTrim(identifier) : `PID-${patientData.id}`;
+    } catch {
+      return patientData?.id ? `PID-${patientData.id}` : "—";
+    }
   }
 
   static getReportRefId(orderData) {
@@ -273,25 +325,25 @@ export class PatientService {
   static getRefDoctorInfo(orderData) {
     if (!orderData?.doctor) return "N/A";
     const d = orderData.doctor;
-    const title    = d.initial ? `${d.initial} ` : "";
-    const name     = d.name || "";
+    const title = d.initial ? `${d.initial} ` : "";
+    const name = d.name || "";
     const fullName = safeTrim(`${title}${name}`);
     const qualification = d.qualification ? ` (${d.qualification})` : "";
-    return fullName + qualification || "N/A";
+    return (fullName + qualification) || "N/A";
   }
 
   static getPartnerInfo(orderData) {
-    if (orderData?.center?.name)           return orderData.center.name;
+    if (orderData?.center?.name) return orderData.center.name;
     if (orderData?.diagnosticCenter?.name) return orderData.diagnosticCenter.name;
-    if (orderData?.refCenter?.name)        return orderData.refCenter.name;
+    if (orderData?.refCenter?.name) return orderData.refCenter.name;
     return orderData?.source || "-";
   }
 
   static getOrderDates(orderData) {
     return {
       collectedAt: orderData?.date,
-      receivedAt:  orderData?.createdAt,
-      reportedAt:  orderData?.updatedAt,
+      receivedAt: orderData?.createdAt,
+      reportedAt: orderData?.updatedAt,
     };
   }
 }

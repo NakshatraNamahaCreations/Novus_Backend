@@ -1,5 +1,6 @@
 // ✅ src/modules/results/result.service.js
 import { PrismaClient } from "@prisma/client";
+import { ageToKeyFromDob } from "../../utils/ageToKeyFromDob.js";
 const prisma = new PrismaClient();
 
 const normalizeGender = (g) => {
@@ -21,7 +22,50 @@ const toIntOrNull = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const isEmptyDefaults = (d) => !d?.left && !d?.center && !d?.right;
+
+
+
+// apply gender + age filter on ranges
+const filterRangesByGenderAndAge = (ranges = [], gender, ageKey) => {
+  try {
+    const original = [...(ranges || [])];
+    if (original.length === 0) return [];
+
+    const normGender = String(gender || "Both").trim();
+    const normAge = String(ageKey || "any").trim().toLowerCase();
+
+    const isAnyAge = (v) => String(v || "").trim().toLowerCase() === "any";
+    const normRef = (v) => String(v || "").trim().toLowerCase();
+
+    // 1) gender filter
+    let out = [...original];
+
+    if (normGender !== "Both") {
+      const specificGender = out.filter((r) => String(r.gender || "").trim() === normGender);
+      out = specificGender.length ? specificGender : out.filter((r) => String(r.gender || "").trim() === "Both");
+    } else {
+      out = out.filter((r) => String(r.gender || "").trim() === "Both");
+    }
+
+    // if gender filtering killed all, fallback to original (optional safety)
+    if (out.length === 0) out = [...original];
+
+    // 2) age filter
+    if (normAge === "any") {
+      const anyAge = out.filter((r) => isAnyAge(r.referenceRange));
+      out = anyAge.length ? anyAge : out; // if no anyAge, keep whatever exists
+    } else {
+      const specificAge = out.filter((r) => !isAnyAge(r.referenceRange) && normRef(r.referenceRange) === normAge);
+      const anyAge = out.filter((r) => isAnyAge(r.referenceRange));
+      out = specificAge.length ? specificAge : (anyAge.length ? anyAge : out);
+    }
+
+    return out;
+  } catch (err) {
+    console.error("filterRangesByGenderAndAge error:", err);
+    return ranges || [];
+  }
+};
 
 export const ResultService = {
   // -------------------------------------------
@@ -56,26 +100,64 @@ export const ResultService = {
   // -------------------------------------------
   // FETCH BEST MATCHING RANGE
   // -------------------------------------------
-  findRange: async (parameterId, patient) => {
+findRange: async (parameterId, patient) => {
+  try {
     const ranges = await prisma.parameterRange.findMany({
-      where: { parameterId },
+      where: { parameterId: Number(parameterId) },
       orderBy: { id: "asc" },
     });
+
     if (!ranges.length) return null;
 
-    const gender = patient.gender?.toLowerCase();
+    const patientGender = normalizeGender(patient?.gender);
+    const ageKey = ageToKeyFromDob(patient?.dob); // ✅ DOB -> ageKey
 
-    return (
-      ranges.find((r) => r.gender?.toLowerCase() === gender) ||
-      ranges.find((r) => !r.gender || r.gender === "any") ||
-      ranges[0]
-    );
-  },
+    const norm = (v) => String(v || "").trim().toLowerCase();
+    const isAny = (v) => norm(v) === "any";
+
+    const match = (r, gWanted, ageWanted) => {
+      const rg = String(r.gender || "Both").trim(); // DB value
+      const ra = norm(r.referenceRange); // age key stored here
+      const gOk = rg === gWanted;
+      const aOk = ra === norm(ageWanted);
+      return gOk && aOk;
+    };
+
+    // ✅ Priority order:
+    // 1) exact gender + exact ageKey
+    let found = ranges.find((r) => match(r, patientGender, ageKey));
+    if (found) return found;
+
+    // 2) Both + exact ageKey
+    found = ranges.find((r) => match(r, "Both", ageKey));
+    if (found) return found;
+
+    // 3) exact gender + any
+    found = ranges.find((r) => match(r, patientGender, "any"));
+    if (found) return found;
+
+    // 4) Both + any
+    found = ranges.find((r) => match(r, "Both", "any"));
+    if (found) return found;
+
+    // 5) if patient ageKey is any, still try gender only
+    found =
+      ranges.find((r) => String(r.gender || "").trim() === patientGender) ||
+      ranges.find((r) => String(r.gender || "").trim() === "Both");
+
+    return found || ranges[0];
+  } catch (err) {
+    console.error("findRange error:", err);
+    return null;
+  }
+},
 
   // -------------------------------------------
   // FLAG EVALUATION
   // -------------------------------------------
   evaluateFlag: (value, range) => {
+
+    console.log("value, range",value, range)
     if (value === null || value === undefined || !range) return "NA";
 
     if (range.criticalLow != null && value < range.criticalLow)
@@ -307,6 +389,7 @@ export const ResultService = {
         for (const p of payload.parameters) {
           const range = await ResultService.findRange(p.parameterId, patient);
 
+          console.log("range000",range)
           const flag =
             p.valueNumber != null
               ? ResultService.evaluateFlag(p.valueNumber, range)
@@ -426,28 +509,22 @@ getOrderReportsAllPatients: async ({ orderId, testId }) => {
       center: { select: { id: true, name: true, address: true } },
       diagnosticCenter: { select: { id: true, name: true, address: true } },
       vendor: { select: { id: true, name: true } },
-
-      // ✅ assuming relation exists
-      orderMembers: {
-        select: { patientId: true },
-      },
+      orderMembers: { select: { patientId: true } },
     },
   });
 
   if (!order) throw new Error("Order not found");
 
   const patientIds = Array.from(
-    new Set([
-      order.patientId,
-      ...(order.orderMembers || []).map((m) => m.patientId),
-    ].filter(Boolean))
+    new Set(
+      [order.patientId, ...(order.orderMembers || []).map((m) => m.patientId)]
+        .filter(Boolean)
+    )
   );
 
-  if (!patientIds.length) {
-    throw new Error("No patients linked to this order");
-  }
+  if (!patientIds.length) throw new Error("No patients linked to this order");
 
-  // 2) Fetch patients
+  // 2) Fetch patients (✅ age removed, only dob)
   const patients = await prisma.patient.findMany({
     where: { id: { in: patientIds } },
     select: {
@@ -455,7 +532,6 @@ getOrderReportsAllPatients: async ({ orderId, testId }) => {
       fullName: true,
       initial: true,
       dob: true,
-      age: true,
       gender: true,
       contactNo: true,
       email: true,
@@ -488,7 +564,8 @@ getOrderReportsAllPatients: async ({ orderId, testId }) => {
         include: {
           parameter: {
             include: {
-              ranges: { orderBy: { id: "asc" } }, // filter later by gender
+              // bring all, filter later
+              ranges: { orderBy: { id: "asc" } },
               resultOpts: { orderBy: { id: "asc" } },
             },
           },
@@ -501,9 +578,7 @@ getOrderReportsAllPatients: async ({ orderId, testId }) => {
     orderBy: [{ patientId: "asc" }, { id: "asc" }],
   });
 
-  if (!results?.length) {
-    throw new Error("No test results found for this order");
-  }
+  if (!results?.length) throw new Error("No test results found for this order");
 
   // 4) Layout (shared)
   const layout = await prisma.reportLayout.findFirst({
@@ -517,43 +592,79 @@ getOrderReportsAllPatients: async ({ orderId, testId }) => {
     resultsByPatientId.get(r.patientId).push(r);
   }
 
-  // 6) Build patientReports
-  // NOTE: reportItems depend on gender, so we fetch per patient.
+  // 6) Build patientReports (reportItems depend on gender + age)
   const patientReports = await Promise.all(
     patientIds.map(async (pid) => {
-      const patient = patientById.get(pid);
-      if (!patient) return null;
+      try {
+        const patient = patientById.get(pid);
+        if (!patient) return null;
 
-      const gender = normalizeGender(patient.gender);
-      const patientResults = resultsByPatientId.get(pid) || [];
+        const gender = normalizeGender(patient.gender);
+        const ageKey = ageToKeyFromDob(patient.dob); // ✅ DOB -> ageKey
 
-      const testIds = [...new Set(patientResults.map((r) => r.testId))];
+        const patientResults = resultsByPatientId.get(pid) || [];
+        const testIds = [...new Set(patientResults.map((r) => r.testId))];
 
-      const reportItemsByTestId = {};
-      await Promise.all(
-        testIds.map(async (tid) => {
-          const items = await prisma.testReportItem.findMany({
-            where: { testId: tid, ...genderWhere(gender) },
-            orderBy: { sortOrder: "asc" },
-            include: {
-              parameter: {
-                include: {
-                  ranges: { where: genderWhere(gender), orderBy: { id: "asc" } },
-                  resultOpts: { orderBy: { id: "asc" } },
+        const reportItemsByTestId = {};
+
+        await Promise.all(
+          testIds.map(async (tid) => {
+            const items = await prisma.testReportItem.findMany({
+              where: { testId: tid, ...genderWhere(gender) },
+              orderBy: { sortOrder: "asc" },
+              include: {
+                parameter: {
+                  include: {
+                    // fetch all ranges; filter in JS for both gender+age
+                    ranges: { orderBy: { id: "asc" } },
+                    resultOpts: { orderBy: { id: "asc" } },
+                  },
                 },
               },
-            },
-          });
-          reportItemsByTestId[tid] = items;
-        })
-      );
+            });
 
-      return {
-        patient,
-        gender,
-        results: patientResults,
-        reportItemsByTestId,
-      };
+            // ✅ apply gender+age filter to each item's parameter.ranges
+            for (const it of items) {
+              if (it?.parameter?.ranges?.length) {
+                it.parameter.ranges = filterRangesByGenderAndAge(
+                  it.parameter.ranges,
+                  gender,
+                  ageKey
+                );
+              }
+            }
+
+            reportItemsByTestId[tid] = items;
+          })
+        );
+
+        // ✅ Also filter ranges inside results.parameterResults.parameter.ranges
+        // (because you included parameter ranges in patientTestResult too)
+        for (const r of patientResults) {
+          if (Array.isArray(r.parameterResults)) {
+            for (const pr of r.parameterResults) {
+              if (pr?.parameter?.ranges?.length) {
+                pr.parameter.ranges = filterRangesByGenderAndAge(
+                  pr.parameter.ranges,
+                  gender,
+                  ageKey
+                );
+              }
+            }
+          }
+        }
+
+        return {
+          patient,
+          gender,
+          ageKey,
+          results: patientResults,
+          reportItemsByTestId,
+        };
+      } catch (err) {
+        console.error("patientReports build error:", err);
+        return null;
+      }
     })
   );
 
