@@ -38,7 +38,7 @@ import cartRoutes from "./modules/cart/cart.routes.js";
 import doctorRoutes from "./modules/doctor/doctor.routes.js";
 import slotRoutes from "./modules/slot/slot.routes.js";
 // Socket handler
-import locationSocketHandler from './modules/location/location.socket.js';
+import reportsRoutes from './modules/report/reports.routes.js'
 import parameterRoutes from "./modules/parameters/parameters.routes.js";
 import resultRoutes from "./modules/results/results.routes.js";
 import rangeRoutes from "./modules/ranges/range.routes.js";
@@ -127,6 +127,8 @@ app.use('/api/vendors', vendorsRoutes);
 app.use('/api/vendor-profile', vendorProfileRoutes);
 
 app.use('/api/vendor-attendance', vvendorAttendanceRoutes);
+app.use('/api/reports', reportsRoutes);
+
 
 
 app.use('/api/users', usersRoutes);

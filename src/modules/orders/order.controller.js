@@ -1969,6 +1969,249 @@ export const getAllOrders = async (req, res) => {
   }
 };
 
+export const getLabOrders = async (req, res) => {
+  try {
+    let {
+      page = 1,
+      limit = 10,
+
+      // ── Separate search fields ────────────────────────────────────────────
+      orderId = "",       // exact order ID (numeric)
+      patientName = "",   // patient.fullName
+      phone = "",         // patient.contactNo
+      testName = "",      // test/package name via orderCheckups or orderMemberPackages
+      orderDate = "",     // order.date (schedule date) — single day YYYY-MM-DD
+      fromDate = "",      // order.createdAt >= fromDate
+      toDate = "",        // order.createdAt <= toDate
+
+      // ── Dropdown filters ──────────────────────────────────────────────────
+      status = "",
+      paymentStatus = "",
+      source = "",
+      refCenterId = "",
+      diagnosticCenterId = "",
+      centerId = "",
+    } = req.query;
+
+    page = Number(page);
+    limit = Number(limit);
+    const skip = (page - 1) * limit;
+
+    const user = req.user;
+    const where = {};
+
+    // ── Role-based restriction ─────────────────────────────────────────────
+    if (user?.role === "admin") {
+      const diagnosticCenterIds = Array.isArray(user?.diagnosticCenterIds)
+        ? user.diagnosticCenterIds
+        : [];
+
+      if (diagnosticCenterIds.length > 0) {
+        where.diagnosticCenterId = { in: diagnosticCenterIds };
+      } else {
+        return res.status(200).json({ success: false, message: "No orders for this user" });
+      }
+    }
+
+    // ── Order ID ───────────────────────────────────────────────────────────
+    if (orderId && orderId !== "") {
+      const asNumber = Number(String(orderId).trim());
+      if (Number.isFinite(asNumber)) {
+        where.id = asNumber;
+      }
+    }
+
+    // ── Patient Name ───────────────────────────────────────────────────────
+    if (patientName && patientName !== "") {
+      where.patient = {
+        fullName: { contains: String(patientName).trim(), mode: "insensitive" },
+      };
+    }
+
+    // ── Phone Number ───────────────────────────────────────────────────────
+    // NOTE: patient filter uses a nested object — merge carefully
+    if (phone && phone !== "") {
+      where.patient = {
+        ...where.patient,
+        contactNo: { contains: String(phone).trim(), mode: "insensitive" },
+      };
+    }
+
+    // ── Test / Package Name ────────────────────────────────────────────────
+    // Order → orderCheckups → checkup (HealthPackage).name
+    // Order → orderMembers  → orderMemberPackages → test.name / package.name
+    if (testName && testName !== "") {
+      const t = String(testName).trim();
+      where.OR = [
+        {
+          orderCheckups: {
+            some: {
+              checkup: {
+                name: { contains: t, mode: "insensitive" },
+              },
+            },
+          },
+        },
+        {
+          orderMembers: {
+            some: {
+              orderMemberPackages: {
+                some: {
+                  OR: [
+                    {
+                      test: {
+                        name: { contains: t, mode: "insensitive" },
+                      },
+                    },
+                    {
+                      package: {
+                        name: { contains: t, mode: "insensitive" },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ];
+    }
+
+    // ── Order / Schedule Date (single day on order.date) ──────────────────
+    if (orderDate && orderDate !== "") {
+      const d = new Date(orderDate);
+      if (!isNaN(d)) {
+        const start = new Date(d);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(d);
+        end.setHours(23, 59, 59, 999);
+        where.date = { gte: start, lte: end };
+      }
+    }
+
+    // ── Created-At date range — NO default to today ────────────────────────
+    if (fromDate && fromDate !== "") {
+      const start = new Date(fromDate);
+      start.setHours(0, 0, 0, 0);
+      where.createdAt = { ...where.createdAt, gte: start };
+    }
+    if (toDate && toDate !== "") {
+      const end = new Date(toDate);
+      end.setHours(23, 59, 59, 999);
+      where.createdAt = { ...where.createdAt, lte: end };
+    }
+
+    // ── Status ─────────────────────────────────────────────────────────────
+    if (status && status !== "" && status !== "all") {
+      where.status = status;
+    }
+
+    // ── Payment Status ─────────────────────────────────────────────────────
+    if (paymentStatus === "pending") {
+      where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED"] };
+    } else if (paymentStatus === "paid") {
+      where.paymentStatus = { in: ["CAPTURED", "COMPLETED", "paid"] };
+    }
+
+    // ── Source ─────────────────────────────────────────────────────────────
+    if (source && source !== "" && source !== "all") {
+      where.source = { contains: String(source), mode: "insensitive" };
+    }
+
+    // ── Ref Center ─────────────────────────────────────────────────────────
+    if (refCenterId && refCenterId !== "" && refCenterId !== "all") {
+      const id = Number(refCenterId);
+      if (Number.isFinite(id)) where.refCenterId = id;
+    }
+
+    // ── Diagnostic Center / Venue ──────────────────────────────────────────
+    if (diagnosticCenterId && diagnosticCenterId !== "" && diagnosticCenterId !== "all") {
+      const id = Number(diagnosticCenterId);
+      if (Number.isFinite(id)) {
+        // Narrow within admin's allowed centers if role = admin
+        if (user?.role === "admin" && where.diagnosticCenterId?.in) {
+          where.diagnosticCenterId = {
+            in: where.diagnosticCenterId.in.filter((x) => x === id),
+          };
+        } else {
+          where.diagnosticCenterId = id;
+        }
+      }
+    }
+
+    // ── B2B Center ─────────────────────────────────────────────────────────
+    if (centerId && centerId !== "" && centerId !== "all") {
+      const id = Number(centerId);
+      if (Number.isFinite(id)) where.centerId = id;
+    }
+
+    // ── Query ──────────────────────────────────────────────────────────────
+    const [orders, total] = await Promise.all([
+      prisma.order.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          orderNumber: true,
+          status: true,
+          paymentStatus: true,
+          totalAmount: true,
+          finalAmount: true,
+          discount: true,
+          paymentMode: true,
+          date: true,
+          reportReady: true,
+          sampleCollected: true,
+          createdAt: true,
+          isSelf: true,
+          trackingId: true,
+          isHomeSample: true,
+          source: true,
+
+          refCenter:        { select: { id: true, name: true } },
+          patient:          { select: { id: true, fullName: true, email: true, contactNo: true } },
+          vendor:           { select: { id: true, name: true, email: true } },
+          slot:             { select: { id: true, name: true, startTime: true, endTime: true } },
+          centerSlot:       { select: { id: true, name: true, startTime: true, endTime: true } },
+          address:          { select: { id: true, address: true, pincode: true, city: true } },
+          center:           { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
+          diagnosticCenter: { select: { id: true, name: true, address: true, pincode: true, cityId: true } },
+
+          // ✅ Correct relations from Prisma schema
+          orderCheckups: {
+            select: {
+              checkup: { select: { id: true, name: true } },
+            },
+          },
+          orderMembers: {
+            select: {
+              orderMemberPackages: {
+                select: {
+                  test:    { select: { id: true, name: true } },
+                  package: { select: { id: true, name: true } },
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.order.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    return res.json({
+      success: true,
+      orders,
+      meta: { currentPage: page, totalPages, total, perPage: limit },
+    });
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch orders" });
+  }
+};
 export const getOrderById = async (req, res) => {
   try {
     const { id } = req.params;

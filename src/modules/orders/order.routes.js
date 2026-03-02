@@ -24,7 +24,8 @@ import {
   getOrdersByPatientIdCompleted,
   fetchReportDue,
   exportOrderReportsExcel,
-  rescheduleOrder
+  rescheduleOrder,
+  getLabOrders
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
 import { authenticateUser } from "../../middlewares/auth.js";
@@ -42,6 +43,9 @@ router.post(
   createOrder
 );
 router.get("/",authenticateUser, getAllOrders);
+router.get("/lab-orders",authenticateUser, getLabOrders);
+
+
 router.post("/create-admin",authenticateUser, createAdminOrder);
 router.get("/order-reports", getOrderReports);
 router.get("/order-reports/export", exportOrderReportsExcel);
