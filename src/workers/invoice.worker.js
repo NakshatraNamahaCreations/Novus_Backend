@@ -55,22 +55,23 @@ new Worker(
 
         console.log("✅ Invoice uploaded successfully to:", invoiceUrl);
       } else {
-        console.log("ℹ️ Invoice URL already exists, skipping generation:", invoiceUrl);
+        console.log(
+          "ℹ️ Invoice URL already exists, skipping generation:",
+          invoiceUrl,
+        );
       }
 
-      
       await whatsappQueue.add(
-  "whatsapp.sendPaymentConfirmed",
-  { paymentId },
-  {
-    jobId: `payconfirm_${paymentId}`, // ✅ no ":" allowed
-    attempts: 5,
-    backoff: { type: "exponential", delay: 2000 },
-    removeOnComplete: 200,
-    removeOnFail: 500,
-  },
-);
-
+        "whatsapp.sendPaymentConfirmed",
+        { paymentId },
+        {
+          jobId: `payconfirm_${paymentId}`, 
+          attempts: 5,
+          backoff: { type: "exponential", delay: 2000 },
+          removeOnComplete: 200,
+          removeOnFail: 500,
+        },
+      );
 
       console.log("📩 Queued WhatsApp payment confirmation for:", paymentId);
 

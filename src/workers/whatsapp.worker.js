@@ -127,6 +127,7 @@ const fetchOrder = async (orderId) => {
         address: true,
         slot: true,
         centerSlot: true,
+         doctor: true,
         orderMembers: {
           include: {
             patient: true,
@@ -237,6 +238,68 @@ const handleSendCenterConfirmation = async (order) => {
   }
 };
 
+const handleSendDoctorReportConfirmation = async (
+  order,
+  { patientId, pdfType = "full" },
+) => {
+  try {
+    if (!order?.doctorId) return { skipped: true, reason: "no-doctorId" };
+
+    const doctorPhone = order?.doctor?.mobile || order?.doctor?.number;
+    if (!doctorPhone) return { skipped: true, reason: "doctor mobile missing" };
+
+    const tpl = WHATSAPP_TEMPLATES.DOCTOR_REPORT_CONFIRMATION;
+    if (!tpl?.templateId) {
+      throw new Error(
+        "Doctor templateId missing: WABRIDGE_DOCTOR_REPORT_CONFIRMATION_TEMPLATE_ID",
+      );
+    }
+
+    // ✅ Use patient-wise report link (same as patient)
+    const reportLink = await fetchPatientReportUrl({
+      orderId: order.id,
+      patientId,
+      pdfType,
+    });
+
+    if (!reportLink) return { skipped: true, reason: "report link not ready" };
+
+    const member = (order.orderMembers || []).find(
+      (m) => Number(m.patientId) === Number(patientId),
+    );
+    const patient = member?.patient || order.patient;
+
+    const age = patient?.age ? String(patient.age) : "";
+    const gender = patient?.gender ? String(patient.gender) : "";
+    const ageGender = safe([age, gender].filter(Boolean).join(" / "), "N/A");
+
+    const testsDone = safe(
+      extractTestNamesForPatient(order, patientId),
+      "As per prescription",
+    );
+
+    const variables = tpl.mapVariables({
+      doctorName: safe(order?.doctor?.name, "Doctor"),
+      patientName: safe(patient?.fullName, "Patient"),
+      ageGender,
+      testsDone,
+      reportLink,
+    });
+
+    await WhatsAppMessage({
+      phone: `${doctorPhone}`,
+      templateId: tpl.templateId,
+      message: tpl.message,
+      variables,
+    });
+
+    return { success: true, type: "doctor-report-confirmation" };
+  } catch (err) {
+    console.error("handleSendDoctorReportConfirmation error:", err);
+    throw err;
+  }
+};
+
 /* ----------------------------------
    Send PATIENT-wise report
 ---------------------------------- */
@@ -273,12 +336,16 @@ const handleSendPatientReport = async (order, { patientId, pdfType = "full" }) =
       reportLink,
     });
 
+    // ✅ 1) Send to patient
     await WhatsAppMessage({
       phone: `${patient.contactNo}`,
       templateId: tpl.templateId,
       message: tpl.message,
       variables,
     });
+
+    // ✅ 2) Send doctor confirmation (only if doctor exists)
+    await handleSendDoctorReportConfirmation(order, { patientId, pdfType });
 
     return { success: true, type: "patient-report", pdfType };
   } catch (err) {
@@ -391,6 +458,8 @@ const handleSendOrderConfirmed = async (order) => {
    job.name: "whatsapp.sendPaymentConfirmed"
 ---------------------------------- */
 const handleSendPaymentConfirmed = async ({ paymentId }) => {
+
+ 
   try {
     const payment = await prisma.payment.findUnique({
       where: { paymentId },
@@ -489,6 +558,7 @@ new Worker(
         case "whatsapp.sendPaymentConfirmed": {
           const { paymentId } = job.data || {};
           if (!paymentId) throw new Error("Missing paymentId");
+          console.log("invoice going",job.data)
           return await handleSendPaymentConfirmed({ paymentId });
         }
 

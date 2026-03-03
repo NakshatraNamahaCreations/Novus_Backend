@@ -219,6 +219,35 @@ Thank you for choosing Novus Health Labs.`,
     paymentLink,    // {{4}}
     supportContact, // {{5}}
   ],
-}
+},
+
+ // ✅ NEW — Doctor report confirmation
+  DOCTOR_REPORT_CONFIRMATION: {
+    templateId: process.env.WABRIDGE_DOCTOR_REPORT_CONFIRMATION_TEMPLATE_ID,
+    message: `Dear Dr. {{1}},
+
+Greetings from Novus Health Labs.
+
+The diagnostic report for your referred patient is now ready.
+
+Patient Name: {{2}}
+Age/Gender: {{3}}
+Tests Done: {{4}}
+
+You can download/view the report using the link below:
+📄 Report Link: {{5}}
+
+Thank you for your valuable referral and continued trust in us.
+
+Warm regards,
+Novus Health Labs`,
+    mapVariables: ({
+      doctorName,
+      patientName,
+      ageGender,
+      testsDone,
+      reportLink,
+    }) => [doctorName, patientName, ageGender, testsDone, reportLink],
+  },
 
 };

@@ -482,14 +482,14 @@ p { font-size: 13px; }
 /* ===============================
    DEPARTMENT HEADER (in results)
    =============================== */
-/* ✅ FIX: minimal margin — no gap between dept header and test title */
+
 .dept-header {
   margin: 4px 0 0 0;
   padding: 0 13px 2px;
   background: transparent;
   border-radius: 0 4px 4px 0;
+  page-break-after: avoid !important;   /* ← ADD THIS */
 }
-
 .dept-header-title {
   font-size: 13px;
   font-weight: 700;

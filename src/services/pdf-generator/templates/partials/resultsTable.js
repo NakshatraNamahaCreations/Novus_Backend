@@ -1,7 +1,3 @@
-// ============================================================
-//  templates/partials/resultsTable.js  —  PDF results renderer
-// ============================================================
-
 function esc(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -16,6 +12,17 @@ function sanitizeHtml(html) {
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
     .replace(/on\w+="[^"]*"/gi, "")
     .replace(/on\w+='[^']*'/gi, "");
+}
+
+// ✅ FIX: Check if HTML has real visible content (not just empty Quill tags like <p><br></p>)
+function hasVisibleHtmlContent(html) {
+  if (!html) return false;
+  const stripped = String(html)
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, "")
+    .trim();
+  return stripped.length > 0;
 }
 
 function formatValue(pr) {
@@ -37,17 +44,12 @@ function formatUnit(pr) {
   return pr?.unit ?? pr?.parameter?.unit ?? pr?.uom ?? "";
 }
 
-// ✅ Priority order for reference range display:
-//   1. Numeric lowerLimit / upperLimit  → e.g. "9 - 10"
-//   2. normalValueHtml                  → rendered as HTML
-//   3. specialConditionHtml             → rendered as HTML
 function formatRefFromPRorItem(pr, itemParam) {
   const ranges = itemParam?.ranges || [];
 
   if (ranges.length) {
     const r0 = ranges[0];
 
-    // Priority 1: numeric limits
     const hasLower = r0?.lowerLimit !== null && r0?.lowerLimit !== undefined;
     const hasUpper = r0?.upperLimit !== null && r0?.upperLimit !== undefined;
 
@@ -58,12 +60,10 @@ function formatRefFromPRorItem(pr, itemParam) {
       if (text && text !== "-") return text;
     }
 
-    // Priority 2: normalValueHtml
     if (r0?.normalValueHtml && String(r0.normalValueHtml).trim()) {
       return String(r0.normalValueHtml);
     }
 
-    // Priority 3: specialConditionHtml
     if (r0?.specialConditionHtml && String(r0.specialConditionHtml).trim()) {
       return String(r0.specialConditionHtml);
     }
@@ -72,7 +72,6 @@ function formatRefFromPRorItem(pr, itemParam) {
   return "";
 }
 
-// ✅ Inject inline styles into HTML tables inside ref-range cells
 function injectRefHtmlStyles(html) {
   if (!html) return "";
   return html
@@ -141,7 +140,6 @@ function buildParamResultMap(parameterResults = []) {
   return map;
 }
 
-// ── Signature block — once per department group ──────────────
 function generateTestSignatures(result) {
   const signatures = {
     left: result?.leftSignature || null,
@@ -175,7 +173,6 @@ function generateTestSignatures(result) {
   `;
 }
 
-// ── Department banner ────────────────────────────────────────
 function renderDeptHeader(deptName) {
   if (!deptName) return "";
   return `
@@ -185,7 +182,6 @@ function renderDeptHeader(deptName) {
   `;
 }
 
-// ── Group results by departmentItemId ────────────────────────
 function groupByDepartment(arr) {
   const groups = [];
   const map = new Map();
@@ -205,8 +201,6 @@ function groupByDepartment(arr) {
   return groups;
 }
 
-// ── Historical trends ────────────────────────────────────────
-// ✅ Only rendered when showTrends = true (i.e. "full" variant only)
 function generateAllTrendsSection(pathologyResults, trendMap) {
   if (!trendMap || pathologyResults.length === 0) return "";
 
@@ -296,7 +290,6 @@ function buildResultCell(value, unit, valueClass) {
   return `<td class="${valueClass}">${content}</td>`;
 }
 
-// ── Helper: build reference range cell content ────────────────
 function buildRefCell(refRaw, unit) {
   if (!refRaw || !String(refRaw).trim()) {
     return `<td class="ref-range"></td>`;
@@ -347,6 +340,9 @@ function renderPathologyUsingReportItems(result) {
 
         const refRaw = formatRefFromPRorItem(pr, pr?.parameter);
 
+        // ✅ Skip rows with no value
+        if (!value && value !== 0) return "";
+
         return `
         <tr>
           <td class="param-name-cell">
@@ -354,11 +350,14 @@ function renderPathologyUsingReportItems(result) {
             ${method ? `<div class="param-method">${esc(method)}</div>` : ""}
           </td>
           ${buildResultCell(value, unit, valueClass)}
-        ${buildRefCell(refRaw, unit)}
+          ${buildRefCell(refRaw, unit)}
         </tr>
       `;
       })
       .join("");
+
+    // ✅ FIX: Skip entire section if no rows were produced (all values empty/calculating)
+    if (!fallbackRows.trim()) return "";
 
     return `
       <div class="section pathology keep-together">
@@ -374,7 +373,7 @@ function renderPathologyUsingReportItems(result) {
             </tr>
           </thead>
           <tbody>
-            ${fallbackRows || `<tr><td colspan="3" class="muted text-center">No parameters available</td></tr>`}
+            ${fallbackRows}
           </tbody>
         </table>
       </div>
@@ -448,7 +447,7 @@ function renderPathologyUsingReportItems(result) {
             ${notes ? `<div class="param-notes">${sanitizeHtml(notes)}</div>` : ""}
           </td>
           ${buildResultCell(value, unit, valueClass)}
-        ${buildRefCell(refRaw, unit)}
+          ${buildRefCell(refRaw, unit)}
         </tr>
       `;
       }
@@ -456,6 +455,18 @@ function renderPathologyUsingReportItems(result) {
       return "";
     })
     .join("");
+
+  // ✅ FIX: Check if any PARAMETER rows have real values
+  const hasParameterRows = items.some((it) => {
+    if (String(it?.type || "").toUpperCase() !== "PARAMETER") return false;
+    const pr = it?.parameterId != null ? prMap.get(it.parameterId) : null;
+    if (!pr) return false;
+    const value = formatValue(pr);
+    return value !== "" && value !== null && value !== undefined;
+  });
+
+  // ✅ FIX: Skip section entirely if no parameter values AND no rendered rows
+  if (!hasParameterRows && !rows.trim()) return "";
 
   const sectionClass =
     (result?.parameterResults?.length || 0) > 20
@@ -486,10 +497,6 @@ function renderPathologyUsingReportItems(result) {
 // ══════════════════════════════════════════════════════════════
 //  MAIN EXPORT
 // ══════════════════════════════════════════════════════════════
-
-// ✅ FIX: Added `showTrends` param — defaults true.
-//         Pass showTrends: false from letterhead/plain variants
-//         to suppress Historical Trends section entirely.
 export function resultsTableHtml({
   results,
   trendMap,
@@ -514,6 +521,11 @@ export function resultsTableHtml({
           const testName = r?.test?.name || "Radiology Report";
           const id = `test-${seq}-${slugify(testName)}`;
 
+          // ✅ FIX: Skip radiology section if reportHtml has no visible content
+          // (e.g. Quill empty state "<p><br></p>" is truthy but renders blank)
+          const sanitizedHtml = sanitizeHtml(r.reportHtml);
+          if (!hasVisibleHtmlContent(sanitizedHtml) && !r?.notes) return "";
+
           indexItems.push({
             id,
             title: testName,
@@ -526,13 +538,16 @@ export function resultsTableHtml({
         <div class="section radiology" id="${esc(id)}">
           <div class="section-title">${esc(testName)}</div>
           <div class="radio-html ql-scope">
-            ${sanitizeHtml(r.reportHtml) || `<div class="muted">No content available</div>`}
+            ${sanitizedHtml || `<div class="muted">No content available</div>`}
           </div>
           ${renderNotesBlock(r?.notes)}
         </div>
       `;
         })
         .join("");
+
+      // ✅ FIX: Skip entire radiology dept group if all tests were empty
+      if (!testsHtml.trim()) return "";
 
       const signaturesHtml = generateTestSignatures(group.results[0]);
 
@@ -560,6 +575,10 @@ export function resultsTableHtml({
             ? r.parameterResults.length
             : 0;
 
+          // ✅ FIX: Build section HTML first — skip entirely if empty
+          const sectionHtml = renderPathologyUsingReportItems(r);
+          if (!sectionHtml.trim()) return "";
+
           indexItems.push({
             id,
             title: testName,
@@ -570,18 +589,22 @@ export function resultsTableHtml({
 
           return `
         <div id="${esc(id)}">
-          ${renderPathologyUsingReportItems(r)}
+          ${sectionHtml}
           ${renderNotesBlock(r?.notes)}
         </div>
       `;
         })
         .join("");
 
+      // ✅ FIX: Skip entire pathology dept group if all tests were empty
+      // This prevents the dept header ("HORMONE ASSAYS") from rendering alone
+      if (!testsHtml.trim()) return "";
+
       const signaturesHtml = generateTestSignatures(group.results[0]);
 
       return `
       <div class="dept-group">
-        ${renderDeptHeader(group.deptName)}
+        
         ${testsHtml}
         ${signaturesHtml}
       </div>
@@ -590,7 +613,6 @@ export function resultsTableHtml({
     .join("");
 
   // ── 3) TRENDS — only when showTrends is true ─────────────────
-  // ✅ FIX: Suppressed for letterhead and plain variants
   const allTrendsHtml = showTrends
     ? generateAllTrendsSection(pathology, trendMap)
     : "";
