@@ -5,12 +5,12 @@
 //          updateOrderStatus, updateAssignvendor, cancelOrder, rescheduleOrder
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { PrismaClient } from "@prisma/client";
+
 import { uploadToS3 } from "../../config/s3.js";
 import { markOrderReportReady } from "./order.service.js";
 import { parseISTDateTime } from "./order.helpers.js";
 
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 // ─── Shared patient select ────────────────────────────────────────────────────
 
@@ -66,7 +66,7 @@ export const getAllOrders = async (req, res) => {
 
     if (status && status !== "all") where.status = status;
 
-    if (paymentStatus === "pending") where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED"] };
+    if (paymentStatus === "pending") where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED","PENDING"] };
     if (paymentStatus === "paid")    where.paymentStatus = { in: ["CAPTURED", "COMPLETED", "paid"] };
 
     if (fromDate && toDate) {
@@ -196,7 +196,7 @@ export const getLabOrders = async (req, res) => {
     if (toDate)   { const e = new Date(toDate);   e.setHours(23, 59, 59, 999); where.createdAt = { ...where.createdAt, lte: e }; }
 
     if (status && status !== "all") where.status = status;
-    if (paymentStatus === "pending") where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED"] };
+    if (paymentStatus === "pending") where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED", "PENDING"] };
     else if (paymentStatus === "paid") where.paymentStatus = { in: ["CAPTURED", "COMPLETED", "paid"] };
     if (source && source !== "all") where.source = { contains: String(source), mode: "insensitive" };
 

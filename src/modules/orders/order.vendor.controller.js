@@ -3,12 +3,11 @@
 //          vendorUpdateOrderStatus, getOrdersByVendor, getVendorOrdersBasic
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { PrismaClient } from "@prisma/client";
 import redis from "../../config/redis.js";
 import locationService from "../location/location.service.js";
 import { istDateKey } from "../../utils/orderRedis.js";
 
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

@@ -2,10 +2,9 @@
 // Handles: addOrderPayment, getOrderPaymentSummary
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { PrismaClient } from "@prisma/client";
-import { invoiceQueue } from "../../queues/invoice.queue.js";
 
-const prisma = new PrismaClient();
+import { invoiceQueue } from "../../queues/invoice.queue.js";
+import prisma from '../../lib/prisma.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ADD PAYMENT TO ORDER

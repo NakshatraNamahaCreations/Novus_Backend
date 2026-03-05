@@ -1,7 +1,7 @@
 // orderSocket.js
 import redis from "../config/redis.js";
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+
+import prisma from '../lib/prisma.js';
 import { istDateKey, orderKeys } from "../utils/orderRedis.js";
 
 async function getVendorActivePincodes(vendorId) {

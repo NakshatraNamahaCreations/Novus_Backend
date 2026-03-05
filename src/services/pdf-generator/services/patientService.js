@@ -1,10 +1,9 @@
-// services/patient.service.js
-import { PrismaClient } from "@prisma/client";
+
 import { safeTrim } from "../utils/stringUtils.js";
 import { SignatureService } from "./signatureService.js";
 import { ageToKeyFromDob } from "../../../utils/ageToKeyFromDob.js";
 
-const prisma = new PrismaClient();
+import prisma from '../../../lib/prisma.js';
 
 
 const normalizeGender = (g) => {

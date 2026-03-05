@@ -1,5 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+
 import { reportQueue } from "../../queues/report.queue.js";
 
 export const markOrderReportReady = async (order) => {

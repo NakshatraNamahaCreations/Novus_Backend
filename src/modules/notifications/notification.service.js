@@ -2,10 +2,10 @@
 
 import axios from "axios";
 import admin from "../../config/firebase.js";
-import { PrismaClient } from "@prisma/client";
+
 import { WHATSAPP_TEMPLATES } from "../../templates/whatsapp.templates.js";
 import { WhatsAppMessage } from "../../utils/whatsapp.js";
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 export const sendPushNotification = async ({
   token,

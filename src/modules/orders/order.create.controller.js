@@ -2,7 +2,6 @@
 // Handles: createOrder (patient-facing) + createAdminOrder (back-office)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
 import redis from "../../config/redis.js";
 import { acquireLock } from "../../utils/redisLock.js";
@@ -30,7 +29,7 @@ import {
   normalizeItemType,
 } from "./order.helpers.js";
 
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 // ─── Shared include for test/package SLA fetch ────────────────────────────────
 

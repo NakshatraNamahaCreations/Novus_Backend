@@ -1,6 +1,4 @@
-// controllers/couponController.js
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 const getPatientType = async (patientId) => {
   const count = await prisma.order.count({

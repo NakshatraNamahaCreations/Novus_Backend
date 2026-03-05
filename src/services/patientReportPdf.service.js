@@ -1,14 +1,14 @@
 // generatePatient3Pdfs.js
 import puppeteer from "puppeteer";
 import { PDFDocument } from "pdf-lib";
-import { PrismaClient } from "@prisma/client";
+
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
 const execFileAsync = promisify(execFile);
 
 /* -----------------------------

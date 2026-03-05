@@ -1,6 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 import { notificationQueue } from "../../queues/notification.queue.js";
 

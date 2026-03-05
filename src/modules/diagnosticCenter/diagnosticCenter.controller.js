@@ -1,5 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 // Create Diagnostic Center
 export const createDiagnosticCenter = async (req, res) => {
   try {

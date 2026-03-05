@@ -1,11 +1,11 @@
-import { PrismaClient } from "@prisma/client";
+
 import phonepeClient from "../../config/phonepeClient.js";
 import { StandardCheckoutPayRequest } from "pg-sdk-node";
 import { v4 as uuidv4 } from "uuid";
 import { WHATSAPP_TEMPLATES } from "../../templates/whatsapp.templates.js";
 import { WhatsAppMessage } from "../../utils/whatsapp.js";
 
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 export const createPaymentLink = async (req, res) => {
   try {

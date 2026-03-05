@@ -1,12 +1,7 @@
-// reportLayout.controller.js (FULL UPDATED FILE)
-// ✅ Supports removeFields[] so "remove image + Update" will delete from S3 + set DB field to null
-// ✅ Keeps your "only one layout" rule
-// ✅ Still replaces image when new file uploaded (and deletes old one first)
-
-import { PrismaClient } from "@prisma/client";
+import prisma from '../../lib/prisma.js';
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 
-const prisma = new PrismaClient();
+
 
 /* =====================================================
    CREATE LAYOUT (ONLY ONCE)

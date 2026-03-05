@@ -1,14 +1,13 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "start:api": "nodemon src/server.js",
-    "start:report-worker": "nodemon src/workers/report.worker.js",
-    "start:whatsapp-worker": "nodemon src/workers/whatsapp.worker.js",
-    "start:notification-worker": "nodemon src/workers/notification.worker.js",
-    "start:vendor-notification-worker": "nodemon src/workers/vendorNotification.worker.js",
-    "start:invoice-worker": "nodemon src/workers/invoice.worker.js"
+  "main": "index.js","scripts": {
+    "start:api":                      "nodemon --exec \"node --env-file=.env src/server.js\"",
+    "start:report-worker":            "nodemon --exec \"node --env-file=.env src/workers/report.worker.js\"",
+    "start:whatsapp-worker":          "nodemon --exec \"node --env-file=.env src/workers/whatsapp.worker.js\"",
+    "start:notification-worker":      "nodemon --exec \"node --env-file=.env src/workers/notification.worker.js\"",
+    "start:vendor-notification-worker": "nodemon --exec \"node --env-file=.env src/workers/vendorNotification.worker.js\"",
+    "start:invoice-worker":           "nodemon --exec \"node --env-file=.env src/workers/invoice.worker.js\""
   },
   "author": "yogesh",
   "license": "ISC",
@@ -30,6 +29,7 @@
     "dotenv": "^17.2.3",
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
     "express-validator": "^7.3.1",
     "firebase-admin": "^13.6.0",
     "geolib": "^3.3.4",

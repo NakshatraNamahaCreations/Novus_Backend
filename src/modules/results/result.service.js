@@ -1,7 +1,6 @@
-// ✅ src/modules/results/result.service.js
-import { PrismaClient } from "@prisma/client";
+import prisma from '../../lib/prisma.js';
 import { ageToKeyFromDob } from "../../utils/ageToKeyFromDob.js";
-const prisma = new PrismaClient();
+
 
 const normalizeGender = (g) => {
   const x = String(g || "").trim().toUpperCase();

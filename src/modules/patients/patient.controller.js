@@ -1,10 +1,9 @@
-import { PrismaClient } from "@prisma/client";
+
 import dayjs from "dayjs";
 import { sendOtpSms } from "../../utils/sendOtpSms.js";
 import { whatsappQueue } from "../../queues/whatsapp.queue.js";
 import { signPatientToken } from "../../utils/jwt.js";
-
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 // Generate OTP
 const generateOtp = () =>
@@ -144,7 +143,6 @@ export const loginOrRegister = async (req, res) => {
     patient = await prisma.patient.create({
       data: {
         contactNo,
-        otp,
         otpExpiry,
         relationship: "Self",
         isPrimary: true,
@@ -267,7 +265,7 @@ export const resendOtp = async (req, res) => {
     return res.json({
       message: "OTP resent successfully",
       contactNo,
-      otp: otp,
+  
     });
   } catch (error) {
     console.error("Error resending OTP:", error);

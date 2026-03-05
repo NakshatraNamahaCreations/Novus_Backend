@@ -17,10 +17,13 @@ import {
 } from "./patient.controller.js";
 
 const router = express.Router();
+import { authLimiter } from '../../middlewares/rateLimiter.js';
+
+
 
 // Auth
-router.post("/login", loginOrRegister);
-router.post("/resend-otp", resendOtp);
+router.post("/login",authLimiter, loginOrRegister);
+router.post("/resend-otp", authLimiter, resendOtp);
 router.post("/verify-otp", verifyOtp);
 router.get("/by-mobile", getPatientByMobile);
 

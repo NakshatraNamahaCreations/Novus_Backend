@@ -1,5 +1,5 @@
 import express from 'express';
-import dotenv from 'dotenv';
+
 import cors from 'cors';
 import cookieParser from "cookie-parser";
 import helmet from 'helmet';
@@ -7,10 +7,6 @@ import helmet from 'helmet';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 
-
-
-
-// Routes
 import { razorpayWebhook } from "./modules/payments/razorpay.controller.js";
 import categoryRoutes from './modules/categories/category.routes.js';  
 import departmentRoutes from './modules/department/department.route.js';  
@@ -42,11 +38,8 @@ import reportsRoutes from './modules/report/reports.routes.js'
 import parameterRoutes from "./modules/parameters/parameters.routes.js";
 import resultRoutes from "./modules/results/results.routes.js";
 import rangeRoutes from "./modules/ranges/range.routes.js";
-
 import optionRoutes from "./modules/resultOptions/option.routes.js";
 import configRoutes from "./modules/config/config.routes.js";
-
-
 import cityRoutes from "./modules/city/city.routes.js";
 import referenceCenterRoutes from "./modules/referenceCenter/reference.routes.js";
 import diagnosticCenterRoutes from "./modules/diagnosticCenter/diagnosticCenter.routes.js";
@@ -60,26 +53,28 @@ import locationRoutes from "./modules/location/location.route.js";
 import sourcesRoutes from "./modules/sources/sources.routes.js";
 import collectionPriceRoutes from "./modules/collectionPrice/collectionPrice.routes.js";
 import enquiryRoutes from "./modules/enquiry/enquiry.route.js";
-
-
 import reportItemsRouter from "./modules/reportItems/testReportItems.routes.js"
-
-
 import "./modules/notifications/notification.scheduler.js";
-
-
 import redis from './config/redis.js';
+import { errorHandler } from './middlewares/errorHandler.js';
 
-
-
-dotenv.config();
-const PORT = process.env.PORT || 3000;
 
 const app = express();
 
-// 1) Razorpay webhook (RAW) — must be before express.json()
-app.post(
-  "/api/pg/razorpay/webhook",
+// ✅ FIRST — timeout protection for ALL routes including webhook
+app.use((req, res, next) => {
+  req.setTimeout(15000, () => {
+    res.status(503).json({
+      success: false,
+      code: 'REQUEST_TIMEOUT',
+      message: 'Server is busy, please try again.'
+    });
+  });
+  next();
+});
+
+// ✅ SECOND — webhook needs raw body before json()
+app.post("/api/pg/razorpay/webhook",
   express.raw({ type: "application/json" }),
   razorpayWebhook
 );
@@ -87,8 +82,8 @@ app.post(
    MIDDLEWARES
 ---------------------------- */
 app.use(cookieParser());
-app.use(express.json({ limit: "1024mb" }));
-app.use(express.urlencoded({ extended: true, limit: "1024mb" }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(helmet());
 
 app.use(
@@ -171,7 +166,7 @@ app.use("/api/options", optionRoutes);
 app.use("/api/results", resultRoutes);
 app.use("/api/vendor-earning-config", configRoutes);
 
-
+app.use(errorHandler);
 // async function clearAllOrders() {
 //   try {
 //     const orderKeys = await redis.keys("order:*");

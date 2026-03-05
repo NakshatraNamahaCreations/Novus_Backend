@@ -4,10 +4,10 @@
 // ✅ Deselect default works (clears removed defaults)
 // ✅ Only ONE default signature per DepartmentItem (GLOBAL UNIQUE)
 
-import { PrismaClient } from "@prisma/client";
+import prisma from '../../lib/prisma.js';
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 
-const prisma = new PrismaClient();
+
 
 /* --------------------------
   helpers

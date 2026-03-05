@@ -1,9 +1,8 @@
 // utils/generateInvoice.js
 import puppeteer from "puppeteer";
 import { uploadBufferToS3 } from "../config/s3.js";
-import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
 
 // ---------------- helpers ----------------
 const numberToIndianWords = (num) => {

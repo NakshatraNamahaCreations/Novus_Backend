@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+
 import { uploadBufferToS3 } from "../../config/s3.js";
 
 import dayjs from "dayjs";
@@ -7,7 +7,7 @@ import timezone from "dayjs/plugin/timezone.js";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 const IST = "Asia/Kolkata";
 
 /* -----------------------------

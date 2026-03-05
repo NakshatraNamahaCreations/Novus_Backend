@@ -3,7 +3,7 @@
 //          getOrdersExpiringSoon
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { PrismaClient } from "@prisma/client";
+
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc.js";
 import tz from "dayjs/plugin/timezone.js";
@@ -24,7 +24,7 @@ import { getISTDayRange, getISTDateRange, getISTMonthRange } from "../../utils/t
 dayjs.extend(utc);
 dayjs.extend(tz);
 
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 // ─── Shared Prisma include for report queries ─────────────────────────────────
 

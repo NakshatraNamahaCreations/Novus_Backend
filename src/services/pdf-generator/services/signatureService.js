@@ -1,6 +1,5 @@
-// services/signatureService.js
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+
+import prisma from '../../../lib/prisma.js';
 
 const alignKey = (a) => String(a || "").toUpperCase(); // LEFT/CENTER/RIGHT
 

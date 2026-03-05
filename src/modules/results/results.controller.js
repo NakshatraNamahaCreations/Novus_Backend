@@ -1,7 +1,6 @@
 // ✅ src/modules/results/results.controller.js
 import { ResultService } from "./result.service.js";
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 export const ResultController = {
   create: async (req, res) => {

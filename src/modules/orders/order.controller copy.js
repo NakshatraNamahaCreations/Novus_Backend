@@ -827,7 +827,7 @@ export const createAdminOrder = async (req, res) => {
 
       // ✅ ADD/KEEP THIS IF YOUR ORDER MODEL HAS paymentStatus
       // If your field name differs (isPaid/paidStatus/etc), rename accordingly.
-      paymentStatus: isFreeOrder ? "PAID" : "PENDING",
+      paymentStatus: isFreeOrder ? "paid" : "pending",
 
       source: source ?? undefined,
       date: orderDate,

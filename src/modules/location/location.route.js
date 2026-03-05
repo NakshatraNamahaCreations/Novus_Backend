@@ -1,9 +1,7 @@
 import express from "express";
-import { PrismaClient } from "@prisma/client";
+
 import locationService from "./location.service.js";
-
-
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 const router = express.Router();
 
 

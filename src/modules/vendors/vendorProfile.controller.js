@@ -1,8 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
-
-const prisma = new PrismaClient();
-
+import prisma from '../../lib/prisma.js';
 // CREATE or UPDATE (UPSERT)
 export const upsertVendorProfile = async (req, res) => {
   try {

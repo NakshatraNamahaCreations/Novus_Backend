@@ -1,8 +1,7 @@
-import { PrismaClient } from "@prisma/client";
+
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 import * as XLSX from "xlsx";
-
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 /* --------------------------
   helpers

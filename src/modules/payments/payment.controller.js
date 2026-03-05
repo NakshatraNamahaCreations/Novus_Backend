@@ -1,8 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+
 import { invoiceQueue } from "../../queues/invoice.queue.js";
-
-const prisma = new PrismaClient();
-
+import prisma from '../../lib/prisma.js';
 /**
  * @desc    Create a new payment
  * @route   POST /api/payments

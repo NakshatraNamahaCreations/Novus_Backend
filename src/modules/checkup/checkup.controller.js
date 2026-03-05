@@ -1,7 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import prisma from '../../lib/prisma.js';
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 
-const prisma = new PrismaClient();
 
 /* -------------------------------------------
    🔵 Helper: Parse selected tests safely

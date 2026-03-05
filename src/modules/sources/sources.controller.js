@@ -1,8 +1,27 @@
-import { PrismaClient } from "@prisma/client";
+import prisma from '../../lib/prisma.js';
+import redis, { getOrSet } from '../../utils/cache.js';
 
-const prisma = new PrismaClient();
+// ─────────────────────────────────────────
+//  CACHE CONFIG
+// ─────────────────────────────────────────
 
-// Create source
+const CACHE_TTL = 60 * 60; // 1 hour
+
+const keys = {
+  all:  ()   => 'sources:all',
+  byId: (id) => `sources:id:${id}`,
+};
+
+const invalidateCaches = async (id = null) => {
+  const toDelete = [keys.all()];
+  if (id) toDelete.push(keys.byId(id));
+  await redis.del(...toDelete);
+};
+
+// ─────────────────────────────────────────
+//  CREATE
+// ─────────────────────────────────────────
+
 export const createSource = async (req, res) => {
   try {
     const { name } = req.body;
@@ -10,51 +29,64 @@ export const createSource = async (req, res) => {
     if (!name)
       return res.status(400).json({ success: false, message: "Source name is required" });
 
-    const source = await prisma.sources.create({
-      data: { name },
-    });
+    const source = await prisma.sources.create({ data: { name } });
 
-    res.status(201).json({ success: true, data: source });
+    await invalidateCaches();
+
+    return res.status(201).json({ success: true, data: source });
   } catch (error) {
     console.error("Error creating source:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// Get all sources (formerly cities)
+// ─────────────────────────────────────────
+//  GET ALL  ── CACHED
+// ─────────────────────────────────────────
+
 export const getCities = async (req, res) => {
   try {
-    const sources = await prisma.sources.findMany({
-      orderBy: { name: "asc" },
-    });
+    const data = await getOrSet(
+      keys.all(),
+      CACHE_TTL,
+      () => prisma.sources.findMany({ orderBy: { name: "asc" } })
+    );
 
-    res.json({ success: true, data: sources });
+    return res.json({ success: true, data });
   } catch (error) {
     console.error("Error fetching sources:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// Get single source by ID
+// ─────────────────────────────────────────
+//  GET ONE  ── CACHED
+// ─────────────────────────────────────────
+
 export const getSourceById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const source = await prisma.sources.findUnique({
-      where: { id: Number(id) },
-    });
+    const data = await getOrSet(
+      keys.byId(id),
+      CACHE_TTL,
+      () => prisma.sources.findUnique({ where: { id: Number(id) } })
+    );
 
-    if (!source)
+    if (!data)
       return res.status(404).json({ success: false, message: "Source not found" });
 
-    res.json({ success: true, data: source });
+    return res.json({ success: true, data });
   } catch (error) {
     console.error("Error fetching source:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// Update source
+// ─────────────────────────────────────────
+//  UPDATE
+// ─────────────────────────────────────────
+
 export const updateSource = async (req, res) => {
   try {
     const { id } = req.params;
@@ -62,28 +94,33 @@ export const updateSource = async (req, res) => {
 
     const updatedSource = await prisma.sources.update({
       where: { id: Number(id) },
-      data: { name },
+      data:  { name },
     });
 
-    res.json({ success: true, data: updatedSource });
+    await invalidateCaches(id);
+
+    return res.json({ success: true, data: updatedSource });
   } catch (error) {
     console.error("Error updating source:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// Delete source
+// ─────────────────────────────────────────
+//  DELETE
+// ─────────────────────────────────────────
+
 export const deleteSource = async (req, res) => {
   try {
     const { id } = req.params;
 
-    await prisma.sources.delete({
-      where: { id: Number(id) },
-    });
+    await prisma.sources.delete({ where: { id: Number(id) } });
 
-    res.json({ success: true, message: "Source deleted successfully" });
+    await invalidateCaches(id);
+
+    return res.json({ success: true, message: "Source deleted successfully" });
   } catch (error) {
     console.error("Error deleting source:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };

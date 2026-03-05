@@ -1,8 +1,4 @@
-// ✅ SERVICE (UPDATED)
-// testReportItems.service.js
-
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 const normalizeGender = (g) => {
   const x = String(g || "Both").trim().toLowerCase();

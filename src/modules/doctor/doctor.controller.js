@@ -1,7 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
-
+import prisma from '../../lib/prisma.js';
 export const createDoctor = async (req, res) => {
   try {
     const {

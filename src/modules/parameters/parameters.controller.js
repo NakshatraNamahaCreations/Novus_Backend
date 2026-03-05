@@ -1,8 +1,7 @@
-import { PrismaClient } from "@prisma/client";
+import prisma from '../../lib/prisma.js';
 import { ParameterService } from "./parameter.service.js";
 import { ageToKeyFromDob } from "../../utils/ageToKeyFromDob.js";
 
-const prisma = new PrismaClient();
 
 
 

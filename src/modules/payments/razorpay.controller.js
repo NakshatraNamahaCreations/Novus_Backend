@@ -1,13 +1,11 @@
-// src/modules/pg/razorpay.controller.js
 
-import { PrismaClient } from "@prisma/client";
 import razorpay from "../../config/razorpayClient.js";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { WHATSAPP_TEMPLATES } from "../../templates/whatsapp.templates.js";
 import { WhatsAppMessage } from "../../utils/whatsapp.js";
 
-const prisma = new PrismaClient();
+import prisma from '../../lib/prisma.js';
 
 /** -----------------------------
  * Helpers
