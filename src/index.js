@@ -61,6 +61,9 @@ import { errorHandler } from './middlewares/errorHandler.js';
 
 const app = express();
 
+// ✅ ADD THIS — trust Nginx reverse proxy
+app.set('trust proxy', 1);
+
 // ✅ FIRST — timeout protection for ALL routes including webhook
 app.use((req, res, next) => {
   req.setTimeout(15000, () => {

@@ -29,7 +29,7 @@ import {
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
 import { authenticateUser } from "../../middlewares/auth.js";
-
+import { getOrderEditData, updateOrderTests } from "./Order.edit.controller.js";
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -54,6 +54,9 @@ router.get("/expiring", getOrdersExpiringSoon);
 router.put("/:orderId/reschedule", authenticateUser, rescheduleOrder);
 
 router.get("/due", fetchReportDue);
+
+router.get("/:id/edit-data",   authenticateUser, getOrderEditData);
+router.put("/:id/edit-tests",  authenticateUser, updateOrderTests);
 router.get("/:id", getOrderById);
 router.get("/:id/tests",   getOrderResultsById);
 

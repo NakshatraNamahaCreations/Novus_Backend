@@ -1,6 +1,8 @@
 // templates/buildHtml.js
+import QRCode from "qrcode";
 import { patientStripHtml } from "./partials/patientStrip.js";
 import { resultsTableHtml } from "./partials/resultsTable.js";
+import { compressHtmlImages } from "../utils/compressHtmlImages.js";
 
 function esc(s) {
   return String(s ?? "")
@@ -17,12 +19,46 @@ const LINK_ICON = `<svg class="idx-link-icon" xmlns="http://www.w3.org/2000/svg"
   <line x1="10" y1="14" x2="21" y2="3"/>
 </svg>`;
 
+// ── Generate QR code as base64 data URL ──────────────────────
+async function generateQrDataUrl(url) {
+  if (!url) return null;
+  try {
+    return await QRCode.toDataURL(url, {
+      width: 80,
+      margin: 1,
+      color: { dark: "#1a1a1a", light: "#ffffff" },
+      errorCorrectionLevel: "M",
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch a remote image and return a base64 data URL.
+ * Used to embed the lab logo/stamp directly into the HTML
+ * so PrinceXML doesn't need a second network fetch.
+ */
+async function fetchAsDataUrl(url) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    const mime = res.headers.get("content-type") || "image/png";
+    const b64 = Buffer.from(buf).toString("base64");
+    return `data:${mime};base64,${b64}`;
+  } catch {
+    return null;
+  }
+}
+
 // ── Patient details strip for index page ─────────────────────
-function buildPatientStrip({ patient, order, derived }) {
-  const name      = esc(patient?.fullName || patient?.name || "—");
-  const initial   = esc(patient?.initial || "");
-  const age       = patient?.age ?? "—";
-  const gender    = esc(patient?.gender || "—");
+function buildIndexPatientStrip({ patient, order }) {
+  const name = esc(patient?.fullName || patient?.name || "—");
+  const initial = esc(patient?.initial || "");
+  const age = patient?.age ?? "—";
+  const gender = esc(patient?.gender || "—");
   const patientId = esc(String(patient?.id || "—"));
 
   return `
@@ -47,13 +83,11 @@ function buildPatientStrip({ patient, order, derived }) {
 }
 
 // ── Standalone index page ─────────────────────────────────────
-// @page indexpage — no running header / footer
 function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
   if (!indexItems.length) return "";
 
   const totalTests = indexItems.length;
 
-  // Group by department
   const deptMap = new Map();
   for (const item of indexItems) {
     const d = item.dept || "General Tests";
@@ -61,8 +95,11 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
     deptMap.get(d).push(item);
   }
 
-  const sections = [...deptMap.entries()].map(([deptName, items]) => {
-    const rows = items.map((it, i) => `
+  const sections = [...deptMap.entries()]
+    .map(([deptName, items]) => {
+      const rows = items
+        .map(
+          (it, i) => `
       <tr class="idx-row">
         <td class="idx-num">${String(i + 1).padStart(2, "0")}</td>
         <td class="idx-name-cell">
@@ -75,14 +112,14 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
           <span class="badge badge-${(it.type || "").toLowerCase()}">${esc(it.type || "")}</span>
         </td>
         <td class="idx-page-cell">
-          <a class="idx-page-link" href="#${esc(it.id)}">
-            ${LINK_ICON}
-          </a>
+          <a class="idx-page-link" href="#${esc(it.id)}">${LINK_ICON}</a>
         </td>
       </tr>
-    `).join("");
+    `
+        )
+        .join("");
 
-    return `
+      return `
       <div class="idx-section">
         <div class="idx-dept-header">
           <div class="idx-dept-icon"></div>
@@ -102,26 +139,22 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
         </table>
       </div>
     `;
-  }).join("");
+    })
+    .join("");
 
   return `
     <div class="index-only-page">
-      <!-- Header image -->
       <div class="hdr">
         <img class="hf-img" src="images/_header.png" alt="Header" />
       </div>
-
-      ${buildPatientStrip({ patient, order, derived })}
-
+      ${buildIndexPatientStrip({ patient, order })}
       <div class="idx-page-header">
         <div class="idx-page-title">Report Index</div>
         <div class="idx-page-sub">
           This report contains <strong>${totalTests}</strong> test${totalTests > 1 ? "s" : ""}
         </div>
       </div>
-
       ${sections}
-
       <div class="idx-notice">
         <div class="idx-notice-icon">ℹ</div>
         <div class="idx-notice-text">
@@ -129,10 +162,18 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
           For any queries, contact your healthcare provider or lab directly.
         </div>
       </div>
-
     </div>
   `;
 }
+
+// ── End of Report ─────────────────────────────────────────────
+const endOfReport = `
+  <div class="end-of-report">
+    <div class="end-of-report-line"></div>
+    <span class="end-of-report-text">**** End of Report ****</span>
+    <div class="end-of-report-line"></div>
+  </div>
+`;
 
 // ── Conditions section ────────────────────────────────────────
 const conditionsSection = `
@@ -149,29 +190,84 @@ const conditionsSection = `
   </div>
 `;
 
+// ── Shared running header + footer HTML ───────────────────────
+function runningElements(patientStripContent, headerSrc, footerSrc) {
+  return `
+    <div class="header-with-patient">
+      <div class="hdr">
+        <img class="hf-img" src="${esc(headerSrc)}" alt="Header" />
+      </div>
+      ${patientStripContent}
+    </div>
+    <div class="page-footer">
+      <img class="hf-img" src="${esc(footerSrc)}" alt="Footer" />
+    </div>
+  `;
+}
+
 // ═════════════════════════════════════════════════════════════
-export function buildHtml({ reportData, variant = "letterhead" }) {
+//  buildHtml — async (QR + logo fetch + image compression)
+// ═════════════════════════════════════════════════════════════
+export async function buildHtml({ reportData, variant = "letterhead" }) {
   const { order, patient, layout, results, derived, trendMap } = reportData;
 
-  const patientStripContent = patientStripHtml({ order, patient, derived });
+  // ── Resolve report URL for QR ──────────────────────────────
+  const reportUrl =
+    derived?.reportUrl ||
+    order?.reportUrl ||
+    (order?.id
+      ? `https://novus-images.s3.ap-southeast-2.amazonaws.com/reports/order-${order.id}/patient-${order.patient.id}/full.pdf`
+      : null);
+
+  // ── Resolve lab logo/stamp URL ─────────────────────────────
+  const logoUrl =
+    layout?.stampImg ||
+    layout?.logoImg ||
+    order?.center?.stampImg ||
+    order?.center?.logoImg ||
+    null;
+
+  // Fetch QR and logo in parallel
+  const [qrDataUrl, logoDataUrl] = await Promise.all([
+    generateQrDataUrl(reportUrl),
+    fetchAsDataUrl(logoUrl),
+  ]);
+
+  const patientStripContent = patientStripHtml({
+    order,
+    patient,
+    derived,
+    qrDataUrl,
+    logoDataUrl,
+  });
+
+  const headerSrc = "images/_header.png";
+  const footerSrc = "images/_footer.png";
+  const plainImg =
+    "https://novus-images.s3.ap-southeast-2.amazonaws.com/Screenshot_14.png";
 
   // ── FULL variant ─────────────────────────────────────────────
-  // ✅ Only "full" renders Historical Trends (showTrends defaults to true)
   if (variant === "full") {
     const hasFrontPage = layout?.frontPageLastImg;
-    const hasLastPage  = layout?.lastPageImg;
+    const hasLastPage = layout?.lastPageImg;
 
-    const { html: resultsContent, indexItems } = resultsTableHtml({
+    const { html: resultsContentRaw, indexItems } = resultsTableHtml({
       results,
       trendMap,
       returnMeta: true,
-      showTrends: true,   // ✅ Trends shown only in full variant
+      showTrends: true,
     });
 
-    const indexPageContent = buildIndexPage(indexItems, { patient, order, derived });
+    // ✅ Compress all embedded base64 images (radiology Quill images)
+    const resultsContent = await compressHtmlImages(resultsContentRaw);
 
-    return `
-<!DOCTYPE html>
+    const indexPageContent = buildIndexPage(indexItems, {
+      patient,
+      order,
+      derived,
+    });
+
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -180,64 +276,51 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
 </head>
 <body>
 
-  ${hasFrontPage ? `
-  <!-- PAGE 1: Full-bleed front cover -->
+  ${
+    hasFrontPage
+      ? `
   <div class="image-page">
     <img class="fullpage-img" src="images/_frontPageLast.jpg" alt="Front Page" />
-  </div>
-  ` : ""}
+  </div>`
+      : ""
+  }
 
-  <!-- PAGE 2: Clean index — NO header/patient stripe/footer.
-       Placed BEFORE running elements so PrinceXML does not create
-       a blank default @page to register them. -->
   ${indexPageContent}
 
-  <!-- PAGE 3+: Results.
-       Running header/footer declared INSIDE .results-page so they
-       only register once content starts — no blank page. -->
   <div class="results-page">
-
-    <div class="header-with-patient">
-      <div class="hdr">
-        <img class="hf-img" src="images/_header.png" alt="Header" />
-      </div>
-      ${patientStripContent}
-    </div>
-
-    <div class="page-footer">
-      <img class="hf-img" src="images/_footer.png" alt="Footer" />
-    </div>
-
+    ${runningElements(patientStripContent, headerSrc, footerSrc)}
     <div class="content">
       ${resultsContent}
+      ${endOfReport}
       ${conditionsSection}
     </div>
-
   </div>
 
-  ${hasLastPage ? `
-  <!-- Last page -->
+  ${
+    hasLastPage
+      ? `
   <div class="image-page">
     <img class="fullpage-img" src="images/_lastPage.jpg" alt="Last Page" />
-  </div>
-  ` : ""}
+  </div>`
+      : ""
+  }
 
 </body>
-</html>
-    `;
+</html>`;
   }
 
   // ── LETTERHEAD variant ───────────────────────────────────────
-  // ✅ FIX: showTrends: false — no Historical Trends in letterhead
   if (variant === "letterhead") {
-    const resultsContent = resultsTableHtml({
+    const resultsContentRaw = resultsTableHtml({
       results,
       trendMap,
       showTrends: false,
     });
 
-    return `
-<!DOCTYPE html>
+    // ✅ Compress all embedded base64 images (radiology Quill images)
+    const resultsContent = await compressHtmlImages(resultsContentRaw);
+
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -246,39 +329,30 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
 </head>
 <body>
 
-  <div class="header-with-patient">
-    <div class="hdr">
-      <img class="hf-img" src="images/_header.png" alt="Header" />
-    </div>
-    ${patientStripContent}
-  </div>
-
-  <div class="page-footer">
-    <img class="hf-img" src="images/_footer.png" alt="Footer" />
-  </div>
-
   <div class="results-page">
+    ${runningElements(patientStripContent, headerSrc, footerSrc)}
     <div class="content">
       ${resultsContent}
+      ${endOfReport}
       ${conditionsSection}
     </div>
   </div>
 
 </body>
-</html>
-    `;
+</html>`;
   }
 
   // ── PLAIN variant ────────────────────────────────────────────
-  // ✅ FIX: showTrends: false — no Historical Trends in plain
-  const resultsContent = resultsTableHtml({
+  const resultsContentRaw = resultsTableHtml({
     results,
     trendMap,
     showTrends: false,
   });
 
-  return `
-<!DOCTYPE html>
+  // ✅ Compress all embedded base64 images (radiology Quill images)
+  const resultsContent = await compressHtmlImages(resultsContentRaw);
+
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -287,29 +361,15 @@ export function buildHtml({ reportData, variant = "letterhead" }) {
 </head>
 <body>
 
-  <div class="header-with-patient">
-    <div class="hdr">
-      <img class="hf-img"
-        src="https://novus-images.s3.ap-southeast-2.amazonaws.com/Screenshot_14.png"
-        alt="Header" />
-    </div>
-    ${patientStripContent}
-  </div>
-
-  <div class="page-footer">
-    <img class="hf-img"
-      src="https://novus-images.s3.ap-southeast-2.amazonaws.com/Screenshot_14.png"
-      alt="Footer" />
-  </div>
-
-  <div class="results-page">
+  <div class="plain-page">
+    ${runningElements(patientStripContent, plainImg, plainImg)}
     <div class="content">
       ${resultsContent}
+      ${endOfReport}
       ${conditionsSection}
     </div>
   </div>
 
 </body>
-</html>
-  `;
+</html>`;
 }

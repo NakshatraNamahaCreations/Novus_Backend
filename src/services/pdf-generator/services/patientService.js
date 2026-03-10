@@ -165,7 +165,7 @@ export class PatientService {
     const gender = normalizeGender(patientGender);
     const ageKey = ageToKeyFromDob(patientDob);
 
-    console.log("ageKey--",ageKey)
+  
 
     // 1) Results
     const results = await prisma.patientTestResult.findMany({
@@ -246,7 +246,7 @@ export class PatientService {
           ranges = ranges.filter((r) => isAnyAge(r.referenceRange));
         } else {
 
-          console.log("ranges=-=",ranges)
+        
           const specific = ranges.filter(
             (r) =>
               !isAnyAge(r.referenceRange) &&
@@ -254,7 +254,7 @@ export class PatientService {
                 .trim()
                 .toLowerCase() === ageKey
           );
-console.log("specific",specific)
+
           const anyAge = ranges.filter((r) =>
             isAnyAge(r.referenceRange)
           );

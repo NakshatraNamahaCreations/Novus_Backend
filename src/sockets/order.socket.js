@@ -105,10 +105,14 @@ export default function orderSocket(io, socket) {
         pincodes = await getVendorActivePincodes(vendorIdStr);
       }
 
+
+      console.log("pincodes",pincodes)
       if (!pincodes.length) return;
 
       // ✅ join ALL pin rooms (or just 1 if passed)
       for (const pin of pincodes) socket.join(`pin_${pin}`);
+
+      console.log("pincodes",pincodes)
 
       const todayKey = istDateKey(new Date());
 

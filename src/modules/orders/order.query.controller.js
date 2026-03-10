@@ -11,6 +11,7 @@ import { markOrderReportReady } from "./order.service.js";
 import { parseISTDateTime } from "./order.helpers.js";
 
 import prisma from '../../lib/prisma.js';
+import { whatsappQueue } from "../../queues/whatsapp.queue.js";
 
 // ─── Shared patient select ────────────────────────────────────────────────────
 
@@ -102,12 +103,12 @@ export const getAllOrders = async (req, res) => {
           isSelf: true, trackingId: true, isHomeSample: true, source: true,
           refCenter:        { select: { id: true, name: true } },
           patient:          { select: PATIENT_SELECT },
-          vendor:           { select: { id: true, name: true, email: true } },
+          // vendor:           { select: { id: true, name: true, email: true } },
           slot:             { select: { id: true, name: true, startTime: true, endTime: true } },
           centerSlot:       { select: { id: true, name: true, startTime: true, endTime: true } },
           address:          { select: { id: true, address: true, pincode: true, city: true } },
           center:           { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
-          diagnosticCenter: { select: { id: true, name: true, address: true, pincode: true, cityId: true } },
+          diagnosticCenter: { select: { id: true, name: true, } },
         },
       }),
       prisma.order.count({ where }),
@@ -624,6 +625,20 @@ export const updateOrderStatus = async (req, res) => {
         ...(reportUrl     && { reportUrl }),
       },
     });
+
+    if(sampleCollected == true){
+    await whatsappQueue.add("whatsapp.sendSampleCollected", {
+  orderId: order.id,
+});
+
+    }
+
+    if(status==="on_the_way"){
+await whatsappQueue.add("whatsapp.sendSampleExecutiveOnTheWay", {
+  orderId: order.id,
+});
+    }
+
 
     const io = req.app.get("io");
     if (io) io.to(`order_${order.id}`).emit("orderStatusForUser", { orderId: order.id, status: order.status });

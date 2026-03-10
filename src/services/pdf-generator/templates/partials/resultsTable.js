@@ -152,11 +152,10 @@ function generateTestSignatures(result) {
     if (!sig) return '<div class="sig-card sig-empty"></div>';
     return `
       <div class="sig-card">
-        ${
-          sig.signatureImg
-            ? `<img class="sig-img" src="${esc(sig.signatureImg)}" alt="Signature" />`
-            : '<div class="muted">No signature</div>'
-        }
+        ${sig.signatureImg
+        ? `<img class="sig-img" src="${esc(sig.signatureImg)}" alt="Signature" />`
+        : '<div class="muted">No signature</div>'
+      }
         <div class="sig-name">${esc(sig.name)}</div>
         ${sig.qualification ? `<div class="sig-sub">${esc(sig.qualification)}</div>` : ""}
         ${sig.designation ? `<div class="sig-sub">${esc(sig.designation)}</div>` : ""}
@@ -280,13 +279,14 @@ function generateAllTrendsSection(pathologyResults, trendMap) {
   `;
 }
 
-function buildResultCell(value, unit, valueClass) {
+function buildResultCell(value, unit, valueClass, bold = false) {
   const hasValue =
     value !== null && value !== undefined && String(value).trim() !== "";
   if (!hasValue) {
     return `<td class="${valueClass}">—</td>`;
   }
-  const content = `${esc(value)}${unit ? " " + esc(unit) : ""}`;
+  let content = `${esc(value)}${unit ? " " + esc(unit) : ""}`;
+  if (bold) content = `<b>${content}</b>`;
   return `<td class="${valueClass}">${content}</td>`;
 }
 
@@ -340,16 +340,23 @@ function renderPathologyUsingReportItems(result) {
 
         const refRaw = formatRefFromPRorItem(pr, pr?.parameter);
 
+        // ✅ Check if this option value is marked as bold
+        const optBold = (pr?.parameter?.resultOpts || []).find(
+          (o) => o.value === value || o.label === value
+        );
+        const isBold = optBold ? optBold.isBold !== false : false;
+
         // ✅ Skip rows with no value
         if (!value && value !== 0) return "";
 
+        const rowClass = (isHigh || isLow) ? ' class="row-abnormal"' : '';
         return `
-        <tr>
+        <tr${rowClass}>
           <td class="param-name-cell">
             <div class="param-name">${esc(pname)}</div>
             ${method ? `<div class="param-method">${esc(method)}</div>` : ""}
           </td>
-          ${buildResultCell(value, unit, valueClass)}
+          ${buildResultCell(value, unit, valueClass, isBold)}
           ${buildRefCell(refRaw, unit)}
         </tr>
       `;
@@ -439,14 +446,21 @@ function renderPathologyUsingReportItems(result) {
 
         const refRaw = formatRefFromPRorItem(pr, it?.parameter);
 
+        // ✅ Check if this option value is marked as bold
+        const optBold = (it?.parameter?.resultOpts || []).find(
+          (o) => o.value === value || o.label === value
+        );
+        const isBold = optBold ? optBold.isBold !== false : false;
+
+        const rowClass = (isHigh || isLow) ? ' class="row-abnormal"' : '';
         return `
-        <tr>
+        <tr${rowClass}>
           <td class="param-name-cell">
             <div class="param-name">${esc(pname)}</div>
             ${method ? `<div class="param-method">${esc(method)}</div>` : ""}
             ${notes ? `<div class="param-notes">${sanitizeHtml(notes)}</div>` : ""}
           </td>
-          ${buildResultCell(value, unit, valueClass)}
+          ${buildResultCell(value, unit, valueClass, isBold)}
           ${buildRefCell(refRaw, unit)}
         </tr>
       `;

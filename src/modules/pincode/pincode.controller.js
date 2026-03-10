@@ -56,7 +56,7 @@ export const getPincodes = async (req, res) => {
     const data = await getOrSet(
       keys.all(),
       CACHE_TTL,
-      () => prisma.pincode.findMany({ orderBy: { id: 'desc' } })
+      () => prisma.pincode.findMany({ orderBy: { pincode: 'asc' } })
     );
 
     res.json({ success: true, data });

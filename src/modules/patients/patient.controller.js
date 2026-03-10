@@ -67,6 +67,7 @@ export const createPatient = async (req, res) => {
         status: status || "active",
         isPrimary: isPrimary !== undefined ? isPrimary : true,
         passportNo,
+        source:"admin",
         aadharNo,
         address,
         initial,
@@ -222,6 +223,8 @@ export const verifyOtp = async (req, res) => {
         removeOnFail: false,
       }
     );
+
+
 
     // ✅ Send token to patient
     return res.json({
@@ -563,7 +566,13 @@ export const updateStatus = async (req, res) => {
 /* ---------------------- GET ALL PATIENTS ---------------------- */
 export const getAllPatients = async (req, res) => {
   try {
-    let { page = 1, limit = 10, search = "", status = "" } = req.query;
+    let {
+      page = 1,
+      limit = 10,
+      search = "",
+      status = "",
+      source = "",
+    } = req.query;
 
     page = Number(page);
     limit = Number(limit);
@@ -576,11 +585,20 @@ export const getAllPatients = async (req, res) => {
         { fullName: { contains: search, mode: "insensitive" } },
         { contactNo: { contains: search, mode: "insensitive" } },
         { email: { contains: search, mode: "insensitive" } },
+      
+        { source: { contains: search, mode: "insensitive" } },
       ];
     }
 
     if (status && status !== "all") {
       where.status = status;
+    }
+
+    if (source && source !== "all") {
+      where.source = {
+        equals: source,
+        mode: "insensitive",
+      };
     }
 
     const patients = await prisma.patient.findMany({
@@ -621,7 +639,6 @@ export const getAllPatients = async (req, res) => {
     });
   }
 };
-
 
 export const getPatientByMobile = async (req, res) => {
   try {

@@ -214,6 +214,13 @@ export const createOrder = async (req, res) => {
         { jobId: `vendor-new-order-${order.id}` },
       );
 
+      if(isHomeSample){
+        await whatsappQueue.add("whatsapp.sendHomeSampleBookedAdmin", {
+  orderId: order.id,
+  adminPhone: process.env.ADMIN_WHATSAPP_NUMBER,
+  adminName: "Admin",
+});
+      }
       // Redis indexing
       const dateKey = istDateKey(orderDate);
       const ttl = secondsToKeepForOrderDate(orderDate, 2);

@@ -1,13 +1,14 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "main": "index.js","scripts": {
-    "start:api":                      "nodemon --exec \"node --env-file=.env src/server.js\"",
-    "start:report-worker":            "nodemon --exec \"node --env-file=.env src/workers/report.worker.js\"",
-    "start:whatsapp-worker":          "nodemon --exec \"node --env-file=.env src/workers/whatsapp.worker.js\"",
-    "start:notification-worker":      "nodemon --exec \"node --env-file=.env src/workers/notification.worker.js\"",
+  "main": "index.js",
+  "scripts": {
+    "start:api": "nodemon --exec \"node --env-file=.env src/server.js\"",
+    "start:report-worker": "nodemon --exec \"node --env-file=.env src/workers/report.worker.js\"",
+    "start:whatsapp-worker": "nodemon --exec \"node --env-file=.env src/workers/whatsapp.worker.js\"",
+    "start:notification-worker": "nodemon --exec \"node --env-file=.env src/workers/notification.worker.js\"",
     "start:vendor-notification-worker": "nodemon --exec \"node --env-file=.env src/workers/vendorNotification.worker.js\"",
-    "start:invoice-worker":           "nodemon --exec \"node --env-file=.env src/workers/invoice.worker.js\""
+    "start:invoice-worker": "nodemon --exec \"node --env-file=.env src/workers/invoice.worker.js\""
   },
   "author": "yogesh",
   "license": "ISC",

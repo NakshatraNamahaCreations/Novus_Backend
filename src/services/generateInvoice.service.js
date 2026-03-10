@@ -63,7 +63,7 @@ const numberToIndianWords = (num) => {
     }
 
     for (let i = 3; i >= 1; i--) {
-      const divider = 10 ** (i * 2 + (i === 1 ? 1 : 0)); // 1000, 100000, 10000000
+      const divider = 10 ** (i * 2 + (i === 1 ? 1 : 0));
       if (v >= divider) {
         return (
           helper(Math.floor(v / divider)) +
@@ -80,37 +80,16 @@ const numberToIndianWords = (num) => {
   return words ? `${words} Rupees Only` : "Zero Rupees Only";
 };
 
-/**
- * Picks collection charge based on CollectionPrice table:
- * priority: centerId -> pincode -> cityId
- * policy: charge applies only when offerSubtotal < minAmount
- *
- * IMPORTANT:
- * - Adjust "centerId" source based on your schema:
- *   order.centerId OR order.slot.centerId OR order.centerSlot.centerId etc.
- * - Ensure order.address has pincode and cityId
- */
 const getCollectionCharge = async (order, offerSubtotal) => {
   try {
-
-
-
-
-
-    const  rule = await prisma.collectionPrice.findFirst({
-        where: { isActive: true,  }
-      
-      });
-    
+    const rule = await prisma.collectionPrice.findFirst({
+      where: { isActive: true },
+    });
 
     if (!rule) return 0;
 
-   
-
     const minAmount = Number(rule.minAmount || 0);
     const price = Number(rule.price || 0);
-
-   
 
     return Number(offerSubtotal) < minAmount ? price : 0;
   } catch (e) {
@@ -121,14 +100,6 @@ const getCollectionCharge = async (order, offerSubtotal) => {
 
 // ---------------- main ----------------
 
-/**
- * Generate the invoice PDF and upload it to S3
- * @param {Object} params
- * @param {string} params.paymentId
- * @param {string} params.patientName
- * @param {number|string} params.orderId
- * @returns {Promise<string>} invoiceUrl - URL of the uploaded invoice in S3
- */
 export const generateAndUploadInvoice = async ({
   paymentId,
   patientName,
@@ -145,7 +116,7 @@ export const generateAndUploadInvoice = async ({
         where: { id: Number(orderId) },
         include: {
           patient: true,
-          address: true, // must contain pincode + cityId (and address string)
+          address: true,
           slot: true,
           orderMembers: {
             include: {
@@ -177,6 +148,7 @@ export const generateAndUploadInvoice = async ({
     // ---------------- patient-wise rows + totals ----------------
     let sr = 1;
 
+    // Use offer price as the price throughout
     const offerSubtotal = (order.orderMembers || []).reduce((t, member) => {
       return (
         t +
@@ -189,39 +161,27 @@ export const generateAndUploadInvoice = async ({
       );
     }, 0);
 
-    const actualSubtotal = (order.orderMembers || []).reduce((t, member) => {
-      return (
-        t +
-        (member.orderMemberPackages || []).reduce((pt, omp) => {
-          const actual = Number(
-            omp?.test?.actualPrice ?? omp?.package?.actualPrice ?? 0,
-          );
-          return pt + actual;
-        }, 0)
-      );
-    }, 0);
-
     const discount = Number(order?.discountAmount || order?.discount || 0);
-
     const collectionCharge = await getCollectionCharge(order, offerSubtotal);
 
-    console.log("collectionCharge",collectionCharge)
+    console.log("collectionCharge", collectionCharge);
 
     const payableTotal =
       Math.max(0, offerSubtotal - discount) + Number(collectionCharge || 0);
 
     const amountInWords = numberToIndianWords(payableTotal);
 
+    // Patient-wise rows — only SR, NAME, PRICE (offer)
     const patientWiseRows = (order.orderMembers || [])
       .map((member) => {
         const p = member?.patient;
 
         const header = `
           <tr>
-            <td colspan="5" style="background:#f3fbfd; font-weight:700; padding:10px;">
+            <td colspan="3" style="background:#f3fbfd; font-weight:700; padding:10px;">
               Patient: ${p?.fullName || "NA"} ${p?.age ? `(${p.age}Y)` : ""} ${
-          p?.gender ? `| ${p.gender}` : ""
-        }
+                p?.gender ? `| ${p.gender}` : ""
+              }
               ${p?.relationship ? `| ${p.relationship}` : ""}
             </td>
           </tr>
@@ -233,18 +193,12 @@ export const generateAndUploadInvoice = async ({
             const offer = Number(
               omp?.test?.offerPrice ?? omp?.package?.offerPrice ?? 0,
             );
-            const actual = Number(
-              omp?.test?.actualPrice ?? omp?.package?.actualPrice ?? 0,
-            );
-            const savings = Math.max(0, actual - offer);
 
             return `
               <tr>
                 <td>${sr++}</td>
                 <td>${name}</td>
-                <td>&#8377; ${actual.toLocaleString("en-IN")}</td>
                 <td>&#8377; ${offer.toLocaleString("en-IN")}</td>
-                <td>&#8377; ${savings.toLocaleString("en-IN")}</td>
               </tr>
             `;
           })
@@ -257,8 +211,6 @@ export const generateAndUploadInvoice = async ({
             <tr>
               <td>${sr++}</td>
               <td>N/A</td>
-              <td>&#8377; 0</td>
-              <td>&#8377; 0</td>
               <td>&#8377; 0</td>
             </tr>
           `)
@@ -473,9 +425,7 @@ export const generateAndUploadInvoice = async ({
               <div class="section">
                 <h3>BILLED TO</h3>
                 <p><strong>${patientName || "NA"}</strong></p>
-                <p>${order?.patient?.age || "NA"} | ${
-      order?.patient?.gender || "NA"
-    }</p>
+                <p>${order?.patient?.age || "NA"} | ${order?.patient?.gender || "NA"}</p>
                 <p>${patientAddress}</p>
                 <p>Phone: ${order?.patient?.contactNo || "NA"}</p>
               </div>
@@ -488,16 +438,13 @@ export const generateAndUploadInvoice = async ({
               </div>
             </div>
 
-            <!-- Items table (Patient-wise) -->
+            <!-- Items table — SR, TEST/PACKAGE, PRICE only -->
             <table class="test-table">
               <thead>
                 <tr>
                   <th>SR. NO.</th>
                   <th>TEST / PACKAGE</th>
-             
-                  <th>ACTUAL PRICE</th>
-                       <th>OFFER PRICE</th>
-                  <th>SAVINGS</th>
+                  <th>PRICE</th>
                 </tr>
               </thead>
               <tbody>
@@ -511,52 +458,39 @@ export const generateAndUploadInvoice = async ({
                 <img src="${paidimg}" alt="Paid Stamp" class="paid-stamp-img" />
               </div>
               <div class="total-section">
-               
 
+                <!-- Single subtotal (offer price) -->
                 <div class="amount-row">
-                  <span class="amount-label">Subtotal (Actual):</span>
-                  <span class="amount-value">&#8377; ${Number(
-                    actualSubtotal,
-                  ).toLocaleString("en-IN")}</span>
+                  <span class="amount-label">Subtotal:</span>
+                  <span class="amount-value">&#8377; ${Number(offerSubtotal).toLocaleString("en-IN")}</span>
                 </div>
 
-                 <div class="amount-row">
-                  <span class="amount-label">Subtotal (Offer):</span>
-                  <span class="amount-value">&#8377; ${Number(
-                    offerSubtotal,
-                  ).toLocaleString("en-IN")}</span>
-                </div>
-
+                ${discount > 0 ? `
                 <div class="amount-row">
                   <span class="amount-label">Discount:</span>
-                  <span class="amount-value">- &#8377; ${Number(
-                    discount,
-                  ).toLocaleString("en-IN")}</span>
+                  <span class="amount-value">- &#8377; ${Number(discount).toLocaleString("en-IN")}</span>
                 </div>
+                ` : ""}
 
+                ${collectionCharge > 0 ? `
                 <div class="amount-row">
                   <span class="amount-label">Collection Charge:</span>
-                  <span class="amount-value">&#8377; ${Number(
-                    collectionCharge,
-                  ).toLocaleString("en-IN")}</span>
+                  <span class="amount-value">&#8377; ${Number(collectionCharge).toLocaleString("en-IN")}</span>
                 </div>
+                ` : ""}
 
                 <div class="total-row">
                   <span class="total-label">Total Amount:</span>
-                  <span class="total-value">&#8377; ${Number(
-                    payableTotal,
-                  ).toLocaleString("en-IN")}</span>
+                  <span class="total-value">&#8377; ${Number(payableTotal).toLocaleString("en-IN")}</span>
                 </div>
 
                 <div class="amount-in-words">
                   Amount in Words: ${amountInWords}
                 </div>
 
-                ${
-                  payableTotal > 10000
-                    ? `<div class="note">* TDS @ 1% applicable as per section 194R</div>`
-                    : ""
-                }
+                ${payableTotal > 10000
+                  ? `<div class="note">* TDS @ 1% applicable as per section 194R</div>`
+                  : ""}
               </div>
             </div>
 
@@ -584,7 +518,6 @@ export const generateAndUploadInvoice = async ({
 
     await page.setContent(invoiceHtml, { waitUntil: "networkidle0", timeout: 60000 });
 
-    // wait for fonts/images
     await page.evaluateHandle("document.fonts.ready");
     await page.evaluate(async () => {
       const imgs = Array.from(document.images);

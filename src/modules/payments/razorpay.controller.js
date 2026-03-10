@@ -127,7 +127,7 @@ export const razorpayWebhook = async (req, res) => {
     const signature = req.headers["x-razorpay-signature"];
     const rawBody = req.body; // Buffer
 
-    console.log("rawBody",rawBody,signature)
+
 
     if (!signature || !rawBody) {
       return res.status(400).send("Missing signature/body");
@@ -145,8 +145,8 @@ export const razorpayWebhook = async (req, res) => {
     const payload = JSON.parse(rawBody.toString("utf8"));
     const event = payload?.event;
 
-    console.log("event",event)
-
+  
+    
     // (Optional) log every webhook payload
     // await prisma.paymentWebhookLog.create({ data: { event: event || "unknown", payload, status: "RECEIVED" } });
 
@@ -288,8 +288,7 @@ export const verifyPayment = async (req, res) => {
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-      console.log("expected",expected)
-      console.log("razorpay_signature",razorpay_signature)
+    
 
 
     const isValid = expected === razorpay_signature;

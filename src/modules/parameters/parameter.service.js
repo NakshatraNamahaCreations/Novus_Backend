@@ -14,42 +14,43 @@ export const ParameterService = {
 
           ranges: Array.isArray(ranges) && ranges.length
             ? {
-                create: ranges.map((r) => ({
-                  lowerLimit:
-                    r?.lowerLimit !== null && r?.lowerLimit !== "" && r?.lowerLimit !== undefined
-                      ? Number(r.lowerLimit)
-                      : null,
-                  upperLimit:
-                    r?.upperLimit !== null && r?.upperLimit !== "" && r?.upperLimit !== undefined
-                      ? Number(r.upperLimit)
-                      : null,
-                  criticalLow:
-                    r?.criticalLow !== null && r?.criticalLow !== "" && r?.criticalLow !== undefined
-                      ? Number(r.criticalLow)
-                      : null,
-                  criticalHigh:
-                    r?.criticalHigh !== null && r?.criticalHigh !== "" && r?.criticalHigh !== undefined
-                      ? Number(r.criticalHigh)
-                      : null,
-                  referenceRange: r?.referenceRange?.trim?.() || null,
-                  gender: r?.gender || "Both",
-                  normalValueHtml: r?.normalValueHtml?.trim?.() || null,
-                  specialConditionHtml: r?.specialConditionHtml?.trim?.() || null,
-                  createdById: createdById ?? null,
-                })),
-              }
+              create: ranges.map((r) => ({
+                lowerLimit:
+                  r?.lowerLimit !== null && r?.lowerLimit !== "" && r?.lowerLimit !== undefined
+                    ? Number(r.lowerLimit)
+                    : null,
+                upperLimit:
+                  r?.upperLimit !== null && r?.upperLimit !== "" && r?.upperLimit !== undefined
+                    ? Number(r.upperLimit)
+                    : null,
+                criticalLow:
+                  r?.criticalLow !== null && r?.criticalLow !== "" && r?.criticalLow !== undefined
+                    ? Number(r.criticalLow)
+                    : null,
+                criticalHigh:
+                  r?.criticalHigh !== null && r?.criticalHigh !== "" && r?.criticalHigh !== undefined
+                    ? Number(r.criticalHigh)
+                    : null,
+                referenceRange: r?.referenceRange?.trim?.() || null,
+                gender: r?.gender || "Both",
+                normalValueHtml: r?.normalValueHtml?.trim?.() || null,
+                specialConditionHtml: r?.specialConditionHtml?.trim?.() || null,
+                createdById: createdById ?? null,
+              })),
+            }
             : undefined,
 
           resultOpts: Array.isArray(resultOpts) && resultOpts.length
             ? {
-                create: resultOpts
-                  .filter((o) => (o?.label || o?.value)?.toString().trim())
-                  .map((o) => ({
-                    label: (o.label || o.value).toString().trim(),
-                    value: (o.value || o.label).toString().trim(),
-                    createdById: createdById ?? null,
-                  })),
-              }
+              create: resultOpts
+                .filter((o) => (o?.label || o?.value)?.toString().trim())
+                .map((o) => ({
+                  label: (o.label || o.value).toString().trim(),
+                  value: (o.value || o.label).toString().trim(),
+                  isBold: o.isBold !== undefined ? !!o.isBold : true,
+                  createdById: createdById ?? null,
+                })),
+            }
             : undefined,
         },
         include: { ranges: true, resultOpts: true },
@@ -151,6 +152,7 @@ export const ParameterService = {
               parameterId: Number(parameterId),
               label: (o.label || o.value).toString().trim(),
               value: (o.value || o.label).toString().trim(),
+              isBold: o.isBold !== undefined ? !!o.isBold : true,
               createdById: createdById ?? null,
             }));
 
@@ -185,136 +187,136 @@ export const ParameterService = {
     });
   },
 
-listByTest: async (testId, gender = "Both", ageKey = "any") => {
-  try {
-    const tId = Number(testId);
-    const g = String(gender || "Both").trim();
-    const a = String(ageKey || "any").trim().toLowerCase();
+  listByTest: async (testId, gender = "Both", ageKey = "any") => {
+    try {
+      const tId = Number(testId);
+      const g = String(gender || "Both").trim();
+      const a = String(ageKey || "any").trim().toLowerCase();
 
-    console.log(a,g)
+      console.log(a, g)
 
-    const isAnyAge = (val) => String(val || "").trim().toLowerCase() === "any";
+      const isAnyAge = (val) => String(val || "").trim().toLowerCase() === "any";
 
-    const rows = await prisma.testParameter.findMany({
-      where: { testId: tId },
-      orderBy: { order: "asc" },
-      include: {
-        ranges: { orderBy: { id: "asc" } },
-        resultOpts: { orderBy: { id: "asc" } }, // ✅ always fetch all
-      },
-    });
-
-
-    // ✅ store original counts so we don't wrongly drop parameters
-    const originalCounts = new Map(
-      rows.map((p) => [
-        p.id,
-        { ranges: p.ranges?.length || 0, resultOpts: p.resultOpts?.length || 0 },
-      ])
-    );
-
-    const filtered = rows.map((p) => {
-      let ranges = [...(p.ranges || [])];
-
-      /* ---------------- GENDER FILTER (ranges only) ---------------- */
-      if (ranges.length > 0) {
-        if (g !== "Both") {
-          const specific = ranges.filter((r) => r.gender === g);
-          ranges = specific.length > 0 ? specific : ranges.filter((r) => r.gender === "Both");
-        } else {
-          ranges = ranges.filter((r) => r.gender === "Both");
-        }
-      }
-
-      /* ---------------- AGE FILTER (ranges only) ---------------- */
-      if (ranges.length > 0) {
-        if (a === "any") {
-          ranges = ranges.filter((r) => isAnyAge(r.referenceRange));
-        } else {
-
-       
-          const specificAge = ranges.filter(
-            (r) =>
-              !isAnyAge(r.referenceRange) &&
-              String(r.referenceRange || "").trim().toLowerCase() === a
-          );
-
-
-          
-          const anyAge = ranges.filter((r) => isAnyAge(r.referenceRange));
-
-          ranges = specificAge.length > 0 ? specificAge : anyAge;
-        }
-      }
-
-      // ✅ resultOpts untouched, return all
-      return { ...p, ranges, resultOpts: p.resultOpts || [] };
-    });
-
-    /* ✅ POST FILTER RULES
-       - If parameter originally had neither ranges nor resultOpts -> keep (still valid)
-       - If it originally had ranges/resultOpts, keep if at least one survived:
-           ranges survived OR resultOpts exists
-       - Since we never filter resultOpts, this will keep OPTIONS parameters always.
-    */
-    return filtered.filter((p) => {
-      const orig = originalCounts.get(p.id) || { ranges: 0, resultOpts: 0 };
-
-      // no config at all -> keep
-      if (orig.ranges === 0 && orig.resultOpts === 0) return true;
-
-      // keep if ranges survived OR has resultOpts
-      if ((p.ranges?.length || 0) > 0) return true;
-      if ((p.resultOpts?.length || 0) > 0) return true;
-
-      // else drop
-      return false;
-    });
-  } catch (err) {
-    console.error("ParameterService.listByTest error:", err);
-    throw err;
-  }
-},
-backfillReportItems: async (testId, createdById = null) => {
-  const tId = Number(testId);
-
-  return prisma.$transaction(async (tx) => {
-    const params = await tx.testParameter.findMany({
-      where: { testId: tId },
-      select: { id: true },
-      orderBy: { order: "asc" },
-    });
-
-    const max = await tx.testReportItem.aggregate({
-      where: { testId: tId },
-      _max: { sortOrder: true },
-    });
-    let sort = (max._max.sortOrder ?? 0) + 1;
-
-    let created = 0;
-
-    for (const p of params) {
-      const exists = await tx.testReportItem.findFirst({
-        where: { testId: tId, type: "PARAMETER", parameterId: p.id },
-        select: { id: true },
+      const rows = await prisma.testParameter.findMany({
+        where: { testId: tId },
+        orderBy: { order: "asc" },
+        include: {
+          ranges: { orderBy: { id: "asc" } },
+          resultOpts: { orderBy: { id: "asc" } }, // ✅ always fetch all
+        },
       });
 
-      if (!exists) {
-        await tx.testReportItem.create({
-          data: {
-            testId: tId,
-            type: "PARAMETER",
-            sortOrder: sort++,
-            parameterId: p.id,
-            createdById: createdById ? Number(createdById) : null,
-          },
-        });
-        created++;
-      }
-    }
 
-    return { created };
-  });
-},
+      // ✅ store original counts so we don't wrongly drop parameters
+      const originalCounts = new Map(
+        rows.map((p) => [
+          p.id,
+          { ranges: p.ranges?.length || 0, resultOpts: p.resultOpts?.length || 0 },
+        ])
+      );
+
+      const filtered = rows.map((p) => {
+        let ranges = [...(p.ranges || [])];
+
+        /* ---------------- GENDER FILTER (ranges only) ---------------- */
+        if (ranges.length > 0) {
+          if (g !== "Both") {
+            const specific = ranges.filter((r) => r.gender === g);
+            ranges = specific.length > 0 ? specific : ranges.filter((r) => r.gender === "Both");
+          } else {
+            ranges = ranges.filter((r) => r.gender === "Both");
+          }
+        }
+
+        /* ---------------- AGE FILTER (ranges only) ---------------- */
+        if (ranges.length > 0) {
+          if (a === "any") {
+            ranges = ranges.filter((r) => isAnyAge(r.referenceRange));
+          } else {
+
+
+            const specificAge = ranges.filter(
+              (r) =>
+                !isAnyAge(r.referenceRange) &&
+                String(r.referenceRange || "").trim().toLowerCase() === a
+            );
+
+
+
+            const anyAge = ranges.filter((r) => isAnyAge(r.referenceRange));
+
+            ranges = specificAge.length > 0 ? specificAge : anyAge;
+          }
+        }
+
+        // ✅ resultOpts untouched, return all
+        return { ...p, ranges, resultOpts: p.resultOpts || [] };
+      });
+
+      /* ✅ POST FILTER RULES
+         - If parameter originally had neither ranges nor resultOpts -> keep (still valid)
+         - If it originally had ranges/resultOpts, keep if at least one survived:
+             ranges survived OR resultOpts exists
+         - Since we never filter resultOpts, this will keep OPTIONS parameters always.
+      */
+      return filtered.filter((p) => {
+        const orig = originalCounts.get(p.id) || { ranges: 0, resultOpts: 0 };
+
+        // no config at all -> keep
+        if (orig.ranges === 0 && orig.resultOpts === 0) return true;
+
+        // keep if ranges survived OR has resultOpts
+        if ((p.ranges?.length || 0) > 0) return true;
+        if ((p.resultOpts?.length || 0) > 0) return true;
+
+        // else drop
+        return false;
+      });
+    } catch (err) {
+      console.error("ParameterService.listByTest error:", err);
+      throw err;
+    }
+  },
+  backfillReportItems: async (testId, createdById = null) => {
+    const tId = Number(testId);
+
+    return prisma.$transaction(async (tx) => {
+      const params = await tx.testParameter.findMany({
+        where: { testId: tId },
+        select: { id: true },
+        orderBy: { order: "asc" },
+      });
+
+      const max = await tx.testReportItem.aggregate({
+        where: { testId: tId },
+        _max: { sortOrder: true },
+      });
+      let sort = (max._max.sortOrder ?? 0) + 1;
+
+      let created = 0;
+
+      for (const p of params) {
+        const exists = await tx.testReportItem.findFirst({
+          where: { testId: tId, type: "PARAMETER", parameterId: p.id },
+          select: { id: true },
+        });
+
+        if (!exists) {
+          await tx.testReportItem.create({
+            data: {
+              testId: tId,
+              type: "PARAMETER",
+              sortOrder: sort++,
+              parameterId: p.id,
+              createdById: createdById ? Number(createdById) : null,
+            },
+          });
+          created++;
+        }
+      }
+
+      return { created };
+    });
+  },
 
 };

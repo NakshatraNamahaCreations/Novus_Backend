@@ -7,15 +7,13 @@ import { buildHtml } from "./templates/buildHtml.js";
 import { princeHtmlToPdfBuffer } from "./prince/princeRunner.js";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
-// STATIC assets folder containing css/report.css (and maybe default images)
 const assetsDirAbs = path.resolve(__dirname, "../../../assets/report");
 
 function layoutAssets(layout, variant) {
   const list = [];
 
-  // For letterhead and full variants, include header/footer
   if (variant !== "plain") {
     if (layout?.headerImg) {
       list.push({ url: layout.headerImg, relPath: "images/_header.png" });
@@ -25,12 +23,10 @@ function layoutAssets(layout, variant) {
     }
   }
 
-  // For full variant only, include front and last page images
   if (variant === "full") {
     if (layout?.frontPageLastImg) {
       list.push({ url: layout.frontPageLastImg, relPath: "images/_frontPageLast.jpg" });
     }
-
     if (layout?.lastPageImg) {
       list.push({ url: layout.lastPageImg, relPath: "images/_lastPage.jpg" });
     }
@@ -40,32 +36,34 @@ function layoutAssets(layout, variant) {
 }
 
 export async function generatePatient3PdfsNew({ orderId, patientId }) {
-  // Fetch all report data once
   const reportData = await PatientService.getReportData({ orderId, patientId });
 
-  // Build trend map
   const trendMap = await TrendService.buildTrendMap({
     results: reportData.results,
     patientId,
   });
 
-  // Add trendMap to reportData
   reportData.trendMap = trendMap;
 
-  // Helper to generate one variant
+  // ⚠️  buildHtml is async — MUST be awaited before passing to princeHtmlToPdfBuffer
   const makeOne = async (variant) => {
-    const html = buildHtml({ reportData, variant });
+    const html = await buildHtml({ reportData, variant }); // ← await is critical
+
+    if (typeof html !== "string") {
+      throw new Error(
+        `buildHtml did not return a string for variant "${variant}". Got: ${typeof html}`
+      );
+    }
 
     return princeHtmlToPdfBuffer({
       html,
       assetsDirAbs,
       extraRemoteAssets: layoutAssets(reportData.layout, variant),
-      debugSave: false, // Set to true for debugging
-      debugOutDirAbs: null, // Set path for debugging
+      debugSave: false,
+      debugOutDirAbs: null,
     });
   };
 
-  // Generate all three variants in parallel
   const [plainBuffer, letterheadBuffer, fullBuffer] = await Promise.all([
     makeOne("plain"),
     makeOne("letterhead"),

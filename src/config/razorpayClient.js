@@ -1,6 +1,6 @@
 import Razorpay from 'razorpay';
 
-console.log("process.env.RAZORPAY_KEY_ID",process.env.RAZORPAY_KEY_ID)
+
 
 if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
   throw new Error('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set in .env');

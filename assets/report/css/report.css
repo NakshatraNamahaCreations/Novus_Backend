@@ -4,7 +4,7 @@
 :root {
   --header-h: 85px;
   --footer-h: 50px;
-  --patient-strip-h: 140px;
+  --patient-strip-h: 118px;
   --pad-x: 14mm;
   --header-top-gap: 8px;
 
@@ -22,8 +22,8 @@
    =============================== */
 @page {
   size: A4;
-  margin-top: calc(var(--header-h) + var(--patient-strip-h) + 8px + 8px);
-  margin-bottom: calc(var(--footer-h) + 8px);
+  margin-top: calc(var(--header-h) + var(--patient-strip-h) + 10px + 8px);
+  margin-bottom: calc(var(--footer-h) + 10px);
   margin-left: var(--pad-x);
   margin-right: var(--pad-x);
 
@@ -40,10 +40,14 @@
   }
 
   @bottom-right {
-    content: "P " counter(page) " of " counter(pages);
-    font-size: 6px;
-    color: #666;
-    padding-bottom: 2px;
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: Arial, sans-serif;
+    font-size: 8px;
+    color: #888888;
+    padding-bottom: 4px;
+    padding-right: 2px;
+    white-space: nowrap;
+    vertical-align: bottom;
   }
 }
 
@@ -55,10 +59,13 @@
   margin: 0;
 
   @bottom-right {
-    content: "P " counter(page) " of " counter(pages);
-    font-size: 6px;
-    color: #666;
-    padding: 8px 10px;
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: Arial, sans-serif;
+    font-size: 8px;
+    color: #888888;
+    padding: 6px 10px;
+    white-space: nowrap;
+    vertical-align: bottom;
   }
 }
 
@@ -69,23 +76,76 @@
   size: A4;
   margin: 0 var(--pad-x) 14mm var(--pad-x);
 
-  @top    { content: none; }
-  @bottom { content: none; }
+  @top {
+    content: none;
+  }
+
+  @bottom {
+    content: none;
+  }
 
   @bottom-right {
-    content: "P " counter(page) " of " counter(pages);
-    font-size: 6px;
-    color: #666;
-    padding-bottom: 2px;
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: Arial, sans-serif;
+    font-size: 8px;
+    color: #888888;
+    padding-bottom: 4px;
+    white-space: nowrap;
+    vertical-align: bottom;
   }
+}
+
+/* ===============================
+   PAGE SETUP — PLAIN VARIANT
+   =============================== */
+@page plainpage {
+  size: A4;
+  margin-top: 90mm;
+  margin-bottom: 35mm;
+  margin-left: var(--pad-x);
+  margin-right: var(--pad-x);
+
+  @top {
+    content: element(header-content);
+    vertical-align: top;
+    padding: 0;
+  }
+
+  @bottom {
+    content: element(footer-content);
+    vertical-align: bottom;
+    padding: 0;
+  }
+
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: Arial, sans-serif;
+    font-size: 8px;
+    color: #888888;
+    padding-bottom: 4px;
+    padding-right: 2px;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+}
+
+.plain-page {
+  page: plainpage;
+}
+
+.plain-page .hdr {
+  height: 50mm;
 }
 
 /* ===============================
    BASE STYLES
    =============================== */
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
@@ -93,7 +153,9 @@ html, body {
   line-height: 1.4;
 }
 
-p { font-size: 13px; }
+p {
+  font-size: 13px;
+}
 
 /* ===============================
    RUNNING ELEMENTS
@@ -102,6 +164,7 @@ p { font-size: 13px; }
   position: running(header-content);
   margin: 0;
   padding: 0;
+  padding-bottom: 0;
 }
 
 .page-footer {
@@ -132,7 +195,8 @@ p { font-size: 13px; }
   width: 100%;
   margin: 0;
   padding: 0;
-  margin-top: 8px;
+  margin-top: var(--header-top-gap);
+  margin-bottom: 6px;
 }
 
 .hf-img {
@@ -153,7 +217,9 @@ p { font-size: 13px; }
 /* ===============================
    FULL IMAGE PAGES
    =============================== */
-.image-page { page: imgpage; }
+.image-page {
+  page: imgpage;
+}
 
 .fullpage-img {
   width: 210mm;
@@ -169,14 +235,13 @@ p { font-size: 13px; }
   page: indexpage;
 }
 
-/* ── Patient strip on index page ── */
 .idx-patient-strip {
   border: 1.5px solid var(--text-dark);
   border-radius: 6px;
   padding: 10px 14px 12px;
   margin-bottom: 18px;
   background: var(--bg-white);
-  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
 }
 
 .idx-patient-title {
@@ -223,7 +288,6 @@ p { font-size: 13px; }
   color: #1a1a1a;
 }
 
-/* ── Index page header ── */
 .idx-page-header {
   display: flex;
   align-items: baseline;
@@ -245,10 +309,13 @@ p { font-size: 13px; }
   color: #888;
 }
 
-.idx-page-sub strong { color: var(--text-dark); }
+.idx-page-sub strong {
+  color: var(--text-dark);
+}
 
-/* ── Department section ── */
-.idx-section { margin-bottom: 18px; }
+.idx-section {
+  margin-bottom: 18px;
+}
 
 .idx-dept-header {
   display: flex;
@@ -286,14 +353,15 @@ p { font-size: 13px; }
   border: 1px solid #dde4ff;
 }
 
-/* ── Index table ── */
 .idx-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
 
-.idx-table thead tr { background: #f8f9ff; }
+.idx-table thead tr {
+  background: #f8f9ff;
+}
 
 .idx-table th {
   padding: 8px 12px;
@@ -312,7 +380,9 @@ p { font-size: 13px; }
   vertical-align: middle;
 }
 
-.idx-row:last-child td { border-bottom: none; }
+.idx-row:last-child td {
+  border-bottom: none;
+}
 
 .th-num  { width: 36px; }
 .th-name { width: auto; }
@@ -349,7 +419,6 @@ p { font-size: 13px; }
   flex-shrink: 0;
 }
 
-/* Badges */
 .badge {
   display: inline-block;
   padding: 2px 9px;
@@ -363,7 +432,10 @@ p { font-size: 13px; }
 .badge-radiology { background: #e8f4fd; color: #1a6fa8; }
 .badge-pathology  { background: #eafaf1; color: #1a7a4a; }
 
-.idx-page-cell { text-align: center; width: 40px; }
+.idx-page-cell {
+  text-align: center;
+  width: 40px;
+}
 
 .idx-page-link {
   display: inline-flex;
@@ -372,10 +444,15 @@ p { font-size: 13px; }
   color: #aaa;
   text-decoration: none;
 }
-.idx-page-link:hover { color: var(--text-dark); }
-.idx-link-icon { width: 13px; height: 13px; display: block; }
 
-/* ── Notice box ── */
+.idx-page-link:hover { color: var(--text-dark); }
+
+.idx-link-icon {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
 .idx-notice {
   margin-top: 20px;
   padding: 10px 14px;
@@ -387,13 +464,14 @@ p { font-size: 13px; }
   gap: 10px;
 }
 
+/* ✅ FIX: images left-aligned */
 .radio-html img {
   max-width: 100%;
   max-height: 500px;
   width: auto;
   height: auto;
   display: block;
-  margin: 0 auto;
+  margin: 0;
   object-fit: contain;
 }
 
@@ -414,82 +492,194 @@ p { font-size: 13px; }
   page-break-before: always;
 }
 
-/* ✅ Radiology: hide department name banner and test name title */
-.dept-group-radiology .dept-header { display: none; }
-.dept-group-radiology .section-title { display: none; }
+.dept-group-radiology .dept-header {
+  display: none;
+}
+
+.dept-group-radiology .section-title {
+  display: none;
+}
 
 /* ===============================
    RESULTS PAGE
    =============================== */
-.results-page { }
+.results-page {}
 
 .results-page .content {
-  padding-top: 4px;
+  padding-top: 0;
 }
 
 /* ===============================
-   PATIENT STRIP (running header)
+   PATIENT STRIP — BLACK ONLY
    =============================== */
-.patient-strip {
-  border: 1.5px solid var(--text-dark);
-  border-radius: 4px;
-  padding: 8px 12px 10px;
-  margin: 0;
-  background: var(--bg-white);
-  box-shadow: 0 1px 3px rgba(0,0,0,.1);
-}
-
-.ps-title {
-  font-weight: 700;
-  font-size: 11px;
-  margin-bottom: 6px;
-  color: var(--text-dark);
-  padding-bottom: 5px;
-  border-bottom: 1px solid var(--border-light);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.ps-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px 12px;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.ps-grid div {
-  padding: 4px 0;
-  border-bottom: 1px dashed var(--border-light);
-  white-space: nowrap;
+.ps3 {
+  display: flex;
+  align-items: stretch;
+  background: #ffffff;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
   overflow: hidden;
-  text-overflow: ellipsis;
+  /* ✅ black borders only — no orange */
+  border-top: 2px solid #524f4f;
+  border-bottom: 1px solid #524f4f;
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
 }
 
-.ps-grid div:last-child,
-.ps-grid div:nth-last-child(2),
-.ps-grid div:nth-last-child(3) {
-  border-bottom: none;
+.ps3-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 14px;
 }
 
-.ps-grid b {
-  color: var(--text-dark);
+/* COL 1 — LEFT ~42% */
+.ps3-col-left {
+  flex: 42;
+  gap: 1px;
+  background: #ffffff;
+  border-right: 1px solid #d0d0d0;
+}
+
+/* COL 2 — MID ~32% */
+.ps3-col-mid {
+  flex: 32;
+  gap: 2px;
+  justify-content: center;
+  background: #f9f9f9;
+  border-right: 1px solid #d0d0d0;
+}
+
+/* COL 3 — RIGHT ~26% */
+.ps3-col-right {
+  flex: 26;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #f9f9f9;
+}
+
+/* Remove old divider */
+.ps3-divider {
+  display: none;
+}
+
+/* ── Left column ── */
+.ps3-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+  line-height: 1.3;
+  letter-spacing: -0.2px;
+}
+
+/* ✅ BLACK only — no orange */
+.ps3-age-gender {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ps3-spacer {
+  height: 2px;
+}
+
+/* Label : value rows */
+.ps3-row {
+  display: flex;
+  align-items: baseline;
+  line-height: 1.65;
+}
+
+.ps3-label {
+  font-size: 10px;
+  color: #888888;
+  white-space: nowrap;
   font-weight: 600;
-  display: inline-block;
-  min-width: 85px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ps3-col-left .ps3-label {
+  min-width: 52px;
+}
+
+.ps3-col-mid .ps3-label {
+  min-width: 82px;
+}
+
+.ps3-colon {
+  font-size: 10px;
+  color: #bbb;
+  margin: 0 5px 0 0;
+}
+
+.ps3-value {
+  font-size: 11px;
+  color: #1a1a1a;
+  font-weight: 500;
+}
+
+/* REG number bold */
+.ps3-col-mid .ps3-row:first-child .ps3-value strong {
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+/* Right column — logo + QR */
+.ps3-right-logo-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.ps3-logo-img {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  display: block;
+  border-radius: 50%;
+  border: 1.5px solid #d0d0d0;
+  padding: 2px;
+  background: #fff;
+}
+
+.ps3-center-code {
+  font-size: 9px;
+  color: #999;
+  text-align: center;
+  letter-spacing: 0.3px;
+}
+
+.ps3-qr-img {
+  width: 64px;
+  height: 64px;
+  display: block;
+  border: 1.5px solid #d0d0d0;
+  border-radius: 4px;
+  flex-shrink: 0;
+  padding: 2px;
+  background: #fff;
 }
 
 /* ===============================
    DEPARTMENT HEADER (in results)
    =============================== */
-
 .dept-header {
-  margin: 4px 0 0 0;
-  padding: 0 13px 2px;
+  margin: 0;
+  padding: 0 13px;
   background: transparent;
   border-radius: 0 4px 4px 0;
-  page-break-after: avoid !important;   /* ← ADD THIS */
+  page-break-after: avoid !important;
 }
+
 .dept-header-title {
   font-size: 13px;
   font-weight: 700;
@@ -504,10 +694,14 @@ p { font-size: 13px; }
 /* ===============================
    SECTION & TEST TITLE
    =============================== */
-.section { margin-bottom: 14px; }   /* ✅ FIX: reduced from 20px */
-.section.keep-together { page-break-inside: avoid; }
+.section {
+  margin-bottom: 14px;
+}
 
-/* ✅ FIX: zero margin-top, minimal padding so test title sits right under dept header */
+.section.keep-together {
+  page-break-inside: avoid;
+}
+
 .test-title-row {
   display: flex;
   justify-content: space-between;
@@ -517,7 +711,6 @@ p { font-size: 13px; }
   padding: 2px 14px 4px;
   background: transparent;
   border-left: none;
-
   page-break-after: avoid;
   page-break-inside: avoid;
 }
@@ -530,17 +723,33 @@ p { font-size: 13px; }
   letter-spacing: 0.5px;
 }
 
+/* ✅ FIX: reduced top padding from 10px to 2px */
 .section-title {
   font-size: 12px;
   font-weight: 700;
-  margin-bottom: 10px;
+  margin: 0;
   color: var(--text-dark);
-  padding: 10px 14px;
-
+  padding: 2px 14px 6px;
   page-break-after: avoid;
   page-break-inside: avoid;
   text-transform: uppercase;
   letter-spacing: 0.4px;
+}
+
+/* ✅ FIX: radiology group — zero top spacing */
+.section.radiology {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+.dept-group-radiology {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+.dept-group-radiology > *:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
 }
 
 /* ===============================
@@ -549,54 +758,81 @@ p { font-size: 13px; }
 .tbl {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;          /* ✅ FIX: reduced from 12px */
+  font-size: 11px;
   margin: 0;
   background: var(--bg-white);
 }
 
-.tbl thead { background: transparent; }
+.tbl thead {
+  background: transparent;
+}
 
 .tbl th {
-  padding: 5px 12px;        /* ✅ FIX: reduced from 6px */
+  padding: 5px 12px;
   text-align: left;
   font-weight: 700;
-  font-size: 10px;          /* ✅ FIX: reduced from 11px */
+  font-size: 10px;
   color: var(--text-dark);
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
 
-.tbl .test-name-header { width: 42%; padding-left: 14px; }
-.tbl .result-header    { width: 29%; text-align: left; }
-.tbl .bio-ref-header   { width: 29%; text-align: left; }
+.tbl .test-name-header {
+  width: 42%;
+  padding-left: 14px;
+}
 
-.tbl tbody tr:last-child { border-bottom: none; }
-.tbl tbody tr:nth-child(even) { background: #fafafa; }
-.tbl tbody tr:hover { background: #f0f7ff; }
+.tbl .result-header {
+  width: 29%;
+  text-align: left;
+}
+
+.tbl .bio-ref-header {
+  width: 29%;
+  text-align: left;
+}
+
+.tbl tbody tr:last-child {
+  border-bottom: none;
+}
+
+.tbl tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.tbl tbody tr:hover {
+  background: #f0f7ff;
+}
 
 .tbl td {
-  padding: 5px 12px;        /* ✅ FIX: reduced from 6px */
-  font-size: 11px;          /* ✅ FIX: reduced from 12px */
+  padding: 5px 12px;
+  font-size: 11px;
   vertical-align: middle;
   color: var(--text-dark);
 }
 
-.tbl tbody td:nth-child(1) { padding-left: 14px; }
+.tbl tbody td:nth-child(1) {
+  padding-left: 14px;
+}
 
-/* ✅ FIX: result column default is normal weight — only .abnormal-value gets bold */
-.tbl tbody td:nth-child(2) { text-align: left; font-weight: 400; }
-.tbl tbody td:nth-child(3) { text-align: left; }
+.tbl tbody td:nth-child(2) {
+  text-align: left;
+  font-weight: 400;
+}
 
-/* ── Parameter name cell ── */
+.tbl tbody td:nth-child(3) {
+  text-align: left;
+}
+
 .param-name-cell {
   vertical-align: top;
-  padding: 5px 12px !important;   /* ✅ FIX: reduced from 6px */
+  padding: 5px 12px !important;
 }
 
 .param-name {
   color: black;
   margin-bottom: 4px;
-  font-size: 11px;          /* ✅ FIX: reduced from 12px */
+  font-size: 11px;
   line-height: 1.4;
 }
 
@@ -608,31 +844,61 @@ p { font-size: 13px; }
 }
 
 .param-notes {
-  font-size: 10px;          /* ✅ FIX: reduced from 11px */
+  font-size: 10px;
   color: #666;
   font-style: italic;
   margin-top: 3px;
 }
 
-/* ── Reference range ── */
 .ref-range {
   color: var(--text-gray);
-  font-size: 10px;          /* ✅ FIX: reduced from 11px */
+  font-size: 10px;
   font-style: italic;
 }
 
 .ref-range.ref-html,
-.ref-range.ref-html * { line-height: 1.15 !important; }
-.ref-range.ref-html p { margin: 0 !important; padding: 0 !important; }
-.ref-range.ref-html p + p { margin-top: 2px !important; }
+.ref-range.ref-html * {
+  line-height: 1.15 !important;
+}
 
-/* ── Abnormal values ── */
-/* ✅ These stay bold + coloured; normal values have font-weight:400 from td rule */
-.abnormal-value { color: #c53030; font-weight: 700; }
-.abnormal-value.high::before { content: '▲'; margin-right: 6px; }
-.abnormal-value.low::before  { content: '▼'; margin-right: 6px; }
+.ref-range.ref-html p {
+  margin: 0 !important;
+  padding: 0 !important;
+}
 
-/* ── Row types ── */
+.ref-range.ref-html p+p {
+  margin-top: 2px !important;
+}
+
+.abnormal-value {
+  color: #000000;
+  font-weight: 700;
+}
+
+.abnormal-value.high::before {
+  content: '▲';
+  margin-right: 6px;
+}
+
+.abnormal-value.low::before {
+  content: '▼';
+  margin-right: 6px;
+}
+
+.tbl tbody tr.row-abnormal td.param-name-cell .param-name {
+  font-weight: 700 !important;
+  color: #1a1a1a !important;
+}
+
+.tbl tbody tr.row-abnormal td:nth-child(2) {
+  font-weight: 700 !important;
+}
+
+.tbl tbody tr.row-abnormal .abnormal-value {
+  color: #000000 !important;
+  font-weight: 700 !important;
+}
+
 .row-heading .heading-cell {
   font-weight: 700;
   font-size: 13px;
@@ -641,12 +907,11 @@ p { font-size: 13px; }
 
 .richtext-cell,
 .notes-cell {
-  font-size: 11px;          /* ✅ FIX: reduced from 12px */
+  font-size: 11px;
   color: #444;
   padding: 8px 12px;
 }
 
-/* Nested tables */
 .richtext-cell table,
 .notes-cell table {
   border-collapse: collapse !important;
@@ -660,8 +925,8 @@ p { font-size: 13px; }
 .notes-cell table td,
 .notes-cell table th {
   border: 1px solid #9aa4b2 !important;
-  padding: 5px 8px !important;  /* ✅ FIX: reduced from 6px */
-  font-size: 11px !important;   /* ✅ FIX: reduced from 12px */
+  padding: 5px 8px !important;
+  font-size: 11px !important;
   color: #1f2937 !important;
 }
 
@@ -674,22 +939,21 @@ p { font-size: 13px; }
 /* ===============================
    RADIOLOGY SECTION
    =============================== */
-/* The section inside also adds space */
-.section.radiology {
-  margin-top: 0 !important;
-  padding-top: 0 !important;
-}
-
-
 .radio-html {
-  padding: 14px;
-  font-size: 11px;          /* ✅ FIX: reduced from 12px */
+  padding: 4px 14px 14px;   /* ✅ top reduced from 14px to 4px */
+  font-size: 11px;
   line-height: 1.6;
   background: var(--bg-white);
 }
 
-.ql-scope p { margin: 6px 0; color: var(--text-dark); }
-.ql-scope .ql-align-center { text-align: center; }
+.ql-scope p {
+  margin: 6px 0;
+  color: var(--text-dark);
+}
+
+.ql-scope .ql-align-center {
+  text-align: center;
+}
 
 /* ===============================
    TEST NOTES BLOCK
@@ -701,13 +965,28 @@ p { font-size: 13px; }
   border-radius: 8px;
 }
 
-.test-notes-title { font-weight: 700; margin-bottom: 6px; }
+.test-notes-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
 
-.test-notes-body { font-size: 11px; line-height: 1.4; }   /* ✅ FIX: reduced from 12px */
+.test-notes-body {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .test-notes-body,
-.test-notes-body * { line-height: 1.35 !important; }
-.test-notes-body p { margin: 0 !important; }
-.test-notes-body p + p { margin-top: 2px !important; }
+.test-notes-body * {
+  line-height: 1.35 !important;
+}
+
+.test-notes-body p {
+  margin: 0 !important;
+}
+
+.test-notes-body p+p {
+  margin-top: 2px !important;
+}
 
 /* ===============================
    SIGNATURES — PER DEPT GROUP
@@ -722,7 +1001,11 @@ p { font-size: 13px; }
   background: var(--bg-white);
 }
 
-.sig-col { display: flex; align-items: flex-start; }
+.sig-col {
+  display: flex;
+  align-items: flex-start;
+}
+
 .sig-col.sig-left   { justify-content: flex-start; }
 .sig-col.sig-center { justify-content: center; }
 .sig-col.sig-right  { justify-content: flex-end; }
@@ -735,7 +1018,9 @@ p { font-size: 13px; }
   padding: 5px;
 }
 
-.sig-card.sig-empty { visibility: hidden; }
+.sig-card.sig-empty {
+  visibility: hidden;
+}
 
 .sig-img {
   max-height: 45px;
@@ -771,7 +1056,6 @@ p { font-size: 13px; }
 
 /* ===============================
    TRENDS SECTION
-   ✅ Always starts on a new page — only shown in "full" variant
    =============================== */
 .trends-section {
   margin-top: 28px;
@@ -799,8 +1083,6 @@ p { font-size: 13px; }
   align-items: center;
   gap: 8px;
 }
-
-.trends-title::before { content: ""; font-size: 0; }
 
 .trends-subtitle {
   font-size: 11px;
@@ -834,7 +1116,7 @@ p { font-size: 13px; }
   letter-spacing: 0.4px;
 }
 
-.trends-table th:first-child  { width: 40%; }
+.trends-table th:first-child { width: 40%; }
 .trends-table th:not(:first-child) { text-align: center; width: 20%; }
 
 .trends-table tbody tr.trend-test-header {
@@ -871,7 +1153,7 @@ p { font-size: 13px; }
 }
 
 .trend-value-cell { font-family: 'Courier New', monospace; }
-.trend-no-data { color: #999; font-style: italic; }
+.trend-no-data    { color: #999; font-style: italic; }
 
 /* ===============================
    CONDITIONS SECTION
@@ -920,6 +1202,32 @@ p { font-size: 13px; }
 }
 
 /* ===============================
+   END OF REPORT
+   =============================== */
+.end-of-report {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0 18px;
+  padding: 0 4px;
+}
+
+.end-of-report-line {
+  flex: 1;
+  height: 1px;
+  background: #d0d0d0;
+}
+
+.end-of-report-text {
+  font-size: 10px;
+  font-weight: 600;
+  color: #888;
+  white-space: nowrap;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+/* ===============================
    PAGE BREAK UTILITIES
    =============================== */
 .keep-together { page-break-inside: avoid; }
@@ -941,5 +1249,8 @@ p { font-size: 13px; }
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  .keep-together { page-break-inside: avoid !important; }
+
+  .keep-together {
+    page-break-inside: avoid !important;
+  }
 }
