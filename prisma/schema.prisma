@@ -915,7 +915,6 @@ model Order {
   patientId          Int
   addressId          Int?
   source             String?
-
   isSelf          Boolean     @default(false)
   totalAmount     Float
   discount        Float?

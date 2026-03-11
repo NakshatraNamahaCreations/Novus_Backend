@@ -331,12 +331,12 @@ export class PatientService {
     return (fullName + qualification) || "N/A";
   }
 
-  static getPartnerInfo(orderData) {
-    if (orderData?.center?.name) return orderData.center.name;
-    if (orderData?.diagnosticCenter?.name) return orderData.diagnosticCenter.name;
-    if (orderData?.refCenter?.name) return orderData.refCenter.name;
-    return orderData?.source || "-";
-  }
+static getPartnerInfo(orderData) {
+  if (orderData?.center?.name) return orderData.center.name;
+  if (orderData?.diagnosticCenter?.name) return orderData.diagnosticCenter.name;
+  if (orderData?.refCenter?.name) return orderData.refCenter.name;
+  return "-";   // ← just return dash, don't expose source
+}
 
   static getOrderDates(orderData) {
     return {

@@ -176,16 +176,17 @@ const endOfReport = `
 `;
 
 // ── Conditions section ────────────────────────────────────────
+
 const conditionsSection = `
   <div class="conditions-section keep-together">
-    <div class="conditions-title">CONDITIONS OF LABORATORY TESTING &amp; REPORTING</div>
+    <div class="conditions-title">CONDITIONS OF DIAGNOSTIC TESTING &amp; REPORTING</div>
     <div class="conditions-content">
-      <p>The test results reported herein pertain only to the specimen received and tested by Novus Health Labs.</p>
-      <p>It is presumed that the specimen submitted belongs to the patient whose name and details appear on the test requisition form.</p>
-      <p>Laboratory investigations are performed to assist the referring physician in clinical diagnosis and should be interpreted in correlation with the patient's clinical condition.</p>
-      <p>All tests are performed using validated laboratory methods and internal quality control procedures.</p>
-      <p>Test results are dependent on the quality, quantity, and integrity of the specimen received, as well as the analytical methodology used.</p>
-      <p>Report delivery timelines are indicative and may be affected due to unforeseen technical or operational circumstances. Any inconvenience caused is regretted.</p>
+      <p>Results and/or imaging findings reported herein pertain only to the specimen, images, or data received and processed by the laboratory.</p>
+      <p>It is assumed that the specimen and/or patient details provided on the requisition form are correct and belong to the patient identified in this report.</p>
+      <p>Laboratory and radiology investigations are performed to aid the referring physician in diagnosis and patient management. Results should be interpreted in correlation with the patient's clinical condition and other relevant investigations.</p>
+      <p>Test results and imaging interpretations depend on the quality, integrity, and adequacy of the specimen or images received, as well as the clinical information provided.</p>
+      <p>All investigations are performed using validated methods and quality control procedures in accordance with applicable laboratory standards.</p>
+      <p>Report turnaround time is indicative and may be affected due to technical or operational circumstances.</p>
     </div>
   </div>
 `;
@@ -366,7 +367,7 @@ export async function buildHtml({ reportData, variant = "letterhead" }) {
     <div class="content">
       ${resultsContent}
       ${endOfReport}
-      ${conditionsSection}
+      <!-- ❌ conditionsSection removed for plain variant -->
     </div>
   </div>
 

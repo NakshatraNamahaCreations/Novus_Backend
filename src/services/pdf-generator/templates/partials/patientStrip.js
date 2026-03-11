@@ -80,7 +80,7 @@ export function patientStripHtml({ order, patient, derived, qrDataUrl, logoDataU
 
   const dates     = derived?.orderDates || {};
   const collected = fmtDate(dates.collectedAt);
-  const received  = fmtDate(dates.receivedAt);
+
   const reported  = fmtDate(dates.reportedAt);
 
   // "412 / 52"
@@ -114,7 +114,7 @@ export function patientStripHtml({ order, patient, derived, qrDataUrl, logoDataU
       <div class="ps3-col ps3-col-mid">
         ${row("REG",       regValue)}
         ${row("Collected", esc(collected))}
-        ${received && received !== "—" ? row("Received", esc(received)) : ""}
+       
         ${row("Reported",  esc(reported))}
       </div>
 
