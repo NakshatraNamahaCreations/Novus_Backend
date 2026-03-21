@@ -353,3 +353,33 @@ export const fetchReportDue = async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 };
+
+import { generateSingleTestPdf } from "../../services/pdf-generator/main.js";
+
+export const downloadSingleTestPdf = async (req, res) => {
+  try {
+    const { orderId, patientId, testResultId } = req.params;
+    const { variant = "letterhead" } = req.query; // 'plain' or 'letterhead'
+
+    if (!orderId || !patientId || !testResultId) {
+      return res.status(400).json({ success: false, message: "Missing required parameters" });
+    }
+    
+    // Generate pdf buffer
+    const pdfBuffer = await generateSingleTestPdf({
+      orderId: Number(orderId),
+      patientId: Number(patientId),
+      testResultId: Number(testResultId),
+      variant: variant === "plain" ? "plain" : "letterhead"
+    });
+
+    const filename = `test-report-${testResultId}-${variant}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("downloadSingleTestPdf error:", err);
+    return res.status(500).json({ success: false, error: "Failed to generate single test PDF" });
+  }
+};

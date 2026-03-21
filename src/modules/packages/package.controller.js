@@ -912,11 +912,12 @@ export const getSpotlightTests = async (req, res) => {
 ========================================================= */
 export const searchTestsGrouped = async (req, res) => {
   try {
-    const { search } = req.query;
+    // Support both ?q=... (EditOrderModal) and ?search=... (other callers)
+    const searchTerm = (req.query.q || req.query.search || "").trim();
 
     const tests = await prisma.test.findMany({
-      where: search
-        ? { name: { contains: String(search).trim(), mode: "insensitive" } }
+      where: searchTerm
+        ? { name: { contains: searchTerm, mode: "insensitive" } }
         : {},
       select: {
         id: true,

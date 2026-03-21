@@ -125,7 +125,8 @@ export const TestReportItemService = {
       data: {
         title: data.title ?? undefined,
         text: data.text ?? undefined,
-        html: data.html ?? undefined,
+        // always write html when provided (null means clear it)
+        html: "html" in data ? (data.html ?? null) : undefined,
         sortOrder: data.sortOrder != null ? Number(data.sortOrder) : undefined,
         gender: data.gender ?? undefined,
       },

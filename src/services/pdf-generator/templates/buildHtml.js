@@ -167,13 +167,21 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
 }
 
 // ── End of Report ─────────────────────────────────────────────
-const endOfReport = `
+function endOfReport(partnerName) {
+  const conductedAt = partnerName
+    ? `<div class="end-of-report-partner">This test conducted at <strong>${esc(partnerName)}</strong></div>`
+    : "";
+  return `
   <div class="end-of-report">
-    <div class="end-of-report-line"></div>
-    <span class="end-of-report-text">**** End of Report ****</span>
-    <div class="end-of-report-line"></div>
+    <div class="end-of-report-row">
+      <div class="end-of-report-line"></div>
+      <span class="end-of-report-text">**** End of Report ****</span>
+      <div class="end-of-report-line"></div>
+    </div>
+    ${conductedAt}
   </div>
 `;
+}
 
 // ── Conditions section ────────────────────────────────────────
 
@@ -242,6 +250,14 @@ export async function buildHtml({ reportData, variant = "letterhead" }) {
     logoDataUrl,
   });
 
+  // Resolve partner name for END OF REPORT
+  const partnerName =
+    derived?.partnerInfo ||
+    order?.partner?.name ||
+    order?.partnerName ||
+    order?.center?.code ||
+    "";
+
   const headerSrc = "images/_header.png";
   const footerSrc = "images/_footer.png";
   const plainImg =
@@ -292,7 +308,7 @@ export async function buildHtml({ reportData, variant = "letterhead" }) {
     ${runningElements(patientStripContent, headerSrc, footerSrc)}
     <div class="content">
       ${resultsContent}
-      ${endOfReport}
+      ${endOfReport(partnerName)}
       ${conditionsSection}
     </div>
   </div>
@@ -334,7 +350,7 @@ export async function buildHtml({ reportData, variant = "letterhead" }) {
     ${runningElements(patientStripContent, headerSrc, footerSrc)}
     <div class="content">
       ${resultsContent}
-      ${endOfReport}
+      ${endOfReport(partnerName)}
       ${conditionsSection}
     </div>
   </div>
@@ -366,7 +382,7 @@ export async function buildHtml({ reportData, variant = "letterhead" }) {
     ${runningElements(patientStripContent, plainImg, plainImg)}
     <div class="content">
       ${resultsContent}
-      ${endOfReport}
+      ${endOfReport(partnerName)}
       <!-- ❌ conditionsSection removed for plain variant -->
     </div>
   </div>

@@ -40,7 +40,7 @@ const rangesWhereByGenderOnly = (gender) => {
 };
 
 export class PatientService {
-  static async getReportData({ orderId, patientId }) {
+  static async getReportData({ orderId, patientId, testResultId }) {
     try {
       const [order, patient, layout] = await Promise.all([
         this.getOrderData(orderId),
@@ -56,7 +56,8 @@ export class PatientService {
         orderId,
         patientId,
         patient.gender,
-        patient.dob
+        patient.dob,
+        testResultId
       );
 
       const derived = {
@@ -160,7 +161,7 @@ export class PatientService {
   }
 
   // ✅ Age-wise filter removed
- static async getPatientResults(orderId, patientId, patientGender, patientDob) {
+ static async getPatientResults(orderId, patientId, patientGender, patientDob, testResultId) {
   try {
     const gender = normalizeGender(patientGender);
     const ageKey = ageToKeyFromDob(patientDob);
@@ -168,11 +169,16 @@ export class PatientService {
   
 
     // 1) Results
+    const whereClause = {
+      orderId: Number(orderId),
+      patientId: Number(patientId),
+    };
+    if (testResultId) {
+      whereClause.id = Number(testResultId);
+    }
+
     const results = await prisma.patientTestResult.findMany({
-      where: {
-        orderId: Number(orderId),
-        patientId: Number(patientId),
-      },
+      where: whereClause,
       include: {
         test: {
           select: {

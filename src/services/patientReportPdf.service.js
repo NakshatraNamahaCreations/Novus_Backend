@@ -1266,10 +1266,6 @@ function buildPatientContentHtml({
           <span class="ps-k">Ref. by :</span>
           <span class="ps-v">${escapeHtml(refBy)}</span>
         </div>
-        <div class="ps-kv">
-          <span class="ps-k">Partner :</span>
-          <span class="ps-v">${escapeHtml(partner)}</span>
-        </div>
       </div>
 
       <div class="ps-col ps-mid">
@@ -1368,6 +1364,7 @@ function buildPatientContentHtml({
           `;
 
           if (isRadiology) {
+            const partnerName = escapeHtml(order?.partnerName || order?.partner || "");
             return `
               <div class="page">
                 <div class="page-content">
@@ -1390,6 +1387,7 @@ function buildPatientContentHtml({
                   </div>
                 </div>
                 ${sigRow}
+                ${partnerName ? `<div style="text-align:center;font-size:10px;color:#6b7280;padding:4px 0;border-top:1px solid #e5e7eb;margin:0 20px;">This test conducted at <strong>${partnerName}</strong></div>` : ""}
               </div>
             `;
           }
@@ -1519,6 +1517,7 @@ function buildPatientContentHtml({
                 `
                 : mainTableHtml;
 
+            const partnerName2 = escapeHtml(order?.partnerName || order?.partner || "");
             return `
               <div class="page">
                 <div class="page-content">
@@ -1539,10 +1538,12 @@ function buildPatientContentHtml({
                   ${bodyHtml}
                 </div>
                 ${sigRow}
+                ${partnerName2 ? `<div style="text-align:center;font-size:10px;color:#6b7280;padding:4px 0;border-top:1px solid #e5e7eb;margin:0 20px;">This test conducted at <strong>${partnerName2}</strong></div>` : ""}
               </div>
             `;
           }
 
+          const partnerName3 = escapeHtml(order?.partnerName || order?.partner || "");
           return `
             <div class="page">
               <div class="page-content">
@@ -1563,6 +1564,7 @@ function buildPatientContentHtml({
                 ${mainTableHtml}
               </div>
               ${sigRow}
+              ${partnerName3 ? `<div style="text-align:center;font-size:10px;color:#6b7280;padding:4px 0;border-top:1px solid #e5e7eb;margin:0 20px;">This test conducted at <strong>${partnerName3}</strong></div>` : ""}
             </div>
           `;
         })

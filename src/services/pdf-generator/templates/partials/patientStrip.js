@@ -105,7 +105,6 @@ export function patientStripHtml({ order, patient, derived, qrDataUrl, logoDataU
         <div class="ps3-age-gender">${esc(age)}/${esc(gender)}</div>
         <div class="ps3-spacer"></div>
         ${row("Ref. by", esc(doctor))}
-        ${row("Partner", esc(partner))}
       </div>
 
       <div class="ps3-divider"></div>

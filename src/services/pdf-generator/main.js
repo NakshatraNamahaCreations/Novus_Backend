@@ -72,3 +72,28 @@ export async function generatePatient3PdfsNew({ orderId, patientId }) {
 
   return { plainBuffer, letterheadBuffer, fullBuffer };
 }
+
+export async function generateSingleTestPdf({ orderId, patientId, testResultId, variant = "letterhead" }) {
+  const reportData = await PatientService.getReportData({ orderId, patientId, testResultId });
+
+  const trendMap = await TrendService.buildTrendMap({
+    results: reportData.results,
+    patientId,
+  });
+
+  reportData.trendMap = trendMap;
+
+  const html = await buildHtml({ reportData, variant });
+
+  if (typeof html !== "string") {
+    throw new Error(`buildHtml did not return a string for variant "${variant}". Got: ${typeof html}`);
+  }
+
+  return princeHtmlToPdfBuffer({
+    html,
+    assetsDirAbs,
+    extraRemoteAssets: layoutAssets(reportData.layout, variant),
+    debugSave: false,
+    debugOutDirAbs: null,
+  });
+}

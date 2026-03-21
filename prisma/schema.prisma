@@ -118,6 +118,7 @@ enum ReportItemType {
   PARAMETER
   NOTES
   RICH_TEXT
+  FREE_TEXT
 }
 
 model Pincode {

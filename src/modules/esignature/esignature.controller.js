@@ -83,7 +83,7 @@ export const createESignature = async (req, res) => {
         });
       }
 
-      // ✅ Set defaults (multi) with GLOBAL UNIQUE rule
+      // ✅ Set defaults — one default per (department + alignment) slot
       if (defaultDeptIds.length) {
         // ensure rows exist for this signature
         await tx.eSignatureDepartment.createMany({
@@ -95,14 +95,25 @@ export const createESignature = async (req, res) => {
           skipDuplicates: true,
         });
 
-        // clear previous defaults for those departments globally
-        await tx.eSignatureDepartment.updateMany({
+        // Clear previous defaults ONLY for the same department + same alignment
+        // (allows Yogesh MRI LEFT and Chetan MRI RIGHT to both be defaults)
+        const sigAlignment = String(alignment || "LEFT").toUpperCase();
+        const conflicting = await tx.eSignatureDepartment.findMany({
           where: {
             departmentItemId: { in: defaultDeptIds },
             isDefault: true,
+            signature: { alignment: sigAlignment },
           },
-          data: { isDefault: false },
+          select: { signatureId: true, departmentItemId: true },
         });
+        if (conflicting.length) {
+          for (const c of conflicting) {
+            await tx.eSignatureDepartment.updateMany({
+              where: { signatureId: c.signatureId, departmentItemId: c.departmentItemId, isDefault: true },
+              data: { isDefault: false },
+            });
+          }
+        }
 
         // set new defaults for this signature
         await tx.eSignatureDepartment.updateMany({
@@ -353,23 +364,26 @@ export const updateESignature = async (req, res) => {
         });
       }
 
-      // ✅ Defaults handling (optional) — FIXED
+      // ✅ Defaults handling — one default per (department + alignment) slot
       if (parsedDefaultDeptIds !== null) {
         const defaultDeptIds = parsedDefaultDeptIds;
+        const sigAlignment = String(
+          alignment !== undefined ? alignment : existing.alignment || "LEFT"
+        ).toUpperCase();
 
-        // ✅ 1) Clear defaults removed from THIS signature
+        // 1) Clear defaults removed from THIS signature
         await tx.eSignatureDepartment.updateMany({
           where: {
             signatureId: sigId,
             isDefault: true,
             departmentItemId: {
-              notIn: defaultDeptIds.length ? defaultDeptIds : [-1], // if empty => clear all
+              notIn: defaultDeptIds.length ? defaultDeptIds : [-1],
             },
           },
           data: { isDefault: false },
         });
 
-        // ✅ 2) If empty -> done (means clear all defaults for this signature)
+        // 2) If empty => done (clear all defaults for this signature)
         if (defaultDeptIds.length) {
           // Ensure rows exist
           await tx.eSignatureDepartment.createMany({
@@ -381,14 +395,23 @@ export const updateESignature = async (req, res) => {
             skipDuplicates: true,
           });
 
-          // ✅ GLOBAL UNIQUE: only one default signature per department
-          await tx.eSignatureDepartment.updateMany({
+          // ✅ SLOT UNIQUE: clear the OTHER signature that holds the same dept+alignment slot
+          // (Yogesh=MRI/LEFT should not clear Chetan=MRI/RIGHT)
+          const conflicting = await tx.eSignatureDepartment.findMany({
             where: {
               departmentItemId: { in: defaultDeptIds },
               isDefault: true,
+              signatureId: { not: sigId },
+              signature: { alignment: sigAlignment },
             },
-            data: { isDefault: false },
+            select: { signatureId: true, departmentItemId: true },
           });
+          for (const c of conflicting) {
+            await tx.eSignatureDepartment.updateMany({
+              where: { signatureId: c.signatureId, departmentItemId: c.departmentItemId },
+              data: { isDefault: false },
+            });
+          }
 
           // Set defaults for THIS signature
           await tx.eSignatureDepartment.updateMany({

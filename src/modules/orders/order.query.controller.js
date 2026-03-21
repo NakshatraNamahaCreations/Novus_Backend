@@ -31,11 +31,11 @@ export const getAllOrders = async (req, res) => {
       centerId = "", source = "",
     } = req.query;
 
-    page  = Number(page);
+    page = Number(page);
     limit = Number(limit);
     const skip = (page - 1) * limit;
 
-    const user  = req.user;
+    const user = req.user;
     const where = {};
 
     // Role restriction
@@ -49,30 +49,30 @@ export const getAllOrders = async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (!fromDate) fromDate = today.toISOString().split("T")[0];
-    if (!toDate)   toDate   = today.toISOString().split("T")[0];
+    if (!toDate) toDate = today.toISOString().split("T")[0];
 
     if (search) {
       const s = String(search).trim();
-      const asNumber  = Number(s);
+      const asNumber = Number(s);
       const isNumeric = s !== "" && Number.isFinite(asNumber);
       where.OR = [
         ...(isNumeric ? [{ id: asNumber }] : []),
         { orderNumber: { contains: s, mode: "insensitive" } },
-        { trackingId:  { contains: s, mode: "insensitive" } },
-        { source:      { contains: s, mode: "insensitive" } },
-        { patient: { fullName:   { contains: s, mode: "insensitive" } } },
-        { patient: { contactNo:  { contains: s, mode: "insensitive" } } },
+        { trackingId: { contains: s, mode: "insensitive" } },
+        { source: { contains: s, mode: "insensitive" } },
+        { patient: { fullName: { contains: s, mode: "insensitive" } } },
+        { patient: { contactNo: { contains: s, mode: "insensitive" } } },
       ];
     }
 
     if (status && status !== "all") where.status = status;
 
-    if (paymentStatus === "pending") where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED","PENDING"] };
-    if (paymentStatus === "paid")    where.paymentStatus = { in: ["CAPTURED", "COMPLETED", "paid"] };
+    if (paymentStatus === "pending") where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED", "PENDING"] };
+    if (paymentStatus === "paid") where.paymentStatus = { in: ["CAPTURED", "COMPLETED", "paid"] };
 
     if (fromDate && toDate) {
       const start = new Date(fromDate); start.setHours(0, 0, 0, 0);
-      const end   = new Date(toDate);   end.setHours(23, 59, 59, 999);
+      const end = new Date(toDate); end.setHours(23, 59, 59, 999);
       where.createdAt = { gte: start, lte: end };
     }
 
@@ -101,14 +101,15 @@ export const getAllOrders = async (req, res) => {
           totalAmount: true, finalAmount: true, discount: true, paymentMode: true,
           date: true, reportReady: true, sampleCollected: true, createdAt: true,
           isSelf: true, trackingId: true, isHomeSample: true, source: true,
-          refCenter:        { select: { id: true, name: true } },
-          patient:          { select: PATIENT_SELECT },
+          refCenter: { select: { id: true, name: true } },
+          patient: { select: PATIENT_SELECT },
           // vendor:           { select: { id: true, name: true, email: true } },
-          slot:             { select: { id: true, name: true, startTime: true, endTime: true } },
-          centerSlot:       { select: { id: true, name: true, startTime: true, endTime: true } },
-          address:          { select: { id: true, address: true, pincode: true, city: true } },
-          center:           { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
+          slot: { select: { id: true, name: true, startTime: true, endTime: true } },
+          centerSlot: { select: { id: true, name: true, startTime: true, endTime: true } },
+          address: { select: { id: true, address: true, pincode: true, city: true } },
+          center: { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
           diagnosticCenter: { select: { id: true, name: true, } },
+          doctor: { select: { id: true, name: true } },
         },
       }),
       prisma.order.count({ where }),
@@ -138,10 +139,10 @@ export const getLabOrders = async (req, res) => {
       refCenterId = "", diagnosticCenterId = "", centerId = "",
     } = req.query;
 
-    page  = Number(page);
+    page = Number(page);
     limit = Number(limit);
     const skip = (page - 1) * limit;
-    const user  = req.user;
+    const user = req.user;
     const where = {};
 
     if (user?.role === "admin") {
@@ -188,13 +189,13 @@ export const getLabOrders = async (req, res) => {
       const d = new Date(orderDate);
       if (!isNaN(d)) {
         const start = new Date(d); start.setHours(0, 0, 0, 0);
-        const end   = new Date(d); end.setHours(23, 59, 59, 999);
-        where.date  = { gte: start, lte: end };
+        const end = new Date(d); end.setHours(23, 59, 59, 999);
+        where.date = { gte: start, lte: end };
       }
     }
 
-    if (fromDate) { const s = new Date(fromDate); s.setHours(0, 0, 0, 0);   where.createdAt = { ...where.createdAt, gte: s }; }
-    if (toDate)   { const e = new Date(toDate);   e.setHours(23, 59, 59, 999); where.createdAt = { ...where.createdAt, lte: e }; }
+    if (fromDate) { const s = new Date(fromDate); s.setHours(0, 0, 0, 0); where.createdAt = { ...where.createdAt, gte: s }; }
+    if (toDate) { const e = new Date(toDate); e.setHours(23, 59, 59, 999); where.createdAt = { ...where.createdAt, lte: e }; }
 
     if (status && status !== "all") where.status = status;
     if (paymentStatus === "pending") where.paymentStatus = { in: ["pending", "AUTHORIZED", "FAILED", "PENDING"] };
@@ -229,20 +230,20 @@ export const getLabOrders = async (req, res) => {
           totalAmount: true, finalAmount: true, discount: true, paymentMode: true,
           date: true, reportReady: true, sampleCollected: true, createdAt: true,
           isSelf: true, trackingId: true, isHomeSample: true, source: true,
-          refCenter:        { select: { id: true, name: true } },
-          patient:          { select: PATIENT_SELECT },
-          vendor:           { select: { id: true, name: true, email: true } },
-          slot:             { select: { id: true, name: true, startTime: true, endTime: true } },
-          centerSlot:       { select: { id: true, name: true, startTime: true, endTime: true } },
-          address:          { select: { id: true, address: true, pincode: true, city: true } },
-          center:           { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
+          refCenter: { select: { id: true, name: true } },
+          patient: { select: PATIENT_SELECT },
+          vendor: { select: { id: true, name: true, email: true } },
+          slot: { select: { id: true, name: true, startTime: true, endTime: true } },
+          centerSlot: { select: { id: true, name: true, startTime: true, endTime: true } },
+          address: { select: { id: true, address: true, pincode: true, city: true } },
+          center: { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
           diagnosticCenter: { select: { id: true, name: true, address: true, pincode: true, cityId: true } },
           orderCheckups: { select: { checkup: { select: { id: true, name: true } } } },
           orderMembers: {
             select: {
               orderMemberPackages: {
                 select: {
-                  test:    { select: { id: true, name: true } },
+                  test: { select: { id: true, name: true } },
                   package: { select: { id: true, name: true } },
                 },
               },
@@ -282,12 +283,12 @@ export const getOrderById = async (req, res) => {
             smokingHabit: true, alcoholConsumption: true, exerciseFrequency: true,
           },
         },
-        payments:  { select: { id: true, invoiceUrl: true } },
-        address:   { select: { id: true, city: true, state: true, pincode: true, landmark: true, latitude: true, longitude: true } },
-        vendor:    { select: { id: true, name: true, number: true, city: true } },
+        payments: { select: { id: true, invoiceUrl: true } },
+        address: { select: { id: true, city: true, state: true, pincode: true, landmark: true, latitude: true, longitude: true } },
+        vendor: { select: { id: true, name: true, number: true, city: true } },
         refCenter: { select: { id: true, name: true, mobile: true, city: true } },
-        doctor:    { select: { id: true, name: true, mobile: true } },
-        center:    { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
+        doctor: { select: { id: true, name: true, mobile: true } },
+        center: { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
         orderMembers: {
           include: {
             patient: { select: { id: true, fullName: true, contactNo: true, gender: true, age: true } },
@@ -372,7 +373,7 @@ export const getOrderResultsById = async (req, res) => {
     // Priority map: APPROVED > latest
     const resultMap = new Map();
     for (const r of results) {
-      const key      = `${orderId}_${r.patientId}_${r.testId}`;
+      const key = `${orderId}_${r.patientId}_${r.testId}`;
       const existing = resultMap.get(key);
       if (!existing) { resultMap.set(key, r); continue; }
       if (existing.status !== "APPROVED" && r.status === "APPROVED") { resultMap.set(key, r); continue; }
@@ -434,9 +435,9 @@ export const getOrdersByPatientId = async (req, res) => {
       include: {
         patient: { select: PATIENT_SELECT },
         address: true, vendor: true,
-        slot:       { select: { id: true, startTime: true, endTime: true } },
+        slot: { select: { id: true, startTime: true, endTime: true } },
         centerSlot: { select: { id: true, startTime: true, endTime: true } },
-        payments:   { select: { id: true, invoiceUrl: true } },
+        payments: { select: { id: true, invoiceUrl: true } },
         orderMembers: {
           where: { patientId },
           include: {
@@ -510,9 +511,9 @@ export const getOrdersByPatientIdCompleted = async (req, res) => {
         ],
       },
       include: {
-        patient:  { select: PATIENT_SELECT },
-        address:  true,
-        vendor:   { select: { id: true, name: true, number: true } },
+        patient: { select: PATIENT_SELECT },
+        address: true,
+        vendor: { select: { id: true, name: true, number: true } },
         vendorReview: { select: { id: true, rating: true, comment: true, createdAt: true, patientId: true, vendorId: true, orderId: true } },
         payments: { select: { id: true, invoiceUrl: true } },
         orderMembers: {
@@ -555,10 +556,10 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
       select: {
         id: true, merchantOrderId: true, paymentStatus: true, status: true,
         reportReady: true, isHomeSample: true, sampleCollected: true, reportUrl: true,
-        slot:       { select: { id: true, startTime: true, endTime: true } },
+        slot: { select: { id: true, startTime: true, endTime: true } },
         centerSlot: { select: { id: true, startTime: true, endTime: true } },
-        patient:    { select: PATIENT_SELECT },
-        payments:   { select: { id: true, invoiceUrl: true } },
+        patient: { select: PATIENT_SELECT },
+        payments: { select: { id: true, invoiceUrl: true } },
         address: true,
         vendor: { select: { id: true, name: true, number: true } },
         orderMembers: {
@@ -568,7 +569,7 @@ export const getOrdersByPrimaryPatientId = async (req, res) => {
             orderMemberPackages: {
               include: {
                 package: { select: { id: true, name: true, description: true, actualPrice: true, offerPrice: true, imgUrl: true } },
-                test:    { select: { id: true, name: true, description: true, actualPrice: true, offerPrice: true, imgUrl: true, testType: true } },
+                test: { select: { id: true, name: true, description: true, actualPrice: true, offerPrice: true, imgUrl: true, testType: true } },
               },
             },
           },
@@ -595,7 +596,7 @@ export const updateDocumentImage = async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No document file provided" });
 
     const documentImage = await uploadToS3(req.file, "order-documents");
-    const updatedOrder  = await prisma.order.update({
+    const updatedOrder = await prisma.order.update({
       where: { id: Number(id) },
       data: { documentImage, sampleCollected: true, status: "sample_collected" },
     });
@@ -618,25 +619,25 @@ export const updateOrderStatus = async (req, res) => {
     const order = await prisma.order.update({
       where: { id: orderId },
       data: {
-        ...(status        && { status }),
+        ...(status && { status }),
         ...(paymentStatus && { paymentStatus }),
         ...(sampleCollected !== undefined && { sampleCollected: sampleCollected === "true" || sampleCollected === true }),
-        ...(reportReady   !== undefined  && { reportReady:    reportReady   === "true" || reportReady   === true }),
-        ...(reportUrl     && { reportUrl }),
+        ...(reportReady !== undefined && { reportReady: reportReady === "true" || reportReady === true }),
+        ...(reportUrl && { reportUrl }),
       },
     });
 
-    if(sampleCollected == true){
-    await whatsappQueue.add("whatsapp.sendSampleCollected", {
-  orderId: order.id,
-});
+    if (sampleCollected == true) {
+      await whatsappQueue.add("whatsapp.sendSampleCollected", {
+        orderId: order.id,
+      });
 
     }
 
-    if(status==="on_the_way"){
-await whatsappQueue.add("whatsapp.sendSampleExecutiveOnTheWay", {
-  orderId: order.id,
-});
+    if (status === "on_the_way") {
+      await whatsappQueue.add("whatsapp.sendSampleExecutiveOnTheWay", {
+        orderId: order.id,
+      });
     }
 
 
@@ -701,7 +702,7 @@ export const rescheduleOrder = async (req, res) => {
     if (["cancelled", "completed"].includes(String(order.status).toLowerCase()))
       return res.status(400).json({ success: false, message: "Order cannot be rescheduled" });
 
-    const wantsHomeSlot   = slotId       != null && slotId       !== "";
+    const wantsHomeSlot = slotId != null && slotId !== "";
     const wantsCenterSlot = centerSlotId != null && centerSlotId !== "";
 
     if (wantsHomeSlot && wantsCenterSlot)
@@ -724,7 +725,7 @@ export const rescheduleOrder = async (req, res) => {
         return res.status(400).json({ success: false, message: "Center slot not available" });
 
       const dayStart = new Date(newDate); dayStart.setHours(0, 0, 0, 0);
-      const dayEnd   = new Date(newDate); dayEnd.setHours(23, 59, 59, 999);
+      const dayEnd = new Date(newDate); dayEnd.setHours(23, 59, 59, 999);
 
       const booked = await prisma.centerSlotBooking.aggregate({
         where: { centerSlotId: csId, slotDate: { gte: dayStart, lte: dayEnd } },

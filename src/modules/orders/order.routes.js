@@ -25,7 +25,8 @@ import {
   fetchReportDue,
   exportOrderReportsExcel,
   rescheduleOrder,
-  getLabOrders
+  getLabOrders,
+  downloadSingleTestPdf
 } from "./order.controller.js";
 import locationService from "../location/location.service.js";
 import { authenticateUser } from "../../middlewares/auth.js";
@@ -59,6 +60,7 @@ router.get("/:id/edit-data",   authenticateUser, getOrderEditData);
 router.put("/:id/edit-tests",  authenticateUser, updateOrderTests);
 router.get("/:id", getOrderById);
 router.get("/:id/tests",   getOrderResultsById);
+router.get("/:orderId/:patientId/test-pdf/:testResultId", authenticateUser, downloadSingleTestPdf);
 
 router.put("/:id/vendor-status", updateOrderStatus);
 router.put("/:id/assign-vendor", updateAssignvendor);

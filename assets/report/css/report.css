@@ -100,7 +100,7 @@
    =============================== */
 @page plainpage {
   size: A4;
-   margin-top: 70mm;
+   margin-top: 85mm;
   margin-bottom: 35mm;
   margin-left: var(--pad-x);
   margin-right: var(--pad-x);
@@ -134,7 +134,7 @@
 }
 
 .plain-page .hdr {
-  height: 30mm;
+  height: 45mm;
 }
 
 /* ===============================
@@ -1206,10 +1206,15 @@ p {
    =============================== */
 .end-of-report {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
   margin: 24px 0 18px;
   padding: 0 4px;
+}
+
+.end-of-report-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .end-of-report-line {
@@ -1225,6 +1230,19 @@ p {
   white-space: nowrap;
   letter-spacing: 0.8px;
   text-transform: uppercase;
+}
+
+.end-of-report-partner {
+  text-align: center;
+  font-size: 10px;
+  color: #555;
+  margin-top: 6px;
+  letter-spacing: 0.2px;
+}
+
+.end-of-report-partner strong {
+  font-weight: 700;
+  color: #1a1a1a;
 }
 
 /* ===============================

@@ -11,4 +11,4 @@ export { acceptOrderByVendor, rejectOrderByVendor,
          getOrdersByVendor, getVendorOrdersBasic }          from "./order.vendor.controller.js";
 export { addOrderPayment, getOrderPaymentSummary }          from "./order.payment.controller.js";
 export { getOrderReports, exportOrderReportsExcel,
-         getOrdersExpiringSoon, fetchReportDue }            from "./order.reports.controller.js";
+         getOrdersExpiringSoon, fetchReportDue, downloadSingleTestPdf }            from "./order.reports.controller.js";
