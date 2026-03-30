@@ -299,6 +299,7 @@ export const createAdminOrder = async (req, res) => {
       totalAmount: bodyTotalAmount, discount, discountAmount,
       finalAmount: bodyFinalAmount,
       date, homeCollectionDate,
+      familyMemberIds,
     } = req.body;
 
     if (!patientId || !Array.isArray(selectedTests) || selectedTests.length === 0) {
@@ -412,7 +413,7 @@ export const createAdminOrder = async (req, res) => {
         }).catch(() => {});
       }
 
-      await Promise.all(
+      const buildPackages = (memberId) =>
         selectedTests.map((item) => {
           const id = castInt(item?.id ?? item?.testId ?? item?.packageId);
           const type = normalizeItemType(item);
@@ -421,7 +422,7 @@ export const createAdminOrder = async (req, res) => {
 
           return tx.orderMemberPackage.create({
             data: {
-              orderMemberId: orderMember.id,
+              orderMemberId: memberId,
               testId: type === "test" ? id : null,
               packageId: type === "package" ? id : null,
               reportWithin: src?.reportWithin ?? null,
@@ -430,8 +431,21 @@ export const createAdminOrder = async (req, res) => {
               dispatchStatus: "NOT_READY",
             },
           });
-        })
-      );
+        });
+
+      await Promise.all(buildPackages(orderMember.id));
+
+      // Create order members for each selected family member
+      const familyIds = Array.isArray(familyMemberIds)
+        ? familyMemberIds.map(castInt).filter(Boolean)
+        : [];
+
+      for (const fmId of familyIds) {
+        const familyMember = await tx.orderMember.create({
+          data: { orderId: order.id, patientId: fmId },
+        });
+        await Promise.all(buildPackages(familyMember.id));
+      }
 
       return { orderId: order.id };
     });
