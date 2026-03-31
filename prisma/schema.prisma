@@ -1145,6 +1145,7 @@ model Payment {
   paymentDate     DateTime      @default(now())
   transactionNote String?
   referenceId     String?
+  invoiceNumber   String?   @unique
   invoiceUrl      String?
   gatewayResponse Json?
   capturedAmount  Float?

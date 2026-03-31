@@ -104,6 +104,7 @@ export const generateAndUploadInvoice = async ({
   paymentId,
   patientName,
   orderId,
+  invoiceNumber
 }) => {
   const logo =
     "https://novus-images.s3.ap-southeast-2.amazonaws.com/novus-logo.webp";
@@ -414,7 +415,7 @@ export const generateAndUploadInvoice = async ({
                 <img src="${logo}" alt="Novus Health Labs Logo" />
               </div>
               <div class="invoice-info">
-                <p><strong>INVOICE #</strong> ${paymentId}</p>
+                <p><strong>INVOICE #</strong> ${invoiceNumber}</p>
                 <p><strong>REPORT REF ID #</strong> BLR${paymentId}</p>
                 <p><strong>DATE:</strong> ${invoiceDate}</p>
               </div>

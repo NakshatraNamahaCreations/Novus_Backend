@@ -1,6 +1,8 @@
 
 import { invoiceQueue } from "../../queues/invoice.queue.js";
 import prisma from '../../lib/prisma.js';
+import { generateInvoiceNumber } from '../../lib/invoiceNumber.js';
+
 /**
  * @desc    Create a new payment
  * @route   POST /api/payments
@@ -75,9 +77,13 @@ export const createPayment = async (req, res) => {
     const finalDiagnosticCenterId =
       toInt(diagnosticCenterId) ?? toInt(order?.diagnosticCenterId) ?? null;
 
+    // ✅ Generate invoice number
+    const invoiceNumber = await generateInvoiceNumber();
+
     // ✅ Create payment
     const payment = await prisma.payment.create({
       data: {
+        invoiceNumber,
         orderId: orderId ? toInt(orderId) : null,
         patientId: toInt(patientId) ?? toInt(req.user?.patientId) ?? null,
         userId: toInt(req.user?.id) ?? null,

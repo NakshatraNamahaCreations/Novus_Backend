@@ -25,6 +25,7 @@ new Worker(
           orderId: true,
           amount: true,
           currency: true,
+          invoiceNumber:true,
           invoiceUrl: true,
           patient: {
             select: { fullName: true },
@@ -36,12 +37,14 @@ new Worker(
         throw new Error(`Payment not found for paymentId: ${paymentId}`);
       }
 
+      console.log("payment",payment)
       // ✅ If invoice already exists, still ensure WhatsApp is queued (idempotent anyway)
       let invoiceUrl = payment.invoiceUrl || null;
 
       if (!invoiceUrl) {
         invoiceUrl = await generateAndUploadInvoice({
           paymentId: payment.id, // internal DB id
+          invoiceNumber: payment.invoiceNumber,
           amount: payment.amount,
           currency: payment.currency,
           patientName: payment.patient?.fullName || "Customer",

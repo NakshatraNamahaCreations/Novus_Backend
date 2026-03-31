@@ -45,7 +45,6 @@ import referenceCenterRoutes from "./modules/referenceCenter/reference.routes.js
 import diagnosticCenterRoutes from "./modules/diagnosticCenter/diagnosticCenter.routes.js";
 import esignatureRoutes from "./modules/esignature/esignature.route.js";
 import reportlayoutsRoutes from "./modules/reportLayout/reportLayout.routes.js"
-import pgRoutes from "./modules/payments/pg.routes.js"
 import razorpayRoutes from "./modules/payments/razorpay.routes.js"
 
 import pincodeRoutes from "./modules/pincode/pincode.routes.js";
@@ -149,7 +148,6 @@ app.use("/api/reference-centers", referenceCenterRoutes);
 app.use("/api/diagnostic-centers", diagnosticCenterRoutes);
 app.use("/api/esignatures", esignatureRoutes);
 app.use("/api/report-layouts", reportlayoutsRoutes);
-app.use("/api/pg", pgRoutes);
 app.use("/api/pg", razorpayRoutes);
 app.use("/api/pincodes", pincodeRoutes);
 app.use("/api/location",locationRoutes)

@@ -5,6 +5,7 @@
 
 import { invoiceQueue } from "../../queues/invoice.queue.js";
 import prisma from '../../lib/prisma.js';
+import { generateInvoiceNumber } from '../../lib/invoiceNumber.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ADD PAYMENT TO ORDER
@@ -40,6 +41,7 @@ export const addOrderPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: "Payment amount must be > 0" });
 
     const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const invoiceNumber = await generateInvoiceNumber();
 
     const payment = await prisma.payment.create({
       data: {
@@ -49,6 +51,7 @@ export const addOrderPayment = async (req, res) => {
         vendorId: order.vendorId,
         centerId: order.centerId,
         paymentId,
+        invoiceNumber,
         diagnosticCenterId,
         paymentMethod: paymentMode?.toUpperCase(),
         paymentStatus: "COMPLETED",
