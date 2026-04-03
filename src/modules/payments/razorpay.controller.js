@@ -88,8 +88,8 @@ export const createRazorpayPaymentLink = async (req, res) => {
     });
 
     // ✅ Send WhatsApp payment link
-    const tpl = WHATSAPP_TEMPLATES.payment_link;
-    const variables = tpl.mapVariables({
+    const tpl = WHATSAPP_TEMPLATES.PAYMENT_LINK;
+    const variables = tpl?.mapVariables({
       customerName: order.patient?.fullName || "Customer",
       amount: amountInRupees,
       bookingId: orderId,
