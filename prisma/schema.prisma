@@ -931,8 +931,9 @@ model Order {
   assignmentNotes String?
   trackingId      String?
   reportUrl       String?
-  sampleCollected Boolean     @default(false)
-  reportReady     Boolean     @default(false)
+  sampleCollected   Boolean     @default(false)
+  sampleCollectedAt DateTime?
+  reportReady       Boolean     @default(false)
   isHomeSample    Boolean     @default(false)
   cancelledBy     String?
   cancelledAt     DateTime?

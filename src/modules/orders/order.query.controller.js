@@ -621,7 +621,10 @@ export const updateOrderStatus = async (req, res) => {
       data: {
         ...(status && { status }),
         ...(paymentStatus && { paymentStatus }),
-        ...(sampleCollected !== undefined && { sampleCollected: sampleCollected === "true" || sampleCollected === true }),
+        ...(sampleCollected !== undefined && {
+          sampleCollected: sampleCollected === "true" || sampleCollected === true,
+          ...((sampleCollected === "true" || sampleCollected === true) && { sampleCollectedAt: new Date() }),
+        }),
         ...(reportReady !== undefined && { reportReady: reportReady === "true" || reportReady === true }),
         ...(reportUrl && { reportUrl }),
       },

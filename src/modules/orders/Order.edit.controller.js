@@ -1,8 +1,8 @@
 // order.edit.controller.js
 // Handles GET /orders/:id/edit-data  and  PUT /orders/:id/edit-tests
-// Only allowed when order.paymentStatus === "pending"
 
 import prisma from '../../lib/prisma.js';
+import { invoiceQueue } from '../../queues/invoice.queue.js';
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,12 +63,6 @@ export const getOrderEditData = async (req, res) => {
 
     if (!order) return res.status(404).json({ message: "Order not found" });
 
-    if (order.paymentStatus !== "PENDING") {
-      return res.status(400).json({
-        message: "Order can only be edited when payment is pending",
-      });
-    }
-
     // ── Flatten all member packages into a single items list ───────────────
     const items = [];
     for (const member of order.orderMembers) {
@@ -125,6 +119,7 @@ export const updateOrderTests = async (req, res) => {
       finalAmount,
       totalAmount,
       remarks,
+      regenerateInvoice = false,
     } = req.body;
 
     if (!items.length) {
@@ -148,12 +143,6 @@ export const updateOrderTests = async (req, res) => {
     });
 
     if (!existing) return res.status(404).json({ message: "Order not found" });
-
-    if (existing.paymentStatus !== "PENDING") {
-      return res.status(400).json({
-        message: "Order can only be edited when payment is pending",
-      });
-    }
 
     // ── Get or create the primary OrderMember ─────────────────────────────
     // Most orders have one member (self). If needed, new items are attached to
@@ -229,10 +218,29 @@ export const updateOrderTests = async (req, res) => {
       return order;
     });
 
+    // ── Regenerate invoices for all linked payments ─────────────────────────
+    if (regenerateInvoice) {
+      const payments = await prisma.payment.findMany({
+        where: { orderId },
+        select: { id: true, paymentId: true },
+      });
+
+      for (const p of payments) {
+        // Clear existing invoiceUrl so the worker regenerates it
+        await prisma.payment.update({
+          where: { id: p.id },
+          data: { invoiceUrl: null },
+        });
+
+        await invoiceQueue.add("generate-invoice", { paymentId: p.paymentId });
+      }
+    }
+
     return res.json({
       success: true,
       message: "Order updated successfully",
       order:   updatedOrder,
+      invoiceRegenerated: regenerateInvoice,
     });
   } catch (err) {
     console.error("[updateOrderTests]", err);

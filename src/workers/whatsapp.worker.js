@@ -26,7 +26,7 @@ const formatTime12Hr = (value) => {
 
     // Handles Date object / ISO datetime / prisma datetime
     if (value instanceof Date || typeof value === "string") {
-      const d = dayjs(value);
+      const d = dayjs(value).tz(IST);
       if (d.isValid()) return d.format("hh:mm A");
     }
 
@@ -163,7 +163,7 @@ const getProcessingCentreName = (order) =>
 
 const getOrderDate = (order) => {
   try {
-    return order?.date ? dayjs(order.date).format("DD MMM YYYY") : "-";
+    return order?.date ? dayjs(order.date).tz(IST).format("DD MMM YYYY") : "-";
   } catch {
     return "-";
   }
@@ -382,10 +382,10 @@ const handleSendReport = async (order) => {
     payload: {
       customerName: safe(order?.patient?.fullName, "Customer"),
       tests: safe(extractTestNames(order), "Medical Test"),
-      reportDate: dayjs().format("DD MMM YYYY"),
+      reportDate: dayjs().tz(IST).format("DD MMM YYYY"),
       reportLink,
     },
-   
+
   });
 
   return { success: true, type: "order-report" };
@@ -468,10 +468,10 @@ const handleSendPatientReport = async (order, { patientId, pdfType = "full" }) =
     payload: {
       customerName: safe(patient?.fullName, "Customer"),
       tests: safe(extractTestNamesForPatient(order, patientId), "Medical Test"),
-      reportDate: dayjs().format("DD MMM YYYY"),
+      reportDate: dayjs().tz(IST).format("DD MMM YYYY"),
       reportLink,
     },
-   
+
   });
 
   await handleSendDoctorReportConfirmation(order, { patientId, pdfType });
@@ -498,7 +498,7 @@ const handleSampleCollectedFromOrder = async (order) => {
   return handleSampleCollected({
     phone: order?.patient?.contactNo,
     customerName: order?.patient?.fullName,
-    collectionDateTime: `${getOrderDate(order)} ${getOrderSlot(order)}`,
+    collectionDateTime: dayjs().tz(IST).format("DD MMM YYYY hh:mm A"),
   });
 };
 
