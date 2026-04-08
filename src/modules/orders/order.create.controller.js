@@ -420,11 +420,15 @@ export const createAdminOrder = async (req, res) => {
           const src = type === "test" ? testMap.get(id) : pkgMap.get(id);
           const unit = src?.reportUnit ? normalizeUnit(src.reportUnit) : null;
 
+          // Save custom price if provided (for price overrides)
+          const customPrice = item.price != null ? parseFloat(item.price) : null;
+
           return tx.orderMemberPackage.create({
             data: {
               orderMemberId: memberId,
               testId: type === "test" ? id : null,
               packageId: type === "package" ? id : null,
+              price: customPrice,
               reportWithin: src?.reportWithin ?? null,
               reportUnit: unit,
               reportDueAt: src ? computeDueAt(orderDate, src.reportWithin, unit) : null,

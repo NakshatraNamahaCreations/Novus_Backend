@@ -231,6 +231,7 @@ export const getLabOrders = async (req, res) => {
           date: true, reportReady: true, sampleCollected: true, createdAt: true,
           isSelf: true, trackingId: true, isHomeSample: true, source: true,
           refCenter: { select: { id: true, name: true } },
+          doctor: { select: { id: true, name: true, initial: true } },
           patient: { select: PATIENT_SELECT },
           vendor: { select: { id: true, name: true, email: true } },
           slot: { select: { id: true, name: true, startTime: true, endTime: true } },
@@ -343,7 +344,7 @@ export const getOrderResultsById = async (req, res) => {
             patient: { select: { id: true, fullName: true, contactNo: true, gender: true, age: true } },
             orderMemberPackages: {
               select: {
-                id: true, orderMemberId: true, packageId: true, testId: true,
+                id: true, orderMemberId: true, packageId: true, testId: true, price: true,
                 test: { select: { id: true, name: true, actualPrice: true, offerPrice: true, discount: true, testType: true, sampleRequired: true, preparations: true } },
                 package: {
                   select: {

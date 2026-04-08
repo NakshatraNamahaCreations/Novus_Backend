@@ -149,15 +149,15 @@ export const generateAndUploadInvoice = async ({
     // ---------------- patient-wise rows + totals ----------------
     let sr = 1;
 
-    // Use offer price as the price throughout
+    // Use custom price if set, otherwise fall back to offer price
     const offerSubtotal = (order.orderMembers || []).reduce((t, member) => {
       return (
         t +
         (member.orderMemberPackages || []).reduce((pt, omp) => {
-          const offer = Number(
-            omp?.test?.offerPrice ?? omp?.package?.offerPrice ?? 0,
-          );
-          return pt + offer;
+          const price = omp.price != null
+            ? Number(omp.price)
+            : Number(omp?.test?.offerPrice ?? omp?.package?.offerPrice ?? 0);
+          return pt + price;
         }, 0)
       );
     }, 0);
@@ -191,15 +191,15 @@ export const generateAndUploadInvoice = async ({
         const rows = (member.orderMemberPackages || [])
           .map((omp) => {
             const name = omp?.test?.name || omp?.package?.name || "N/A";
-            const offer = Number(
-              omp?.test?.offerPrice ?? omp?.package?.offerPrice ?? 0,
-            );
+            const price = omp.price != null
+              ? Number(omp.price)
+              : Number(omp?.test?.offerPrice ?? omp?.package?.offerPrice ?? 0);
 
             return `
               <tr>
                 <td>${sr++}</td>
                 <td>${name}</td>
-                <td>&#8377; ${offer.toLocaleString("en-IN")}</td>
+                <td>&#8377; ${price.toLocaleString("en-IN")}</td>
               </tr>
             `;
           })

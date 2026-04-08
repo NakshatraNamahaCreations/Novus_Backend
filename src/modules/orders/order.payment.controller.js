@@ -41,7 +41,15 @@ export const addOrderPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: "Payment amount must be > 0" });
 
     const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const invoiceNumber = await generateInvoiceNumber();
+
+    const newTotalPaid = existingTotal + amount;
+    const newPaymentStatus =
+      newTotalPaid >= order.finalAmount ? "paid"
+      : newTotalPaid > 0               ? "partially_paid"
+                                       : "pending";
+
+    // Only generate invoice number when full payment is completed
+    const invoiceNumber = newPaymentStatus === "paid" ? await generateInvoiceNumber() : null;
 
     const payment = await prisma.payment.create({
       data: {
@@ -67,19 +75,16 @@ export const addOrderPayment = async (req, res) => {
       },
     });
 
-    const newTotalPaid = existingTotal + amount;
-    const newPaymentStatus =
-      newTotalPaid >= order.finalAmount ? "paid"
-      : newTotalPaid > 0               ? "partially_paid"
-                                       : "pending";
-
     const updatedOrder = await prisma.order.update({
       where: { id: parseInt(orderId) },
       data: { paymentStatus: newPaymentStatus },
       include: { payments: { orderBy: { createdAt: "desc" }, take: 5 } },
     });
 
-    await invoiceQueue.add("generate-invoice", { paymentId });
+    // Only generate invoice when full amount is paid
+    if (newPaymentStatus === "paid") {
+      await invoiceQueue.add("generate-invoice", { paymentId });
+    }
 
     // Update vendor earnings
     if (order.vendorId && amount > 0) {

@@ -77,13 +77,9 @@ export const createPayment = async (req, res) => {
     const finalDiagnosticCenterId =
       toInt(diagnosticCenterId) ?? toInt(order?.diagnosticCenterId) ?? null;
 
-    // ✅ Generate invoice number
-    const invoiceNumber = await generateInvoiceNumber();
-
-    // ✅ Create payment
+    // ✅ Create payment (invoice number generated only when fully paid)
     const payment = await prisma.payment.create({
       data: {
-        invoiceNumber,
         orderId: orderId ? toInt(orderId) : null,
         patientId: toInt(patientId) ?? toInt(req.user?.patientId) ?? null,
         userId: toInt(req.user?.id) ?? null,
@@ -144,6 +140,34 @@ export const createPayment = async (req, res) => {
           where: { id: toInt(orderId) },
           data: { paymentStatus },
         });
+
+        // Only generate invoice when full amount is paid
+        if (paymentStatus === "paid") {
+          const invoiceNumber = await generateInvoiceNumber();
+          await prisma.payment.update({
+            where: { paymentId },
+            data: { invoiceNumber },
+          });
+
+          try {
+            await invoiceQueue.add("generate-invoice", { paymentId });
+          } catch (e) {
+            console.warn("invoiceQueue failed:", e?.message);
+          }
+        }
+      }
+    } else {
+      // Non-order payment — generate invoice immediately
+      const invoiceNumber = await generateInvoiceNumber();
+      await prisma.payment.update({
+        where: { paymentId },
+        data: { invoiceNumber },
+      });
+
+      try {
+        await invoiceQueue.add("generate-invoice", { paymentId });
+      } catch (e) {
+        console.warn("invoiceQueue failed:", e?.message);
       }
     }
 
@@ -170,12 +194,6 @@ export const createPayment = async (req, res) => {
           createdById: toInt(req.user?.id),
         },
       });
-    }
-
-    try {
-      await invoiceQueue.add("generate-invoice", { paymentId });
-    } catch (e) {
-      console.warn("invoiceQueue failed:", e?.message);
     }
 
     return res.status(201).json({

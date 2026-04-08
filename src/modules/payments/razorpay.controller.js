@@ -4,6 +4,8 @@ import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { WHATSAPP_TEMPLATES } from "../../templates/whatsapp.templates.js";
 import { WhatsAppMessage } from "../../utils/whatsapp.js";
+import { invoiceQueue } from "../../queues/invoice.queue.js";
+import { generateInvoiceNumber } from "../../lib/invoiceNumber.js";
 
 import prisma from '../../lib/prisma.js';
 
@@ -171,6 +173,25 @@ export const razorpayWebhook = async (req, res) => {
       // ✅ Idempotency: don't insert twice
       const exists = await prisma.payment.findUnique({ where: { paymentId } });
       if (!exists) {
+        // Calculate total paid including this new payment
+        const existingPayments = await prisma.payment.findMany({
+          where: { orderId },
+          select: { amount: true },
+        });
+        const existingTotal = existingPayments.reduce((t, p) => t + (p.amount || 0), 0);
+        const order = await prisma.order.findUnique({
+          where: { id: orderId },
+          select: { finalAmount: true },
+        });
+        const newTotalPaid = existingTotal + amount;
+        const newPaymentStatus =
+          newTotalPaid >= (order?.finalAmount || 0) ? "paid"
+          : newTotalPaid > 0 ? "partially_paid"
+          : "pending";
+
+        // Only generate invoice number when fully paid
+        const invoiceNumber = newPaymentStatus === "paid" ? await generateInvoiceNumber() : null;
+
         await prisma.$transaction(async (tx) => {
           // Create payment row
           await tx.payment.create({
@@ -178,6 +199,7 @@ export const razorpayWebhook = async (req, res) => {
               paymentId,
               amount,
               currency,
+              invoiceNumber,
               paymentMode: "ONLINE",
               paymentMethod,
               paymentStatus: "COMPLETED",
@@ -192,12 +214,21 @@ export const razorpayWebhook = async (req, res) => {
           await tx.order.update({
             where: { id: orderId },
             data: {
-              paymentStatus: "paid", // your Order.paymentStatus is string
+              paymentStatus: newPaymentStatus,
               paymentMode: "ONLINE",
-              merchantOrderId: merchantOrderId || undefined, // keep mapping
+              merchantOrderId: merchantOrderId || undefined,
             },
           });
         });
+
+        // Generate invoice only when full amount is paid
+        if (newPaymentStatus === "paid") {
+          try {
+            await invoiceQueue.add("generate-invoice", { paymentId });
+          } catch (e) {
+            console.warn("invoiceQueue failed:", e?.message);
+          }
+        }
       }
     }
 

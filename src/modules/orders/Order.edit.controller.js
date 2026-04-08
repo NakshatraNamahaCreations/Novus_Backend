@@ -22,8 +22,24 @@ export const getOrderEditData = async (req, res) => {
         totalAmount:    true,
         discountAmount: true,
         finalAmount:    true,
-        collectionCharge: true,   // add this field if not present yet — see schema note
+        collectionCharge: true,
         remarks:        true,
+        source:         true,
+        isHomeSample:   true,
+        diagnosticCenterId: true,
+        doctorId:       true,
+        refCenterId:    true,
+        centerId:       true,
+        centerSlotId:   true,
+        slotId:         true,
+        addressId:      true,
+        patientId:      true,
+        patient:        { select: { id: true, fullName: true, contactNo: true, gender: true, dob: true, age: true, initial: true } },
+        doctor:         { select: { id: true, name: true, initial: true } },
+        refCenter:      { select: { id: true, name: true } },
+        diagnosticCenter: { select: { id: true, name: true } },
+        center:         { select: { id: true, name: true } },
+        address:        { select: { id: true, address: true, city: true, pincode: true } },
         orderMembers: {
           select: {
             id: true,
@@ -92,6 +108,22 @@ export const getOrderEditData = async (req, res) => {
       collectionCharge: order.collectionCharge ?? 0,
       finalAmount:      order.finalAmount,
       remarks:          order.remarks,
+      source:           order.source,
+      isHomeSample:     order.isHomeSample,
+      diagnosticCenterId: order.diagnosticCenterId,
+      doctorId:         order.doctorId,
+      refCenterId:      order.refCenterId,
+      centerId:         order.centerId,
+      centerSlotId:     order.centerSlotId,
+      slotId:           order.slotId,
+      addressId:        order.addressId,
+      patientId:        order.patientId,
+      patient:          order.patient,
+      doctor:           order.doctor,
+      refCenter:        order.refCenter,
+      diagnosticCenter: order.diagnosticCenter,
+      center:           order.center,
+      address:          order.address,
     });
   } catch (err) {
     console.error("[getOrderEditData]", err);
@@ -108,6 +140,15 @@ export const getOrderEditData = async (req, res) => {
 //   finalAmount      – number  (pre-calculated on frontend, verified here)
 //   totalAmount      – number
 //   remarks          – string
+//   source           – string (optional)
+//   diagnosticCenterId – number (optional)
+//   doctorId         – number (optional)
+//   refCenterId      – number (optional)
+//   isHomeSample     – boolean (optional)
+//   centerId         – number (optional, B2B center)
+//   centerSlotId     – number (optional)
+//   slotId           – number (optional)
+//   addressId        – number (optional)
 // ─────────────────────────────────────────────────────────────────────────────
 export const updateOrderTests = async (req, res) => {
   try {
@@ -120,6 +161,15 @@ export const updateOrderTests = async (req, res) => {
       totalAmount,
       remarks,
       regenerateInvoice = false,
+      source,
+      diagnosticCenterId,
+      doctorId,
+      refCenterId,
+      isHomeSample,
+      centerId,
+      centerSlotId,
+      slotId,
+      addressId,
     } = req.body;
 
     if (!items.length) {
@@ -202,17 +252,28 @@ export const updateOrderTests = async (req, res) => {
         });
       }
 
-      // 4. Update Order totals
+      // 4. Update Order totals and optional fields
+      const updateData = {
+        totalAmount:      computedSubtotal,
+        discountAmount:   discountAmount,
+        collectionCharge: collectionCharge,
+        finalAmount:      computedFinal,
+        ...(remarks !== undefined ? { remarks } : {}),
+        ...(source !== undefined ? { source } : {}),
+        ...(diagnosticCenterId !== undefined ? { diagnosticCenterId: diagnosticCenterId ? Number(diagnosticCenterId) : null } : {}),
+        ...(doctorId !== undefined ? { doctorId: doctorId ? Number(doctorId) : null } : {}),
+        ...(refCenterId !== undefined ? { refCenterId: refCenterId ? Number(refCenterId) : null } : {}),
+        ...(isHomeSample !== undefined ? { isHomeSample: Boolean(isHomeSample) } : {}),
+        ...(centerId !== undefined ? { centerId: centerId ? Number(centerId) : null } : {}),
+        ...(centerSlotId !== undefined ? { centerSlotId: centerSlotId ? Number(centerSlotId) : null } : {}),
+        ...(slotId !== undefined ? { slotId: slotId ? Number(slotId) : null } : {}),
+        ...(addressId !== undefined ? { addressId: addressId ? Number(addressId) : null } : {}),
+        updatedAt:        new Date(),
+      };
+
       const order = await tx.order.update({
         where: { id: orderId },
-        data: {
-          totalAmount:      computedSubtotal,
-          discountAmount:   discountAmount,
-          collectionCharge: collectionCharge,
-          finalAmount:      computedFinal,
-          ...(remarks !== undefined ? { remarks } : {}),
-          updatedAt:        new Date(),
-        },
+        data: updateData,
       });
 
       return order;
