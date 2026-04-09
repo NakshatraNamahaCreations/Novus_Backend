@@ -94,7 +94,15 @@ function injectRefHtmlStyles(html) {
 }
 
 function renderNotesBlock(notes) {
-  const notesHtml = sanitizeHtml(notes || "");
+  let notesText = notes || "";
+  // Parse JSON notes format: { __notes: "...", __freeTexts: {...} }
+  try {
+    const parsed = JSON.parse(notesText);
+    notesText = parsed.__notes || "";
+  } catch {
+    // plain string — use as-is
+  }
+  const notesHtml = sanitizeHtml(notesText);
   if (!notesHtml.trim()) return "";
   return `
     <div class="test-notes">
@@ -111,7 +119,10 @@ function isRadiology(r) {
 }
 
 function isPathology(r) {
-  return Array.isArray(r?.parameterResults) && r.parameterResults.length > 0;
+  return (
+    (Array.isArray(r?.parameterResults) && r.parameterResults.length > 0) ||
+    (Array.isArray(r?.reportItems) && r.reportItems.length > 0)
+  );
 }
 
 function formatDate(date) {
@@ -306,6 +317,17 @@ function buildRefCell(refRaw, unit) {
   return `<td class="ref-range">${esc(refRaw)}${unitSuffix}</td>`;
 }
 
+// ── Parse notes JSON to extract __freeTexts map ──────────────
+function parseFreeTextsFromNotes(notes) {
+  if (!notes) return {};
+  try {
+    const parsed = JSON.parse(notes);
+    return parsed.__freeTexts || {};
+  } catch {
+    return {};
+  }
+}
+
 // ── Pathology table (reportItems-driven) ─────────────────────
 function renderPathologyUsingReportItems(result) {
   const testName = result?.test?.name || "Lab Test";
@@ -314,6 +336,7 @@ function renderPathologyUsingReportItems(result) {
     ? result.parameterResults
     : [];
   const prMap = buildParamResultMap(paramResults);
+  const freeTextsMap = parseFreeTextsFromNotes(result?.notes);
 
   const currentDate = new Date().toLocaleDateString("en-GB", {
     day: "2-digit",
@@ -418,6 +441,20 @@ function renderPathologyUsingReportItems(result) {
         return `
         <tr class="row-notes">
           <td colspan="3" class="notes-cell ql-scope">${html}</td>
+        </tr>
+      `;
+      }
+
+      if (type === "FREE_TEXT") {
+        const itemId = String(it?.id || "");
+        const rawHtml = freeTextsMap[itemId] || it?.html || it?.text || "";
+        const html = sanitizeHtml(rawHtml);
+        if (!hasVisibleHtmlContent(html)) return "";
+        const title = (it?.title || "").trim();
+        return `
+        ${title ? `<tr class="row-heading"><td colspan="3" class="heading-cell">${esc(title)}</td></tr>` : ""}
+        <tr class="row-richtext">
+          <td colspan="3" class="richtext-cell ql-scope">${html}</td>
         </tr>
       `;
       }
