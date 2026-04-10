@@ -108,14 +108,14 @@ findRange: async (parameterId, patient) => {
 
     if (!ranges.length) return null;
 
-    const patientGender = normalizeGender(patient?.gender);
+    const patientGender = normalizeGender(patient?.gender); // "MALE" | "FEMALE" | "BOTH"
     const ageKey = ageToKeyFromDob(patient?.dob); // ✅ DOB -> ageKey
 
     const norm = (v) => String(v || "").trim().toLowerCase();
-    const isAny = (v) => norm(v) === "any";
+    const normG = (v) => normalizeGender(v); // compare both sides the same way
 
     const match = (r, gWanted, ageWanted) => {
-      const rg = String(r.gender || "Both").trim(); // DB value
+      const rg = normG(r.gender || "Both"); // normalize DB value too
       const ra = norm(r.referenceRange); // age key stored here
       const gOk = rg === gWanted;
       const aOk = ra === norm(ageWanted);
@@ -128,7 +128,7 @@ findRange: async (parameterId, patient) => {
     if (found) return found;
 
     // 2) Both + exact ageKey
-    found = ranges.find((r) => match(r, "Both", ageKey));
+    found = ranges.find((r) => match(r, "BOTH", ageKey));
     if (found) return found;
 
     // 3) exact gender + any
@@ -136,13 +136,13 @@ findRange: async (parameterId, patient) => {
     if (found) return found;
 
     // 4) Both + any
-    found = ranges.find((r) => match(r, "Both", "any"));
+    found = ranges.find((r) => match(r, "BOTH", "any"));
     if (found) return found;
 
     // 5) if patient ageKey is any, still try gender only
     found =
-      ranges.find((r) => String(r.gender || "").trim() === patientGender) ||
-      ranges.find((r) => String(r.gender || "").trim() === "Both");
+      ranges.find((r) => normG(r.gender) === patientGender) ||
+      ranges.find((r) => normG(r.gender) === "BOTH");
 
     return found || ranges[0];
   } catch (err) {
@@ -255,8 +255,6 @@ findRange: async (parameterId, patient) => {
             ? ResultService.evaluateFlag(p.valueNumber, range)
             : "NA";
 
-        const ref = (range?.referenceRange ?? "").trim();
-
         const hasLower =
           range?.lowerLimit !== null && range?.lowerLimit !== undefined;
         const hasUpper =
@@ -276,7 +274,7 @@ findRange: async (parameterId, patient) => {
           valueText: p.valueText ?? null,
           unit: p.unit ?? null,
           flag,
-          normalRangeText: ref || limitsText || (range?.normalValueHtml ?? null),
+          normalRangeText: limitsText || (range?.normalValueHtml ?? null),
           createdById:
             payload.createdById != null ? Number(payload.createdById) : null,
         });
@@ -388,13 +386,10 @@ findRange: async (parameterId, patient) => {
         for (const p of payload.parameters) {
           const range = await ResultService.findRange(p.parameterId, patient);
 
-          console.log("range000",range)
           const flag =
             p.valueNumber != null
               ? ResultService.evaluateFlag(p.valueNumber, range)
               : "NA";
-
-          const ref = (range?.referenceRange ?? "").trim();
 
           const hasLower =
             range?.lowerLimit !== null && range?.lowerLimit !== undefined;
@@ -409,7 +404,7 @@ findRange: async (parameterId, patient) => {
               : "";
 
           const normalRangeText =
-            ref || limitText || (range?.normalValueHtml ?? null);
+            limitText || (range?.normalValueHtml ?? null);
 
           rows.push({
             patientTestResultId: Number(id),

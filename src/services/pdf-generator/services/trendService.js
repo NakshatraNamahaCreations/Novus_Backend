@@ -54,7 +54,11 @@ export class TrendService {
       const previousByIndex = previousResults.map(prev => {
         const perParam = new Map();
         for (const pr of prev.parameterResults || []) {
-          const value = pr.valueNumber ?? pr.valueText ?? "—";
+          // Prefer valueText so "6.0" stays "6.0" instead of becoming "6".
+          const value =
+            (pr.valueText !== null && pr.valueText !== undefined && pr.valueText !== ""
+              ? pr.valueText
+              : pr.valueNumber) ?? "—";
           const unit = pr.unit || pr.parameter?.unit || "";
           perParam.set(pr.parameterId, formatValueWithUnit(value, unit));
         }

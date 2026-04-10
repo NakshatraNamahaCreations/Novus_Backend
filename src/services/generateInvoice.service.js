@@ -119,6 +119,8 @@ export const generateAndUploadInvoice = async ({
           patient: true,
           address: true,
           slot: true,
+          refCenter: true,
+          doctor: true,
           orderMembers: {
             include: {
               patient: true,
@@ -416,7 +418,7 @@ export const generateAndUploadInvoice = async ({
               </div>
               <div class="invoice-info">
                 <p><strong>INVOICE #</strong> ${invoiceNumber}</p>
-                <p><strong>REPORT REF ID #</strong> BLR${paymentId}</p>
+                <p><strong>PATIENT ID #</strong> ${order?.patient?.id ?? "NA"}</p>
                 <p><strong>DATE:</strong> ${invoiceDate}</p>
               </div>
             </div>
@@ -429,6 +431,16 @@ export const generateAndUploadInvoice = async ({
                 <p>${order?.patient?.age || "NA"} | ${order?.patient?.gender || "NA"}</p>
                 <p>${patientAddress}</p>
                 <p>Phone: ${order?.patient?.contactNo || "NA"}</p>
+                ${
+                  order?.refCenter?.name
+                    ? `<p><strong>Ref Center:</strong> ${order.refCenter.name}</p>`
+                    : ""
+                }
+                ${
+                  order?.doctor?.name
+                    ? `<p><strong>Ref Doctor:</strong> ${order.doctor.name}</p>`
+                    : ""
+                }
               </div>
               <div class="section">
                 <h3>BILL FROM</h3>

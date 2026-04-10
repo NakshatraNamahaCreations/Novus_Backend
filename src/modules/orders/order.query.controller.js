@@ -28,7 +28,7 @@ export const getAllOrders = async (req, res) => {
       status = "", paymentStatus = "",
       fromDate, toDate,
       refCenterId = "", diagnosticCenterId = "",
-      centerId = "", source = "",
+      centerId = "", source = "", excludeSource = "",
     } = req.query;
 
     page = Number(page);
@@ -90,6 +90,17 @@ export const getAllOrders = async (req, res) => {
     }
     if (source && source !== "all") {
       where.source = { contains: String(source), mode: "insensitive" };
+    }
+    // Exclude orders whose source equals the given value (case-insensitive
+    // exact match). Used by the Workspace page to hide mobile-app bookings,
+    // which live on their own "Online Booking" screen. Exact match (not
+    // `contains`) so future source values like "support" or "walkapp" can't
+    // be accidentally hidden by `excludeSource=app`.
+    if (excludeSource && excludeSource !== "all") {
+      where.NOT = {
+        ...(where.NOT || {}),
+        source: { equals: String(excludeSource), mode: "insensitive" },
+      };
     }
 
     const [orders, total] = await Promise.all([

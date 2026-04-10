@@ -2,6 +2,7 @@
 import { invoiceQueue } from "../../queues/invoice.queue.js";
 import prisma from '../../lib/prisma.js';
 import { generateInvoiceNumber } from '../../lib/invoiceNumber.js';
+import { generateAndUploadInvoice } from '../../services/generateInvoice.service.js';
 
 /**
  * @desc    Create a new payment
@@ -1036,6 +1037,83 @@ export const deletePayment = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error deleting payment",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @desc    Manually (re)generate the invoice PDF for a payment.
+ *          Used when the background invoice worker failed or was skipped and
+ *          the payment row is sitting with no invoiceUrl.
+ * @route   POST /api/payments/:id/generate-invoice
+ * @access  Private (Admin)
+ */
+export const regenerateInvoice = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const paymentDbId = Number(id);
+    if (!Number.isFinite(paymentDbId)) {
+      return res.status(400).json({ success: false, message: "Invalid payment id" });
+    }
+
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentDbId },
+      select: {
+        id: true,
+        paymentId: true,
+        orderId: true,
+        invoiceNumber: true,
+        invoiceUrl: true,
+        patient: { select: { fullName: true } },
+      },
+    });
+
+    if (!payment) {
+      return res.status(404).json({ success: false, message: "Payment not found" });
+    }
+    if (!payment.orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot generate invoice: payment has no linked order",
+      });
+    }
+
+    // Ensure an invoice number exists (it may be missing if the original
+    // enqueue flow never ran, e.g. the order was never marked fully paid).
+    let invoiceNumber = payment.invoiceNumber;
+    if (!invoiceNumber) {
+      invoiceNumber = await generateInvoiceNumber();
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { invoiceNumber },
+      });
+    }
+
+    // Run synchronously so the UI gets a real success/failure response.
+    const invoiceUrl = await generateAndUploadInvoice({
+      paymentId: payment.id,
+      invoiceNumber,
+      patientName: payment.patient?.fullName || "Customer",
+      orderId: payment.orderId,
+    });
+
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { invoiceUrl },
+    });
+
+    return res.json({
+      success: true,
+      message: "Invoice generated successfully",
+      invoiceUrl,
+      invoiceNumber,
+    });
+  } catch (error) {
+    console.error("Regenerate invoice error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate invoice",
       error: error.message,
     });
   }

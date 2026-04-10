@@ -7,7 +7,8 @@ import {
   updatePaymentStatus,
   processRefund,
   getPaymentStatistics,
-  deletePayment
+  deletePayment,
+  regenerateInvoice
 } from './payment.controller.js';
 import {
   addOrderPayment,
@@ -64,6 +65,9 @@ router.route('/:id/status')
 
 router.route('/:id/refund')
   .post(  refundValidation, processRefund); // Process refund (admin only)
+
+router.route('/:id/generate-invoice')
+  .post(authenticateUser, regenerateInvoice); // Manually (re)generate invoice PDF
 
 // ================= ORDER PAYMENT ROUTES =================
 router.route('/orders/:orderId/payments')

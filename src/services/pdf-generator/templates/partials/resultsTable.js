@@ -28,9 +28,11 @@ function hasVisibleHtmlContent(html) {
 function formatValue(pr) {
   const vn = pr?.valueNumber;
   const vt = pr?.valueText;
+  // Prefer valueText so user-entered formatting (e.g. "6.0") is preserved.
+  // Fall back to valueNumber for legacy rows that only have the numeric value.
   const v =
+    (vt !== null && vt !== undefined && vt !== "" ? vt : null) ??
     (vn !== null && vn !== undefined ? vn : null) ??
-    (vt !== null && vt !== undefined ? vt : null) ??
     pr?.value ??
     pr?.result ??
     pr?.resultValue ??

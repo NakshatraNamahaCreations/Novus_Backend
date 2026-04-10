@@ -394,7 +394,11 @@ async function buildTrendMap({ results, patientId }) {
     const prevByIndex = previous.map((prev) => {
       const perParam = new Map();
       for (const pr of prev.parameterResults || []) {
-        const value = pr.valueNumber ?? pr.valueText ?? "—";
+        // Prefer valueText so "6.0" stays "6.0" instead of becoming "6".
+        const value =
+          (pr.valueText !== null && pr.valueText !== undefined && pr.valueText !== ""
+            ? pr.valueText
+            : pr.valueNumber) ?? "—";
         const unit = pr.unit || pr.parameter?.unit || "";
         perParam.set(pr.parameterId, formatValueWithUnit(value, unit));
       }
@@ -1397,7 +1401,11 @@ function buildPatientContentHtml({
           const buildMainRows = (arr) =>
             arr
               .map((pr) => {
-                const valueRaw = pr.valueNumber ?? pr.valueText ?? "—";
+                // Prefer valueText so "6.0" stays "6.0" instead of becoming "6".
+                const valueRaw =
+                  (pr.valueText !== null && pr.valueText !== undefined && pr.valueText !== ""
+                    ? pr.valueText
+                    : pr.valueNumber) ?? "—";
                 const unit = pr.unit || pr.parameter?.unit || "";
                 const method = pr.method || pr.parameter?.method || "";
                 const flag = getFlagKind(pr.flag);
