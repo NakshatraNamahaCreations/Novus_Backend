@@ -49,7 +49,10 @@ export const addOrderPayment = async (req, res) => {
                                        : "pending";
 
     // Only generate invoice number when full payment is completed
-    const invoiceNumber = newPaymentStatus === "paid" ? await generateInvoiceNumber() : null;
+    let invoiceNumber = null;
+    if (newPaymentStatus === "paid") {
+      invoiceNumber = await generateInvoiceNumber();
+    }
 
     const payment = await prisma.payment.create({
       data: {
@@ -126,6 +129,10 @@ export const addOrderPayment = async (req, res) => {
     });
   } catch (error) {
     console.error("Add order payment error:", error);
+    // P2002 = unique constraint violation (invoice number collision under concurrency)
+    if (error.code === "P2002" && error.meta?.target?.includes("invoiceNumber")) {
+      return res.status(409).json({ success: false, message: "Payment conflict: please retry" });
+    }
     return res.status(500).json({ success: false, message: "Error adding payment", error: error.message });
   }
 };
