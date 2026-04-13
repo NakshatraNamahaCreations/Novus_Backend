@@ -7,6 +7,8 @@ import {
   getWalkInReport,
   exportReport,
   getReportFilterData,
+  getRefCenterStats,
+  getDoctorStats,
 } from "./reports.controller.js";
 
 // Middleware: import your existing auth middleware
@@ -35,6 +37,12 @@ router.get("/gateway",            getPaymentGatewayReport);
 
 // GET /api/reports/walkin?fromDate=...&toDate=...&createdById=...
 router.get("/walkin",             getWalkInReport);
+
+// GET /api/reports/ref-center-stats?fromDate=...&toDate=...&createdById=...
+router.get("/ref-center-stats",   getRefCenterStats);
+
+// GET /api/reports/doctor-stats?fromDate=...&toDate=...&createdById=...
+router.get("/doctor-stats",       getDoctorStats);
 
 // ── CSV Export ────────────────────────────────────────────────────────────────
 // GET /api/reports/export?type=collection&fromDate=...&toDate=...

@@ -678,3 +678,136 @@ export const getReportFilterData = async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to fetch filter data" });
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6️⃣  REF CENTER STATISTICS
+// ─────────────────────────────────────────────────────────────────────────────
+export const getRefCenterStats = async (req, res) => {
+  try {
+    const { fromDate, toDate, createdById } = req.query;
+    const { from, to } = parseDateRange(fromDate, toDate);
+
+    const where = { createdAt: { gte: from, lte: to } };
+    if (createdById && createdById !== "all") where.createdById = Number(createdById);
+
+    const orders = await prisma.order.findMany({
+      where,
+      select: {
+        id: true,
+        finalAmount: true,
+        paymentStatus: true,
+        refCenterId: true,
+        refCenter: { select: { id: true, name: true, contactName: true } },
+        createdBy: { select: { id: true, name: true } },
+      },
+    });
+
+    const centerMap = {};
+    for (const o of orders) {
+      if (!o.refCenterId) continue;
+      const key = o.refCenterId;
+      if (!centerMap[key]) {
+        centerMap[key] = {
+          id: o.refCenter?.id || key,
+          name: o.refCenter?.name || "Unknown",
+          contactName: o.refCenter?.contactName || "",
+          totalOrders: 0,
+          totalAmount: 0,
+          paidAmount: 0,
+          pendingAmount: 0,
+          createdByUsers: new Set(),
+        };
+      }
+      centerMap[key].totalOrders++;
+      centerMap[key].totalAmount += o.finalAmount || 0;
+      if (o.createdBy?.name) centerMap[key].createdByUsers.add(o.createdBy.name);
+      const isPaid = ["paid", "CAPTURED", "COMPLETED"].includes(o.paymentStatus);
+      if (isPaid) centerMap[key].paidAmount += o.finalAmount || 0;
+      else        centerMap[key].pendingAmount += o.finalAmount || 0;
+    }
+
+    const rows = Object.values(centerMap)
+      .map((r) => ({ ...r, createdByUsers: [...r.createdByUsers] }))
+      .sort((a, b) => b.totalOrders - a.totalOrders);
+
+    return res.json({
+      success: true,
+      summary: {
+        totalCenters: rows.length,
+        totalOrders: orders.filter((o) => o.refCenterId).length,
+        totalAmount: rows.reduce((s, r) => s + r.totalAmount, 0),
+      },
+      rows,
+    });
+  } catch (err) {
+    console.error("Ref center stats error:", err);
+    res.status(500).json({ success: false, message: "Failed to generate ref center statistics" });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7️⃣  DOCTOR STATISTICS
+// ─────────────────────────────────────────────────────────────────────────────
+export const getDoctorStats = async (req, res) => {
+  try {
+    const { fromDate, toDate, createdById } = req.query;
+    const { from, to } = parseDateRange(fromDate, toDate);
+
+    const where = { createdAt: { gte: from, lte: to } };
+    if (createdById && createdById !== "all") where.createdById = Number(createdById);
+
+    const orders = await prisma.order.findMany({
+      where,
+      select: {
+        id: true,
+        finalAmount: true,
+        paymentStatus: true,
+        doctorId: true,
+        doctor: { select: { id: true, name: true, speciality: true, mobile: true } },
+        createdBy: { select: { id: true, name: true } },
+      },
+    });
+
+    const doctorMap = {};
+    for (const o of orders) {
+      if (!o.doctorId) continue;
+      const key = o.doctorId;
+      if (!doctorMap[key]) {
+        doctorMap[key] = {
+          id: o.doctor?.id || key,
+          name: o.doctor?.name || "Unknown",
+          speciality: o.doctor?.speciality || "",
+          mobile: o.doctor?.mobile || "",
+          totalOrders: 0,
+          totalAmount: 0,
+          paidAmount: 0,
+          pendingAmount: 0,
+          createdByUsers: new Set(),
+        };
+      }
+      doctorMap[key].totalOrders++;
+      doctorMap[key].totalAmount += o.finalAmount || 0;
+      if (o.createdBy?.name) doctorMap[key].createdByUsers.add(o.createdBy.name);
+      const isPaid = ["paid", "CAPTURED", "COMPLETED"].includes(o.paymentStatus);
+      if (isPaid) doctorMap[key].paidAmount += o.finalAmount || 0;
+      else        doctorMap[key].pendingAmount += o.finalAmount || 0;
+    }
+
+    const rows = Object.values(doctorMap)
+      .map((r) => ({ ...r, createdByUsers: [...r.createdByUsers] }))
+      .sort((a, b) => b.totalOrders - a.totalOrders);
+
+    return res.json({
+      success: true,
+      summary: {
+        totalDoctors: rows.length,
+        totalOrders: orders.filter((o) => o.doctorId).length,
+        totalAmount: rows.reduce((s, r) => s + r.totalAmount, 0),
+      },
+      rows,
+    });
+  } catch (err) {
+    console.error("Doctor stats error:", err);
+    res.status(500).json({ success: false, message: "Failed to generate doctor statistics" });
+  }
+};

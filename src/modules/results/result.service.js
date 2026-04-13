@@ -201,21 +201,15 @@ findRange: async (parameterId, patient) => {
       //   defaults = await ResultService.getDefaultSignaturesByCategory(test.categoryId);
       // }
 
-      // ✅ Choose signature ids: manual override > department defaults
-      const leftSignatureId =
-        payload.leftSignatureId != null
-          ? toIntOrNull(payload.leftSignatureId)
-          : defaults.left;
+      // ✅ Choose signature ids: manual override > department defaults.
+      // NOTE: empty string "" or null from the UI means "no override" — use default.
+      const leftOverride = toIntOrNull(payload.leftSignatureId);
+      const centerOverride = toIntOrNull(payload.centerSignatureId);
+      const rightOverride = toIntOrNull(payload.rightSignatureId);
 
-      const centerSignatureId =
-        payload.centerSignatureId != null
-          ? toIntOrNull(payload.centerSignatureId)
-          : defaults.center;
-
-      const rightSignatureId =
-        payload.rightSignatureId != null
-          ? toIntOrNull(payload.rightSignatureId)
-          : defaults.right;
+      const leftSignatureId = leftOverride != null ? leftOverride : defaults.left;
+      const centerSignatureId = centerOverride != null ? centerOverride : defaults.center;
+      const rightSignatureId = rightOverride != null ? rightOverride : defaults.right;
 
       // ✅ Create PatientTestResult WITH signatures
       const created = await prisma.patientTestResult.create({
@@ -330,18 +324,17 @@ findRange: async (parameterId, patient) => {
       //   defaults = await ResultService.getDefaultSignaturesByCategory(test.categoryId);
       // }
 
-      const hasLeft = Object.prototype.hasOwnProperty.call(
-        payload,
-        "leftSignatureId"
-      );
-      const hasCenter = Object.prototype.hasOwnProperty.call(
-        payload,
-        "centerSignatureId"
-      );
-      const hasRight = Object.prototype.hasOwnProperty.call(
-        payload,
-        "rightSignatureId"
-      );
+      // NOTE: empty string "" from UI means "no explicit override" — keep
+      // the existing signature or fall back to the department default.
+      const hasLeft =
+        Object.prototype.hasOwnProperty.call(payload, "leftSignatureId") &&
+        toIntOrNull(payload.leftSignatureId) != null;
+      const hasCenter =
+        Object.prototype.hasOwnProperty.call(payload, "centerSignatureId") &&
+        toIntOrNull(payload.centerSignatureId) != null;
+      const hasRight =
+        Object.prototype.hasOwnProperty.call(payload, "rightSignatureId") &&
+        toIntOrNull(payload.rightSignatureId) != null;
 
       const nextLeft = hasLeft
         ? toIntOrNull(payload.leftSignatureId)

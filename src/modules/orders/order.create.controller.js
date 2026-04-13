@@ -295,9 +295,10 @@ export const createAdminOrder = async (req, res) => {
       addressId, homeCollection = false,
       registrationType, provisionalDiagnosis, notes, remark, source,
       diagnosticCenterId, refCenterId, doctorId,
-      centerId, collectionCenterId, slotId,
+      centerId, collectionCenterId, slotId, centerSlotId,
       totalAmount: bodyTotalAmount, discount, discountAmount,
       finalAmount: bodyFinalAmount,
+      collectionCharge: bodyCollectionCharge,
       date, homeCollectionDate,
       familyMemberIds,
     } = req.body;
@@ -327,8 +328,14 @@ export const createAdminOrder = async (req, res) => {
     const total = bodyTotalAmount != null ? toNumber(bodyTotalAmount) : computedTotal;
     const discountAmt =
       discountAmount != null ? toNumber(discountAmount) : discount != null ? toNumber(discount) : 0;
+    // Collection charge (only for home collection orders)
+    const collectionChargeAmt = Boolean(homeCollection)
+      ? toNumber(bodyCollectionCharge) || 0
+      : 0;
     const finalAmt =
-      bodyFinalAmount != null ? toNumber(bodyFinalAmount) : Math.max(0, total - discountAmt);
+      bodyFinalAmount != null
+        ? toNumber(bodyFinalAmount)
+        : Math.max(0, total - discountAmt) + collectionChargeAmt;
     const isFreeOrder = Number(finalAmt) <= 0;
 
     const orderDate = parseISTDateTime(date || homeCollectionDate || null);
@@ -368,6 +375,7 @@ export const createAdminOrder = async (req, res) => {
       totalAmount: Number(total),
       discount: Number(discountAmt) || 0,
       discountAmount: Number(discountAmt),
+      collectionCharge: Number(collectionChargeAmt) || 0,
       finalAmount: Number(finalAmt),
       paymentStatus: isFreeOrder ? "PAID" : "PENDING",
       source: source ?? undefined,
@@ -385,6 +393,8 @@ export const createAdminOrder = async (req, res) => {
     } else {
       const finalCenterId = castInt(centerId ?? collectionCenterId);
       if (finalCenterId) dataToCreate.center = { connect: { id: finalCenterId } };
+      const csId = castInt(centerSlotId);
+      if (csId) dataToCreate.centerSlot = { connect: { id: csId } };
     }
 
     const dId = castInt(doctorId);

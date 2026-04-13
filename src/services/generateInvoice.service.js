@@ -10,78 +10,62 @@ const numberToIndianWords = (num) => {
   if (n === 0) return "Zero Rupees Only";
 
   const belowTwenty = [
-    "",
-    "One",
-    "Two",
-    "Three",
-    "Four",
-    "Five",
-    "Six",
-    "Seven",
-    "Eight",
-    "Nine",
-    "Ten",
-    "Eleven",
-    "Twelve",
-    "Thirteen",
-    "Fourteen",
-    "Fifteen",
-    "Sixteen",
-    "Seventeen",
-    "Eighteen",
-    "Nineteen",
+    "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
+    "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen",
+    "Sixteen", "Seventeen", "Eighteen", "Nineteen",
   ];
 
   const tens = [
-    "",
-    "",
-    "Twenty",
-    "Thirty",
-    "Forty",
-    "Fifty",
-    "Sixty",
-    "Seventy",
-    "Eighty",
-    "Ninety",
+    "", "", "Twenty", "Thirty", "Forty", "Fifty",
+    "Sixty", "Seventy", "Eighty", "Ninety",
   ];
 
-  const scales = ["", "Thousand", "Lakh", "Crore"];
-
-  const helper = (x) => {
-    const v = Number(x || 0);
+  // Convert numbers up to 999 into words
+  const helper = (v) => {
+    v = Number(v || 0);
     if (v === 0) return "";
     if (v < 20) return belowTwenty[v] + " ";
-    if (v < 100) {
-      return (
-        tens[Math.floor(v / 10)] +
-        (v % 10 ? " " + belowTwenty[v % 10] : "") +
-        " "
-      );
-    }
-    if (v < 1000) {
-      return belowTwenty[Math.floor(v / 100)] + " Hundred " + helper(v % 100);
-    }
-
-    for (let i = 3; i >= 1; i--) {
-      const divider = 10 ** (i * 2 + (i === 1 ? 1 : 0));
-      if (v >= divider) {
-        return (
-          helper(Math.floor(v / divider)) +
-          scales[i] +
-          " " +
-          helper(v % divider)
-        );
-      }
-    }
-    return "";
+    if (v < 100) return tens[Math.floor(v / 10)] + (v % 10 ? " " + belowTwenty[v % 10] : "") + " ";
+    return belowTwenty[Math.floor(v / 100)] + " Hundred " + helper(v % 100);
   };
 
-  const words = helper(Math.floor(n)).trim();
+  // Indian number system: Crore(10^7), Lakh(10^5), Thousand(10^3)
+  let v = Math.floor(n);
+  let result = "";
+
+  if (v >= 1_00_00_000) {
+    result += helper(Math.floor(v / 1_00_00_000)) + "Crore ";
+    v %= 1_00_00_000;
+  }
+  if (v >= 1_00_000) {
+    result += helper(Math.floor(v / 1_00_000)) + "Lakh ";
+    v %= 1_00_000;
+  }
+  if (v >= 1_000) {
+    result += helper(Math.floor(v / 1_000)) + "Thousand ";
+    v %= 1_000;
+  }
+  if (v > 0) {
+    result += helper(v);
+  }
+
+  const words = result.trim();
   return words ? `${words} Rupees Only` : "Zero Rupees Only";
 };
 
 const getCollectionCharge = async (order, offerSubtotal) => {
   try {
+    // ✅ Only apply collection charge to home-sample orders.
+    // Walk-in / B2B orders must never show a home-collection charge.
+    if (!order?.isHomeSample) return 0;
+
+    // ✅ Prefer the value persisted on the order itself (set at order creation).
+    // This guarantees the invoice matches what the user actually confirmed.
+    if (order?.collectionCharge != null) {
+      return Number(order.collectionCharge) || 0;
+    }
+
+    // Fallback: derive from the active rule if nothing was stored on the order
     const rule = await prisma.collectionPrice.findFirst({
       where: { isActive: true },
     });
@@ -91,7 +75,9 @@ const getCollectionCharge = async (order, offerSubtotal) => {
     const minAmount = Number(rule.minAmount || 0);
     const price = Number(rule.price || 0);
 
-    return Number(offerSubtotal) < minAmount ? price : 0;
+    // ✅ If the order subtotal is below the minimum fixed amount,
+    // the collection charge must NOT be shown in the invoice.
+    return Number(offerSubtotal) < minAmount ? 0 : price;
   } catch (e) {
     console.error("getCollectionCharge error:", e);
     return 0;
@@ -501,9 +487,7 @@ export const generateAndUploadInvoice = async ({
                   Amount in Words: ${amountInWords}
                 </div>
 
-                ${payableTotal > 10000
-                  ? `<div class="note">* TDS @ 1% applicable as per section 194R</div>`
-                  : ""}
+               
               </div>
             </div>
 

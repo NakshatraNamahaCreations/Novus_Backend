@@ -454,14 +454,15 @@ function chunkArray(arr, size) {
 }
 
 /* -------------------------------------------------------
-✅ Default signatures by Category
+✅ Default signatures by DepartmentItem
+   Keyed by departmentItemId (matches eSignatureDepartment in admin)
 -------------------------------------------------------- */
-async function getDefaultSignaturesByCategory(categoryIds = []) {
-  const ids = [...new Set(categoryIds.map(Number))].filter(Boolean);
+async function getDefaultSignaturesByDepartment(departmentItemIds = []) {
+  const ids = [...new Set(departmentItemIds.map(Number))].filter(Boolean);
   if (!ids.length) return new Map();
 
-  const rows = await prisma.eSignatureCategory.findMany({
-    where: { categoryId: { in: ids }, isDefault: true },
+  const rows = await prisma.eSignatureDepartment.findMany({
+    where: { departmentItemId: { in: ids }, isDefault: true },
     include: {
       signature: {
         select: {
@@ -478,13 +479,13 @@ async function getDefaultSignaturesByCategory(categoryIds = []) {
 
   const map = new Map();
   for (const row of rows) {
-    const cid = row.categoryId;
-    if (!map.has(cid)) map.set(cid, { LEFT: null, CENTER: null, RIGHT: null });
+    const depId = row.departmentItemId;
+    if (!map.has(depId)) map.set(depId, { LEFT: null, CENTER: null, RIGHT: null });
 
     const sig = row.signature;
     if (!sig) continue;
 
-    const bucket = map.get(cid);
+    const bucket = map.get(depId);
     const a = String(sig.alignment || "").toUpperCase();
 
     if (a === "LEFT" && !bucket.LEFT) bucket.LEFT = sig;
@@ -1170,9 +1171,22 @@ function buildPatientContentHtml({
     const testId = r.testId ?? r.test?.id;
     const testName = safeTrim(r.test?.name) || "Test";
 
-    // Handle radiology reports (HTML content)
-    if (isHtmlPresent(r.reportHtml)) {
-      const parts = splitRadiologyHtmlIntoPages(r.reportHtml, 1600, 800);
+    // Resolve free text HTML from notes (takes priority over reportHtml)
+    let freeTextHtml = "";
+    if (r.notes) {
+      try {
+        const parsed = JSON.parse(r.notes);
+        const entries = Object.values(parsed.__freeTexts || {}).filter(
+          (v) => v && v.replace(/<[^>]*>/g, "").trim()
+        );
+        if (entries.length) freeTextHtml = entries.join("\n");
+      } catch { /* plain string, ignore */ }
+    }
+
+    // Handle radiology/free-text reports (HTML content)
+    const htmlContent = freeTextHtml || (isHtmlPresent(r.reportHtml) ? r.reportHtml : "");
+    if (htmlContent) {
+      const parts = splitRadiologyHtmlIntoPages(htmlContent, 1600, 800);
       parts.forEach((part, idx) => {
         pages.push({
           r,
@@ -1656,7 +1670,7 @@ export async function generatePatient3Pdfs({ orderId, patientId }) {
   const resultsRaw = await prisma.patientTestResult.findMany({
     where: { orderId: Number(orderId), patientId: Number(patientId) },
     include: {
-      test: { select: { id: true, name: true, categoryId: true } },
+      test: { select: { id: true, name: true, categoryId: true, departmentItemId: true } },
       parameterResults: {
         include: { parameter: true },
         orderBy: { parameterId: "asc" },
@@ -1670,12 +1684,38 @@ export async function generatePatient3Pdfs({ orderId, patientId }) {
 
   if (!resultsRaw.length) throw new Error("No results for this patient");
 
-  const categoryIds = resultsRaw.map((r) => r.test?.categoryId).filter(Boolean);
-  const defaultByCategory = await getDefaultSignaturesByCategory(categoryIds);
+  // Resolve departmentItemId for each result: prefer test.departmentItemId,
+  // fall back to category.departmentItemId via a single batch lookup
+  const categoryIdsNeedingDept = [
+    ...new Set(
+      resultsRaw
+        .filter((r) => !r.test?.departmentItemId && r.test?.categoryId)
+        .map((r) => r.test.categoryId)
+    ),
+  ];
+  const catDeptMap = new Map();
+  if (categoryIdsNeedingDept.length) {
+    const cats = await prisma.category.findMany({
+      where: { id: { in: categoryIdsNeedingDept } },
+      select: { id: true, departmentItemId: true },
+    });
+    for (const c of cats) {
+      if (c.departmentItemId) catDeptMap.set(c.id, c.departmentItemId);
+    }
+  }
+
+  const departmentItemIds = [
+    ...new Set(
+      resultsRaw
+        .map((r) => r.test?.departmentItemId || catDeptMap.get(r.test?.categoryId) || null)
+        .filter(Boolean)
+    ),
+  ];
+  const defaultByDept = await getDefaultSignaturesByDepartment(departmentItemIds);
 
   const results = resultsRaw.map((r) => {
-    const cid = r.test?.categoryId;
-    const defs = cid ? defaultByCategory.get(cid) : null;
+    const depId = r.test?.departmentItemId || catDeptMap.get(r.test?.categoryId) || null;
+    const defs = depId ? defaultByDept.get(depId) : null;
     return {
       ...r,
       sigLeft: r.leftSignature || defs?.LEFT || null,
