@@ -18,30 +18,30 @@ export async function generateInvoiceNumber(maxRetries = 5) {
   const fyEnd = fyStart + 1;
   const fySuffix = `${String(fyStart).slice(-2)}-${String(fyEnd).slice(-2)}`;
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    // Re-read on every attempt so a concurrent insert is visible
-    const lastPayment = await prisma.payment.findFirst({
-      where: { invoiceNumber: { endsWith: `/${fySuffix}` } },
-      orderBy: { id: "desc" },
-      select: { invoiceNumber: true },
-    });
+  // Fetch all invoice numbers for this FY and find the true max numerically
+  const allPayments = await prisma.payment.findMany({
+    where: { invoiceNumber: { endsWith: `/${fySuffix}` } },
+    select: { invoiceNumber: true },
+  });
 
-    let nextNum = 1;
-    if (lastPayment?.invoiceNumber) {
-      const match = lastPayment.invoiceNumber.match(/^NHL-(\d+)\//);
-      if (match) nextNum = parseInt(match[1], 10) + 1;
+  let maxNum = 0;
+  for (const p of allPayments) {
+    const match = p.invoiceNumber?.match(/^NHL-(\d+)\//);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n > maxNum) maxNum = n;
     }
+  }
 
-    const candidate = `NHL-${String(nextNum).padStart(2, "0")}/${fySuffix}`;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const candidate = `NHL-${String(maxNum + 1 + attempt).padStart(2, "0")}/${fySuffix}`;
 
-    // Check if this candidate already exists (race window check)
     const conflict = await prisma.payment.findUnique({
       where: { invoiceNumber: candidate },
       select: { id: true },
     });
 
     if (!conflict) return candidate;
-    // Another request grabbed this number — loop and try the next one
   }
 
   throw new Error(`Failed to generate a unique invoice number after ${maxRetries} attempts`);
