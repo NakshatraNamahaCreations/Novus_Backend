@@ -4,7 +4,7 @@
 :root {
   --header-h: 85px;
   --footer-h: 50px;
-  --patient-strip-h: 118px;
+  --patient-strip-h: 95px;
   --pad-x: 14mm;
   --header-top-gap: 8px;
 
@@ -22,7 +22,7 @@
    =============================== */
 @page {
   size: A4;
-  margin-top: calc(var(--header-h) + var(--patient-strip-h) + 10px + 8px);
+  margin-top: calc(var(--header-h) + var(--patient-strip-h) + 2px);
   margin-bottom: calc(var(--footer-h) + 10px);
   margin-left: var(--pad-x);
   margin-right: var(--pad-x);
@@ -100,7 +100,7 @@
    =============================== */
 @page plainpage {
   size: A4;
-   margin-top: 85mm;
+  margin-top: calc(45mm + var(--patient-strip-h) + 2px);
   margin-bottom: 35mm;
   margin-left: var(--pad-x);
   margin-right: var(--pad-x);
@@ -729,7 +729,7 @@ p {
   font-weight: 700;
   margin: 0;
   color: var(--text-dark);
-  padding: 2px 14px 6px;
+  padding: 0px 14px 6px;
   page-break-after: avoid;
   page-break-inside: avoid;
   text-transform: uppercase;
@@ -940,7 +940,7 @@ p {
    RADIOLOGY SECTION
    =============================== */
 .radio-html {
-  padding: 4px 14px 14px;   /* ✅ top reduced from 14px to 4px */
+  padding: 2px 14px 14px;
   font-size: 11px;
   line-height: 1.6;
   background: var(--bg-white);
