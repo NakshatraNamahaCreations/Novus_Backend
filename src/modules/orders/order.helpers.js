@@ -88,6 +88,7 @@ export function buildOrderReportWhere(query) {
       city,
       pincode,
       orderId,
+      paymentStatus,
     } = query;
 
     const where = {};
@@ -116,6 +117,12 @@ export function buildOrderReportWhere(query) {
     if (diagnosticCenterId) where.diagnosticCenterId = Number(diagnosticCenterId);
     if (status) where.status = status;
     if (source) where.source = source;
+
+    console.log("paymentStatus",paymentStatus)
+
+    if (paymentStatus && String(paymentStatus).trim()) {
+      where.paymentStatus = String(paymentStatus).trim().toLocaleUpperCase();
+    }
 
     if ((city && city.trim()) || (pincode && pincode.trim())) {
       const c = city?.trim();
