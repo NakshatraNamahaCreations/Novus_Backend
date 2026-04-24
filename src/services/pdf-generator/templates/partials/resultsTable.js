@@ -428,8 +428,21 @@ function renderPathologyUsingReportItems(result) {
       }
 
       if (type === "RICH_TEXT") {
-        const html = sanitizeHtml(it?.html || it?.text || "");
-        if (!html.trim()) return "";
+        // Value is filled at result time (stored in freeTextsMap by item id),
+        // falling back to any design-time default
+        const itemId = String(it?.id || "");
+        const rawHtml = freeTextsMap[itemId] || it?.html || it?.text || "";
+        const html = sanitizeHtml(rawHtml);
+        const title = (it?.title || "").trim();
+        if (!html.trim() && !title) return "";
+        if (title) {
+          return `
+        <tr class="row-richtext">
+          <td class="param-name-cell"><div class="param-name">${esc(title)}</div></td>
+          <td colspan="2" class="richtext-cell ql-scope">${html}</td>
+        </tr>
+      `;
+        }
         return `
         <tr class="row-richtext">
           <td colspan="3" class="richtext-cell ql-scope">${html}</td>

@@ -100,7 +100,7 @@
    =============================== */
 @page plainpage {
   size: A4;
-  margin-top: calc(45mm + var(--patient-strip-h) + 2px);
+  margin-top: calc(35mm + var(--patient-strip-h) + 2px);
   margin-bottom: 35mm;
   margin-left: var(--pad-x);
   margin-right: var(--pad-x);
@@ -134,7 +134,7 @@
 }
 
 .plain-page .hdr {
-  height: 45mm;
+  height: 35mm;
 }
 
 /* ===============================
