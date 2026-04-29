@@ -424,7 +424,7 @@ export const generateAndUploadInvoice = async ({
                 }
                 ${
                   order?.doctor?.name
-                    ? `<p><strong>Ref Doctor:</strong> ${order.doctor.name}</p>`
+                    ? `<p><strong>Ref Doctor:</strong> Dr. ${order.doctor.name}</p>`
                     : ""
                 }
               </div>
