@@ -169,11 +169,29 @@ export const getLabOrders = async (req, res) => {
     }
 
     if (patientName) {
-      where.patient = { fullName: { contains: String(patientName).trim(), mode: "insensitive" } };
+      const pn = String(patientName).trim();
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { patient: { fullName: { contains: pn, mode: "insensitive" } } },
+            { orderMembers: { some: { patient: { fullName: { contains: pn, mode: "insensitive" } } } } },
+          ],
+        },
+      ];
     }
 
     if (phone) {
-      where.patient = { ...where.patient, contactNo: { contains: String(phone).trim(), mode: "insensitive" } };
+      const ph = String(phone).trim();
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { patient: { contactNo: { contains: ph, mode: "insensitive" } } },
+            { orderMembers: { some: { patient: { contactNo: { contains: ph, mode: "insensitive" } } } } },
+          ],
+        },
+      ];
     }
 
     if (testName) {
