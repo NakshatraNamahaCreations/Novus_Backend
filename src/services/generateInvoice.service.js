@@ -59,6 +59,9 @@ const getCollectionCharge = async (order, offerSubtotal) => {
     // Walk-in / B2B orders must never show a home-collection charge.
     if (!order?.isHomeSample) return 0;
 
+    // ✅ Only add collection charge for app-sourced orders.
+    if (order?.source !== "app") return 0;
+
     // ✅ Prefer the value persisted on the order itself (set at order creation).
     // This guarantees the invoice matches what the user actually confirmed.
     if (order?.collectionCharge != null) {

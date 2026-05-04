@@ -121,6 +121,7 @@ export const getAllOrders = async (req, res) => {
           center: { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
           diagnosticCenter: { select: { id: true, name: true, } },
           doctor: { select: { id: true, name: true } },
+          orderMembers: { select: { patient: { select: PATIENT_SELECT } } },
         },
       }),
       prisma.order.count({ where }),
@@ -253,6 +254,7 @@ export const getLabOrders = async (req, res) => {
           orderCheckups: { select: { checkup: { select: { id: true, name: true } } } },
           orderMembers: {
             select: {
+              patient: { select: PATIENT_SELECT },
               orderMemberPackages: {
                 select: {
                   test: { select: { id: true, name: true } },

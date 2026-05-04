@@ -482,6 +482,14 @@ export const createAdminOrder = async (req, res) => {
       { attempts: 3, backoff: { type: "exponential", delay: 2000 }, removeOnComplete: true, removeOnFail: false },
     ).catch((e) => console.warn("WhatsApp queue failed:", e?.message));
 
+    if (Boolean(homeCollection)) {
+      whatsappQueue.add("whatsapp.sendHomeSampleBookedAdmin", {
+        orderId: result.orderId,
+        adminPhone: process.env.ADMIN_WHATSAPP_NUMBER,
+        adminName: "Admin",
+      }).catch((e) => console.warn("WhatsApp home sample admin queue failed:", e?.message));
+    }
+
     return res.json({ success: true, message: "Order created successfully", order: createdOrder });
   } catch (error) {
     console.error("Create admin order error:", error);

@@ -397,8 +397,14 @@ const handleSendDoctorReportConfirmation = async (
 ) => {
   if (!order?.doctorId) return { skipped: true, reason: "no-doctorId" };
 
-  const doctorPhone = order?.doctor?.mobile || order?.doctor?.number;
+  const doctorPhone = order?.doctor?.mobile;
   if (!doctorPhone) return { skipped: true, reason: "doctor mobile missing" };
+
+  const cleanDoctorPhone = String(doctorPhone).replace(/\D/g, "");
+  if (cleanDoctorPhone.length !== 10) {
+    console.warn(`Doctor report skipped — invalid mobile for doctorId ${order.doctorId}: "${doctorPhone}"`);
+    return { skipped: true, reason: "invalid doctor phone format" };
+  }
 
   const tpl = WHATSAPP_TEMPLATES.DOCTOR_REPORT_CONFIRMATION;
 
