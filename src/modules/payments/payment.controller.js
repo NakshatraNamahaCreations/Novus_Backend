@@ -265,12 +265,12 @@ export const getAllPayments = async (req, res) => {
     if (paymentMethod) where.AND.push({ paymentMethod });
     if (paymentStatus) where.AND.push({ paymentStatus });
 
-    // ✅ date range uses paymentDate
+    // ✅ date range uses createdAt, interpreted in IST (Asia/Kolkata, UTC+05:30)
     if (startDate || endDate) {
       const dateFilter = {};
-      if (startDate) dateFilter.gte = new Date(`${startDate}T00:00:00.000Z`);
-      if (endDate) dateFilter.lte = new Date(`${endDate}T23:59:59.999Z`);
-      where.AND.push({ paymentDate: dateFilter });
+      if (startDate) dateFilter.gte = new Date(`${startDate}T00:00:00.000+05:30`);
+      if (endDate) dateFilter.lte = new Date(`${endDate}T23:59:59.999+05:30`);
+      where.AND.push({ createdAt: dateFilter });
     }
 
     // ✅ global search
@@ -303,7 +303,15 @@ export const getAllPayments = async (req, res) => {
       prisma.payment.findMany({
         where,
         include: {
-          order: { select: { id: true, orderNumber: true, finalAmount: true } },
+          order: {
+            select: {
+              id: true,
+              orderNumber: true,
+              finalAmount: true,
+              diagnosticCenterId: true,
+              diagnosticCenter: { select: { id: true, name: true } },
+            },
+          },
           patient: { select: { id: true, fullName: true, contactNo: true } },
           vendor: { select: { id: true, name: true, number: true } },
 

@@ -63,7 +63,7 @@ export const addOrderPayment = async (req, res) => {
         centerId: order.centerId,
         paymentId,
         invoiceNumber,
-        diagnosticCenterId,
+        diagnosticCenterId: diagnosticCenterId ?? order.diagnosticCenterId ?? null,
         paymentMethod: paymentMode?.toUpperCase(),
         paymentStatus: "COMPLETED",
         amount, currency,

@@ -172,6 +172,7 @@ export const createOrder = async (req, res) => {
       await tx.payment.create({
         data: {
           orderId: created.id, patientId, paymentId,
+          diagnosticCenterId: created.diagnosticCenterId ?? null,
           paymentMethod: "UPI", paymentMode: "ONLINE",
           paymentStatus: "COMPLETED", amount: finalAmount,
           currency: "INR", paymentDate: new Date(),

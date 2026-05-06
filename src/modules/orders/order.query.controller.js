@@ -157,7 +157,7 @@ export const getLabOrders = async (req, res) => {
     const user = req.user;
     const where = {};
 
-    if (user?.role === "admin") {
+    if (user?.role === "admin" && source !== "app") {
       const ids = Array.isArray(user?.diagnosticCenterIds) ? user.diagnosticCenterIds : [];
       if (ids.length > 0) where.diagnosticCenterId = { in: ids };
       else return res.status(200).json({ success: false, message: "No orders for this user" });
