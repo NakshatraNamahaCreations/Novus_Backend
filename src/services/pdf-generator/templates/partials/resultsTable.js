@@ -571,7 +571,10 @@ export function resultsTableHtml({
 }) {
   const all = Array.isArray(results) ? results : [];
   const radiology = all.filter(isRadiology);
-  const pathology = all.filter(isPathology);
+  // Radiology takes priority — a result that qualifies as radiology must not
+  // also render under pathology (prevents the same test appearing twice in
+  // the Report Index, e.g. 2D ECHO with both reportHtml and reportItems).
+  const pathology = all.filter((r) => !isRadiology(r) && isPathology(r));
 
   const indexItems = [];
   let seq = 0;

@@ -88,18 +88,10 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
 
   const totalTests = indexItems.length;
 
-  const deptMap = new Map();
-  for (const item of indexItems) {
-    const d = item.dept || "General Tests";
-    if (!deptMap.has(d)) deptMap.set(d, []);
-    deptMap.get(d).push(item);
-  }
-
-  const sections = [...deptMap.entries()]
-    .map(([deptName, items]) => {
-      const rows = items
-        .map(
-          (it, i) => `
+  // Flat list — no department grouping/headers on the Report Index page.
+  const rows = indexItems
+    .map(
+      (it, i) => `
       <tr class="idx-row">
         <td class="idx-num">${String(i + 1).padStart(2, "0")}</td>
         <td class="idx-name-cell">
@@ -116,16 +108,11 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
         </td>
       </tr>
     `
-        )
-        .join("");
+    )
+    .join("");
 
-      return `
+  const sections = `
       <div class="idx-section">
-        <div class="idx-dept-header">
-          <div class="idx-dept-icon"></div>
-          <span class="idx-dept-name">${esc(deptName)}</span>
-          <span class="idx-dept-count">${items.length} test${items.length > 1 ? "s" : ""}</span>
-        </div>
         <table class="idx-table">
           <thead>
             <tr>
@@ -139,8 +126,6 @@ function buildIndexPage(indexItems = [], { patient, order, derived } = {}) {
         </table>
       </div>
     `;
-    })
-    .join("");
 
   return `
     <div class="index-only-page">
