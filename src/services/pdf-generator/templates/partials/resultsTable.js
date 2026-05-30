@@ -95,7 +95,7 @@ function injectRefHtmlStyles(html) {
     );
 }
 
-function renderNotesBlock(notes) {
+function extractNotesText(notes) {
   let notesText = notes || "";
   // Parse JSON notes format: { __notes: "...", __freeTexts: {...} }
   try {
@@ -104,11 +104,21 @@ function renderNotesBlock(notes) {
   } catch {
     // plain string — use as-is
   }
+  return notesText;
+}
+
+function hasNotesContent(notes) {
+  const text = extractNotesText(notes);
+  return hasVisibleHtmlContent(text);
+}
+
+function renderNotesBlock(notes) {
+  const notesText = extractNotesText(notes);
   const notesHtml = sanitizeHtml(notesText);
   if (!notesHtml.trim()) return "";
   return `
     <div class="test-notes">
-      <div class="test-notes-title">Notes</div>
+      <div class="test-notes-title">Clinical Notes</div>
       <div class="test-notes-body ql-scope">${notesHtml}</div>
     </div>
   `;
@@ -123,7 +133,8 @@ function isRadiology(r) {
 function isPathology(r) {
   return (
     (Array.isArray(r?.parameterResults) && r.parameterResults.length > 0) ||
-    (Array.isArray(r?.reportItems) && r.reportItems.length > 0)
+    (Array.isArray(r?.reportItems) && r.reportItems.length > 0) ||
+    hasNotesContent(r?.notes)
   );
 }
 
@@ -644,9 +655,23 @@ export function resultsTableHtml({
             ? r.parameterResults.length
             : 0;
 
-          // ✅ FIX: Build section HTML first — skip entirely if empty
+          // ✅ FIX: Build section + notes HTML — skip only if BOTH are empty.
+          // Tests with only clinical notes (no parameter values) must still render.
           const sectionHtml = renderPathologyUsingReportItems(r);
-          if (!sectionHtml.trim()) return "";
+          const notesHtml = renderNotesBlock(r?.notes);
+          if (!sectionHtml.trim() && !notesHtml.trim()) return "";
+
+          // When the result table is empty but notes exist, render the test
+          // title header so notes are not orphaned without a heading.
+          const notesOnlyHeader = !sectionHtml.trim() && notesHtml.trim()
+            ? `
+              <div class="section pathology keep-together">
+                <div class="test-title-row">
+                  <div class="test-name-left">${esc(testName)}</div>
+                </div>
+              </div>
+            `
+            : "";
 
           indexItems.push({
             id,
@@ -659,7 +684,8 @@ export function resultsTableHtml({
           return `
         <div id="${esc(id)}">
           ${sectionHtml}
-          ${renderNotesBlock(r?.notes)}
+          ${notesOnlyHeader}
+          ${notesHtml}
         </div>
       `;
         })

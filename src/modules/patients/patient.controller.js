@@ -9,6 +9,12 @@ import prisma from '../../lib/prisma.js';
 const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
+// Demo credentials for Apple App Store review.
+// Apple re-reviews on every release, so this bypass must remain permanently.
+// Keep the number in a format that cannot collide with a real customer.
+const DEMO_PHONE = "9999999999";
+const DEMO_OTP = "123456";
+
 const calculateAge = (dob) => {
   if (!dob) return null;
   const now = dayjs();
@@ -118,8 +124,13 @@ export const loginOrRegister = async (req, res) => {
       return res.status(400).json({ error: "Contact number required" });
     }
 
-    const otp = generateOtp();
-    const otpExpiry = dayjs().add(5, "minute").toDate();
+    const isDemo = contactNo === DEMO_PHONE;
+    const otp = isDemo ? DEMO_OTP : generateOtp();
+    // Demo OTP gets a far-future expiry so Apple's reviewer never sees an
+    // "OTP expired" error if the build sits between login and verify.
+    const otpExpiry = isDemo
+      ? dayjs().add(10, "year").toDate()
+      : dayjs().add(5, "minute").toDate();
 
     let patient = await prisma.patient.findFirst({
       where: { contactNo },
@@ -131,26 +142,27 @@ export const loginOrRegister = async (req, res) => {
         data: { otp, otpExpiry },
       });
 
-      await sendOtpSms(contactNo, otp);
+      if (!isDemo) await sendOtpSms(contactNo, otp);
 
       return res.json({
         message: "OTP sent successfully",
         contactNo,
         isNew: false,
-        otp: otp,
+        otp: isDemo ? undefined : otp,
       });
     }
 
     patient = await prisma.patient.create({
       data: {
         contactNo,
+        otp,
         otpExpiry,
         relationship: "Self",
         isPrimary: true,
       },
     });
 
-    await sendOtpSms(contactNo, otp);
+    if (!isDemo) await sendOtpSms(contactNo, otp);
 
     return res.json({
       message: "Account created & OTP sent",
@@ -167,13 +179,17 @@ export const verifyOtp = async (req, res) => {
   try {
     const { contactNo, otp, fcmToken, platform } = req.body;
 
+    const isDemo = contactNo === DEMO_PHONE && otp === DEMO_OTP;
+
     const patient = await prisma.patient.findFirst({
       where: { contactNo },
     });
 
     if (!patient) return res.status(400).json({ error: "Patient not found" });
-    if (patient.otp !== otp) return res.status(400).json({ error: "Invalid OTP" });
-    if (dayjs().isAfter(patient.otpExpiry)) return res.status(400).json({ error: "OTP expired" });
+    if (!isDemo) {
+      if (patient.otp !== otp) return res.status(400).json({ error: "Invalid OTP" });
+      if (dayjs().isAfter(patient.otpExpiry)) return res.status(400).json({ error: "OTP expired" });
+    }
 
     // ✅ Clear OTP
     const updatedPatient = await prisma.patient.update({
@@ -255,20 +271,23 @@ export const resendOtp = async (req, res) => {
       return res.status(404).json({ error: "Patient not found" });
     }
 
-    const otp = generateOtp();
-    const otpExpiry = dayjs().add(5, "minute").toDate();
+    const isDemo = contactNo === DEMO_PHONE;
+    const otp = isDemo ? DEMO_OTP : generateOtp();
+    const otpExpiry = isDemo
+      ? dayjs().add(10, "year").toDate()
+      : dayjs().add(5, "minute").toDate();
 
     await prisma.patient.update({
       where: { contactNo },
       data: { otp, otpExpiry },
     });
 
-    await sendOtpSms(contactNo, otp);
+    if (!isDemo) await sendOtpSms(contactNo, otp);
 
     return res.json({
       message: "OTP resent successfully",
       contactNo,
-  
+
     });
   } catch (error) {
     console.error("Error resending OTP:", error);
