@@ -295,6 +295,104 @@ export const resendOtp = async (req, res) => {
   }
 };
 
+// DELETE ACCOUNT (Apple Guideline 5.1.1(v) compliant)
+// Anonymizes PII on the Patient row and deletes device tokens / address PII.
+// Medical records (orders, test results, payments, prescriptions) are retained
+// for legal compliance with Indian medical record retention rules — they remain
+// linked to the now-anonymized patient row.
+export const deletePatientAccount = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const patientId = Number(id);
+    if (!Number.isInteger(patientId) || patientId <= 0) {
+      return res.status(400).json({ error: "Invalid patient id" });
+    }
+
+    // Block deletion of the Apple-review demo account so reviewers can
+    // always log back in on subsequent re-reviews.
+    const existing = await prisma.patient.findUnique({
+      where: { id: patientId },
+      select: { id: true, contactNo: true, status: true },
+    });
+    if (!existing) return res.status(404).json({ error: "Patient not found" });
+    if (existing.contactNo === DEMO_PHONE) {
+      return res
+        .status(403)
+        .json({ error: "Demo account cannot be deleted" });
+    }
+    if (existing.status === "deleted") {
+      return res.json({ message: "Account already deleted" });
+    }
+
+    // Run scrub + cleanup in a single transaction so a partial failure
+    // doesn't leave a half-deleted account.
+    await prisma.$transaction(async (tx) => {
+      // 1. Drop push-notification device rows (FCM tokens are PII).
+      await tx.patientDevice.deleteMany({ where: { patientId } });
+
+      // 2. Scrub address rows but keep them — Orders reference Address rows
+      //    via addressId and we must not break those foreign keys.
+      await tx.address.updateMany({
+        where: { patientId },
+        data: {
+          saveas: null,
+          landmark: null,
+          city: "-",
+          state: "-",
+          pincode: "-",
+          latitude: null,
+          longitude: null,
+          address: "[deleted]",
+        },
+      });
+
+      // 3. Anonymize the Patient row itself. We keep the id so all
+      //    medical-record foreign keys (Order, PatientTestResult, Payment,
+      //    Prescription, etc.) stay valid.
+      await tx.patient.update({
+        where: { id: patientId },
+        data: {
+          fullName: "Deleted Account",
+          initial: null,
+          dob: null,
+          age: null,
+          gender: null,
+          email: null,
+          height: null,
+          weight: null,
+          smokingHabit: null,
+          alcoholConsumption: null,
+          exerciseFrequency: null,
+          bloodType: null,
+          // Free the unique phone number so the user can sign up fresh later.
+          contactNo: null,
+          aadharNo: null,
+          address: null,
+          passportNo: null,
+          otp: null,
+          otpExpiry: null,
+          status: "deleted",
+        },
+      });
+    });
+
+    // Clear the auth cookie if one is set on this client.
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    });
+
+    return res.json({
+      message:
+        "Your account and personal information have been deleted. Anonymized medical records are retained as required by Indian medical regulations.",
+    });
+  } catch (error) {
+    console.error("Error deleting patient account:", error);
+    return res.status(500).json({ error: "Failed to delete account" });
+  }
+};
+
 const toNullableInt = (v) => {
   if (v === undefined) return undefined; // don't touch field
   if (v === null) return null;

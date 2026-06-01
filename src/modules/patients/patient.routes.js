@@ -13,7 +13,8 @@ import {
   getAllPatients,
   getPatientById,
   createPatient,
-  getPatientByMobile
+  getPatientByMobile,
+  deletePatientAccount,
 } from "./patient.controller.js";
 
 const router = express.Router();
@@ -42,5 +43,10 @@ router.post("/:primaryId/family", addFamilyMember);
 router.get("/:primaryId/family", getFamilyMembers);
 router.put("/family/:memberId", updateFamilyMember);
 router.delete("/family/:memberId", deleteFamilyMember);
+
+// Account deletion (Apple Guideline 5.1.1(v))
+// Must be registered AFTER the /family/:memberId route so "family" is not
+// matched as an :id parameter.
+router.delete("/:id", deletePatientAccount);
 
 export default router;
