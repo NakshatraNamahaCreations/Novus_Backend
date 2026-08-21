@@ -6,6 +6,7 @@ import {
   getTestById,
   updateTest,
   deleteTest,
+  restoreTest,
   getTestsByCategory,
   getTestsBySubCategory,
   getTestsByTestType,
@@ -52,8 +53,10 @@ router.get("/testtype/:testType", getTestsByTestType);
 
 // ─── Dynamic /:id routes LAST ─────────────────────────────────────────────────
 
+router.post("/:id/restore", authenticateUser, restoreTest);
 router.get("/:id", getTestById);
 router.put("/:id", upload.single("image"), authenticateUser, updateTest);
+// DELETE archives the test (soft delete). Hard delete only with ?force=true and zero references.
 router.delete("/:id", authenticateUser, deleteTest);
 
 export default router;

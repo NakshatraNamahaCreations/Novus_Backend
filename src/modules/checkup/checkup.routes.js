@@ -6,6 +6,7 @@ import {
   getHealthPackageById,
   updateHealthPackage,
   deleteHealthPackage,
+  restoreHealthPackage,
   getHealthPackagesByCategory,
   getSpotlightHealthPackages
 } from "./checkup.controller.js";
@@ -20,8 +21,10 @@ router.get("/spotlight", getSpotlightHealthPackages);
 
 router.get("/category/:categoryId", getHealthPackagesByCategory);
 
+router.post("/:id/restore", authenticateUser, restoreHealthPackage);
 router.get("/:id", getHealthPackageById);
 router.put("/:id", upload.single("image"), updateHealthPackage);
-router.delete("/:id", deleteHealthPackage);
+// DELETE archives the package (soft delete). Hard delete only with ?force=true and zero order references.
+router.delete("/:id", authenticateUser, deleteHealthPackage);
 
 export default router;

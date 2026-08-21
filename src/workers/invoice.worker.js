@@ -2,6 +2,7 @@ import { Worker } from "bullmq";
 import { PrismaClient } from "@prisma/client";
 
 import { generateAndUploadInvoice } from "../services/generateInvoice.service.js";
+import { generateInvoiceNumber } from "../lib/invoiceNumber.js";
 import { queueRedis } from "../config/redisQueue.js";
 import { whatsappQueue } from "../queues/whatsapp.queue.js";
 
@@ -38,13 +39,27 @@ new Worker(
       }
 
       console.log("payment",payment)
+
+      // ✅ Safety net: some order-creation paths enqueue the invoice before an
+      // invoice number is assigned. Never print "INVOICE # null" — generate and
+      // persist one now if it's missing, so every invoice is numbered.
+      let invoiceNumber = payment.invoiceNumber;
+      if (!invoiceNumber) {
+        invoiceNumber = await generateInvoiceNumber();
+        await prisma.payment.update({
+          where: { paymentId },
+          data: { invoiceNumber },
+        });
+        console.log("🧾 Assigned missing invoice number:", invoiceNumber);
+      }
+
       // ✅ If invoice already exists, still ensure WhatsApp is queued (idempotent anyway)
       let invoiceUrl = payment.invoiceUrl || null;
 
       if (!invoiceUrl) {
         invoiceUrl = await generateAndUploadInvoice({
           paymentId: payment.id, // internal DB id
-          invoiceNumber: payment.invoiceNumber,
+          invoiceNumber,
           amount: payment.amount,
           currency: payment.currency,
           patientName: payment.patient?.fullName || "Customer",

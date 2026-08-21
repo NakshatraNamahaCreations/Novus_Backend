@@ -1,6 +1,37 @@
 import prisma from '../../lib/prisma.js';
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 
+/** Packages are never hard-deleted once used — they are archived (status = "archived"). */
+export const ARCHIVED_STATUS = "archived";
+
+/* Audit helpers — write to AuditLog when that model exists (NABL build); otherwise
+   fall back to a console line, so this file runs on both code lines unchanged. */
+const actorFromReq = (req) => ({
+  userId: req.user?.id ?? req.user?.userId ?? null,
+  ipAddress:
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.socket?.remoteAddress ||
+    null,
+});
+const logAudit = async (entry, tx = prisma) => {
+  if (typeof tx?.auditLog?.create === "function") {
+    return tx.auditLog.create({
+      data: {
+        entity: entry.entity,
+        entityId: String(entry.entityId),
+        action: entry.action,
+        oldValue: entry.oldValue ?? undefined,
+        newValue: entry.newValue ?? undefined,
+        reason: entry.reason ?? null,
+        userId: entry.userId ?? null,
+        ipAddress: entry.ipAddress ?? null,
+      },
+    });
+  }
+  console.info("[audit:HealthPackage]", JSON.stringify({ ...entry, at: new Date().toISOString() }));
+  return null;
+};
+
 
 /* -------------------------------------------
    🔵 Helper: Parse selected tests safely
@@ -313,21 +344,28 @@ export const getAllHealthPackages = async (req, res) => {
 
    const searchText = String(search || "").trim();
 
-const whereCondition = searchText
-  ? {
-      OR: [
-        { name: { contains: searchText, mode: "insensitive" } },
-        { alsoKnowAs: { contains: searchText, mode: "insensitive" } },
-        {
-          category: {
-            is: {
-              name: { contains: searchText, mode: "insensitive" },
+const showArchived = String(req.query.includeArchived ?? "") === "true"; // admin panel only
+
+const whereCondition = {
+  // Archived packages stay in the DB (historical bills/bookings point at them)
+  // but are hidden from the app and from new-order selection.
+  ...(showArchived ? {} : { NOT: { status: ARCHIVED_STATUS } }),
+  ...(searchText
+    ? {
+        OR: [
+          { name: { contains: searchText, mode: "insensitive" } },
+          { alsoKnowAs: { contains: searchText, mode: "insensitive" } },
+          {
+            category: {
+              is: {
+                name: { contains: searchText, mode: "insensitive" },
+              },
             },
           },
-        },
-      ],
-    }
-  : {};
+        ],
+      }
+    : {}),
+};
     /* -------------------------------------------
        1️⃣ COUNT TOTAL RESULTS
     -------------------------------------------- */
@@ -380,6 +418,7 @@ const whereCondition = searchText
       return {
         id: pkg.id,
         name: pkg.name,
+        status: pkg.status,
         imgUrl: pkg.imgUrl,
         description: pkg.description,
         actualPrice: pkg.actualPrice,
@@ -436,6 +475,7 @@ export const getSpotlightHealthPackages = async (req, res) => {
     -------------------------------------------- */
     const whereCondition = {
       spotlight: true, // ⭐ ONLY SPOTLIGHT PACKAGES
+      NOT: { status: ARCHIVED_STATUS },
       ...(search && {
         OR: [
           { name: { contains: search, mode: "insensitive" } },
@@ -567,6 +607,7 @@ export const getHealthPackagesByCategory = async (req, res) => {
     -------------------------------------------- */
     const whereCondition = {
       categoryId: catId,
+      NOT: { status: ARCHIVED_STATUS },
       ...(searchText
         ? {
             OR: [
@@ -761,34 +802,137 @@ export const getHealthPackageById = async (req, res) => {
 
 
 /* -------------------------------------------
-   🔴 DELETE PACKAGE
+   🔴 DELETE PACKAGE  →  ARCHIVE (soft delete)
+
+   A package that has ever been billed / booked must NOT be hard-deleted:
+   OrderMemberPackage.packageId, OrderCheckup.checkupId, CartItem.packageId
+   and CheckupPackage all point at it, and the FK actions (SET NULL / CASCADE
+   / explicit deleteMany) would orphan or wipe historical bills & bookings.
+
+   DELETE /checkups/:id now:
+     • sets status = "archived" (hidden from app, spotlight, category lists
+       and new-order selection; still visible in admin with ?includeArchived=true)
+     • keeps the image and the CheckupPackage test composition (needed for
+       result entry / reports of existing orders)
+     • writes an append-only AuditLog entry
+   Hard delete is only possible with ?force=true AND when no order/booking
+   has ever referenced the package.
 -------------------------------------------- */
+const countPackageUsage = async (packageId) => {
+  const [orderLines, orderCheckups, cartItems] = await Promise.all([
+    prisma.orderMemberPackage.count({ where: { packageId } }),
+    prisma.orderCheckup.count({ where: { checkupId: packageId } }),
+    prisma.cartItem.count({ where: { packageId } }),
+  ]);
+  return { orderLines, orderCheckups, cartItems, total: orderLines + orderCheckups + cartItems };
+};
+
 export const deleteHealthPackage = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = Number(req.params.id);
+    const force = String(req.query.force ?? "") === "true";
+    const { userId, ipAddress } = actorFromReq(req);
 
-    const pkg = await prisma.healthPackage.findUnique({
-      where: { id: Number(id) }
-    });
-
+    const pkg = await prisma.healthPackage.findUnique({ where: { id } });
     if (!pkg) {
       return res.status(404).json({ error: "HealthPackage not found" });
     }
 
-    if (pkg.imgUrl) await deleteFromS3(pkg.imgUrl);
+    const usage = await countPackageUsage(id);
 
-    await prisma.checkupPackage.deleteMany({
-      where: { checkupId: Number(id) }
+    /* ── Hard delete: explicit ?force=true and zero order/booking references ── */
+    if (force) {
+      if (usage.orderLines + usage.orderCheckups > 0) {
+        return res.status(409).json({
+          error: `This package is used in ${usage.orderLines + usage.orderCheckups} order(s)/booking(s) and cannot be permanently deleted. Archive it instead.`,
+          code: "PACKAGE_IN_USE",
+          usage,
+        });
+      }
+      await prisma.$transaction(async (tx) => {
+        await tx.checkupPackage.deleteMany({ where: { checkupId: id } });
+        await tx.healthPackage.delete({ where: { id } });
+        await logAudit(
+          { entity: "HealthPackage", entityId: id, action: "DELETE", oldValue: pkg, reason: "force delete — no order references", userId, ipAddress },
+          tx
+        );
+      });
+      if (pkg.imgUrl) {
+        try { await deleteFromS3(pkg.imgUrl); } catch (e) { console.warn("S3 delete failed (ignored):", e?.message || e); }
+      }
+      return res.json({ message: "HealthPackage permanently deleted (no orders referenced it)", deleted: true });
+    }
+
+    /* ── Default: archive ── */
+    if (pkg.status === ARCHIVED_STATUS) {
+      return res.json({ message: "HealthPackage is already archived", archived: true, usage });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.healthPackage.update({
+        where: { id },
+        data: { status: ARCHIVED_STATUS, spotlight: false },
+      });
+      await logAudit(
+        {
+          entity: "HealthPackage",
+          entityId: id,
+          action: "ARCHIVE",
+          oldValue: { status: pkg.status, spotlight: pkg.spotlight },
+          newValue: { status: ARCHIVED_STATUS, spotlight: false },
+          reason: req.body?.reason ?? null,
+          userId,
+          ipAddress,
+        },
+        tx
+      );
+      return u;
     });
 
-    await prisma.healthPackage.delete({
-      where: { id: Number(id) }
+    return res.json({
+      message: "HealthPackage archived. It is hidden from the app and new orders; existing bills, bookings and patient records are untouched.",
+      archived: true,
+      usage,
+      data: updated,
     });
-
-    res.json({ message: "HealthPackage deleted successfully" });
-
   } catch (error) {
-    console.error("Error deleting health package:", error);
-    res.status(500).json({ error: "Failed to delete health package" });
+    console.error("Error archiving health package:", error);
+    if (error?.code === "P2003") {
+      return res.status(409).json({
+        error: "This package is referenced by orders/bookings and cannot be deleted. Archive it instead.",
+        code: "PACKAGE_IN_USE",
+      });
+    }
+    res.status(500).json({ error: "Failed to archive health package" });
+  }
+};
+
+/* -------------------------------------------
+   🟢 RESTORE (un-archive) PACKAGE
+-------------------------------------------- */
+export const restoreHealthPackage = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { userId, ipAddress } = actorFromReq(req);
+
+    const pkg = await prisma.healthPackage.findUnique({ where: { id } });
+    if (!pkg) return res.status(404).json({ error: "HealthPackage not found" });
+    if (pkg.status !== ARCHIVED_STATUS) {
+      return res.json({ message: "HealthPackage is not archived", data: pkg });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.healthPackage.update({ where: { id }, data: { status: "active" } });
+      await logAudit(
+        { entity: "HealthPackage", entityId: id, action: "RESTORE", oldValue: { status: pkg.status }, newValue: { status: "active" }, userId, ipAddress },
+        tx
+      );
+      return u;
+    });
+
+    return res.json({ message: "HealthPackage restored", data: updated });
+  } catch (error) {
+    console.error("Error restoring health package:", error);
+    res.status(500).json({ error: "Failed to restore health package" });
   }
 };

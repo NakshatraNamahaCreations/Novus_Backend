@@ -53,6 +53,10 @@ const numberToIndianWords = (num) => {
   return words ? `${words} Rupees Only` : "Zero Rupees Only";
 };
 
+// Orders whose subtotal reaches this amount get FREE home collection.
+// Below it, the collection charge is added; at/above it, it is waived (₹0).
+const FREE_COLLECTION_THRESHOLD = 299;
+
 const getCollectionCharge = async (order, offerSubtotal) => {
   try {
     // ✅ Only apply collection charge to home-sample orders.
@@ -62,25 +66,24 @@ const getCollectionCharge = async (order, offerSubtotal) => {
     // ✅ Only add collection charge for app-sourced orders.
     if (order?.source !== "app") return 0;
 
-    // ✅ Prefer the value persisted on the order itself (set at order creation).
-    // This guarantees the invoice matches what the user actually confirmed.
-    if (order?.collectionCharge != null) {
-      return Number(order.collectionCharge) || 0;
-    }
-
-    // Fallback: derive from the active rule if nothing was stored on the order
+    // Resolve the active collection-price rule (for the charge amount + optional threshold).
     const rule = await prisma.collectionPrice.findFirst({
       where: { isActive: true },
     });
 
-    if (!rule) return 0;
+    // Free-collection threshold — rule.minAmount can override the default ₹299.
+    const threshold = Number(rule?.minAmount ?? FREE_COLLECTION_THRESHOLD);
 
-    const minAmount = Number(rule.minAmount || 0);
-    const price = Number(rule.price || 0);
+    // Charge amount: prefer what was persisted on the order (what the user confirmed),
+    // else fall back to the active rule's price.
+    const charge =
+      order?.collectionCharge != null
+        ? Number(order.collectionCharge) || 0
+        : Number(rule?.price || 0);
 
-    // ✅ If the order subtotal is below the minimum fixed amount,
-    // the collection charge must NOT be shown in the invoice.
-    return Number(offerSubtotal) < minAmount ? 0 : price;
+    // ✅ Only add the collection charge when the subtotal is BELOW the threshold.
+    // Orders of ₹299 and above get free home collection.
+    return Number(offerSubtotal) < threshold ? charge : 0;
   } catch (e) {
     console.error("getCollectionCharge error:", e);
     return 0;
@@ -436,7 +439,7 @@ export const generateAndUploadInvoice = async ({
                 <p><strong>UNNATHI TELEMED PVT LTD</strong></p>
                 <p>New No. CH19/1A On, Door No, 1028/3A, Jayalakshmi Vilas Rd, Chamaraja Mohalla, Mysuru, Karnataka 570005</p>
                 <p><strong>CIN:</strong> U86905KA20240PC191601</p>
-                <p><strong>GSTIN:</strong> 29AADCO6367J1ZQ</p>
+                <p><strong>GSTIN:</strong> 29AADCU6367J1ZQ</p>
               </div>
             </div>
 

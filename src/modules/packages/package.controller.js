@@ -3,6 +3,36 @@ import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 import * as XLSX from "xlsx";
 import prisma from '../../lib/prisma.js';
 
+/** Tests are never hard-deleted once used — they are archived (status = "archived"), same as packages. */
+export const ARCHIVED_STATUS = "archived";
+
+/* Audit helpers — write to AuditLog when that model exists (NABL build); otherwise console. */
+const actorFromReq = (req) => ({
+  userId: req.user?.id ?? req.user?.userId ?? null,
+  ipAddress:
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.socket?.remoteAddress ||
+    null,
+});
+const logAudit = async (entry, tx = prisma) => {
+  if (typeof tx?.auditLog?.create === "function") {
+    return tx.auditLog.create({
+      data: {
+        entity: entry.entity,
+        entityId: String(entry.entityId),
+        action: entry.action,
+        oldValue: entry.oldValue ?? undefined,
+        newValue: entry.newValue ?? undefined,
+        reason: entry.reason ?? null,
+        userId: entry.userId ?? null,
+        ipAddress: entry.ipAddress ?? null,
+      },
+    });
+  }
+  console.info("[audit:Test]", JSON.stringify({ ...entry, at: new Date().toISOString() }));
+  return null;
+};
+
 /* --------------------------
   helpers
 -------------------------- */
@@ -504,7 +534,8 @@ export const exportTests = async (req, res) => {
       req.query;
 
     // ── Build same filters as getAllTests ──────────────────────────────────
-    const where = {};
+    const showArchived = String(req.query.includeArchived ?? "") === "true";
+    const where = showArchived ? {} : { NOT: { status: ARCHIVED_STATUS } };
 
     if (search?.trim()) {
       where.OR = [
@@ -778,7 +809,8 @@ export const getAllTests = async (req, res) => {
     page = Number(page);
     limit = Number(limit);
 
-    const where = {};
+    const showArchived = String(req.query.includeArchived ?? "") === "true"; // admin panel only
+    const where = showArchived ? {} : { NOT: { status: ARCHIVED_STATUS } };
 
     if (search.trim() !== "") {
       where.OR = [
@@ -832,6 +864,7 @@ export const getAllTests = async (req, res) => {
 export const getAllTestsnames = async (req, res) => {
   try {
     const tests = await prisma.test.findMany({
+      where: { NOT: { status: ARCHIVED_STATUS } },
       select: {
         id: true,
         name: true,
@@ -867,7 +900,7 @@ export const getSpotlightTests = async (req, res) => {
     page = Number(page);
     limit = Number(limit);
 
-    const filter = { spotlight: true };
+    const filter = { spotlight: true, NOT: { status: ARCHIVED_STATUS } };
 
     if (search.trim() !== "") {
       filter.name = { contains: search, mode: "insensitive" };
@@ -916,9 +949,10 @@ export const searchTestsGrouped = async (req, res) => {
     const searchTerm = (req.query.q || req.query.search || "").trim();
 
     const tests = await prisma.test.findMany({
-      where: searchTerm
-        ? { name: { contains: searchTerm, mode: "insensitive" } }
-        : {},
+      where: {
+        NOT: { status: ARCHIVED_STATUS },
+        ...(searchTerm ? { name: { contains: searchTerm, mode: "insensitive" } } : {}),
+      },
       select: {
         id: true,
         name: true,
@@ -1301,49 +1335,131 @@ export const updateTest = async (req, res) => {
 };
 
 /* =========================================================
-   DELETE TEST (same)
+   DELETE TEST  →  ARCHIVE (soft delete)
+   Same rule as packages: a test that has results / bill lines / package
+   membership must never be hard-deleted. DELETE /tests/:id now sets
+   status = "archived" (hidden from app lists, search, spotlight, most-booked
+   and new-order selection; admin still sees it with ?includeArchived=true).
+   Hard delete only with ?force=true AND when nothing references the test.
 ========================================================= */
+const countTestUsage = async (testId) => {
+  const [orderLines, results, inPackages, cartItems] = await Promise.all([
+    prisma.orderMemberPackage.count({ where: { testId } }),
+    prisma.patientTestResult.count({ where: { testId } }),
+    prisma.checkupPackage.count({ where: { testId } }),
+    prisma.cartItem.count({ where: { testId } }),
+  ]);
+  return { orderLines, results, inPackages, cartItems, total: orderLines + results + inPackages + cartItems };
+};
+
 export const deleteTest = async (req, res) => {
   try {
-    const { id } = req.params;
-    const testId = Number(id);
+    const testId = Number(req.params.id);
+    const force = String(req.query.force ?? "") === "true";
+    const { userId, ipAddress } = actorFromReq(req);
 
-    const existing = await prisma.test.findUnique({
-      where: { id: testId },
-      select: { id: true, imgUrl: true },
-    });
-
+    const existing = await prisma.test.findUnique({ where: { id: testId } });
     if (!existing) return res.status(404).json({ error: "Test not found" });
 
-    await prisma.test.delete({ where: { id: testId } });
+    const usage = await countTestUsage(testId);
 
-    if (existing.imgUrl) {
-      try {
-        await deleteFromS3(existing.imgUrl);
-      } catch (e) {
-        console.warn("S3 delete failed (ignored):", e?.message || e);
-      }
-    }
-
-    return res.json({ message: "Test deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting test:", error);
-
-    if (error?.code === "P2003") {
-      if (error?.meta?.constraint === "PatientTestResult_testId_fkey") {
+    /* ── Hard delete: explicit ?force=true and zero references ── */
+    if (force) {
+      if (usage.orderLines + usage.results + usage.inPackages > 0) {
         return res.status(409).json({
-          error:
-            "You can’t delete this test because patient results are already created for it.",
+          error: `This test is used in ${usage.orderLines} order line(s), ${usage.results} result(s) and ${usage.inPackages} package(s) and cannot be permanently deleted. Archive it instead.`,
           code: "TEST_IN_USE",
+          usage,
         });
       }
-      return res.status(409).json({
-        error: "You can’t delete this test because it is used elsewhere.",
-        code: "FK_CONSTRAINT",
+      await prisma.$transaction(async (tx) => {
+        await tx.test.delete({ where: { id: testId } });
+        await logAudit(
+          { entity: "Test", entityId: testId, action: "DELETE", oldValue: existing, reason: "force delete — no references", userId, ipAddress },
+          tx
+        );
       });
+      if (existing.imgUrl) {
+        try { await deleteFromS3(existing.imgUrl); } catch (e) { console.warn("S3 delete failed (ignored):", e?.message || e); }
+      }
+      return res.json({ message: "Test permanently deleted (nothing referenced it)", deleted: true });
     }
 
-    return res.status(500).json({ error: "Failed to delete test" });
+    /* ── Default: archive ── */
+    if (existing.status === ARCHIVED_STATUS) {
+      return res.json({ message: "Test is already archived", archived: true, usage });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.test.update({
+        where: { id: testId },
+        data: { status: ARCHIVED_STATUS, spotlight: false },
+      });
+      await logAudit(
+        {
+          entity: "Test",
+          entityId: testId,
+          action: "ARCHIVE",
+          oldValue: { status: existing.status, spotlight: existing.spotlight },
+          newValue: { status: ARCHIVED_STATUS, spotlight: false },
+          reason: req.body?.reason ?? null,
+          userId,
+          ipAddress,
+        },
+        tx
+      );
+      return u;
+    });
+
+    const note = usage.inPackages > 0
+      ? ` Note: it is still part of ${usage.inPackages} health package(s); remove it from those packages if it should no longer be offered there.`
+      : "";
+
+    return res.json({
+      message: `Test archived. It is hidden from the app and new orders; existing results, bills and bookings are untouched.${note}`,
+      archived: true,
+      usage,
+      data: updated,
+    });
+  } catch (error) {
+    console.error("Error archiving test:", error);
+    if (error?.code === "P2003") {
+      return res.status(409).json({
+        error: "This test is referenced by results/orders/packages and cannot be deleted. Archive it instead.",
+        code: "TEST_IN_USE",
+      });
+    }
+    return res.status(500).json({ error: "Failed to archive test" });
+  }
+};
+
+/* =========================================================
+   RESTORE (un-archive) TEST
+========================================================= */
+export const restoreTest = async (req, res) => {
+  try {
+    const testId = Number(req.params.id);
+    const { userId, ipAddress } = actorFromReq(req);
+
+    const existing = await prisma.test.findUnique({ where: { id: testId } });
+    if (!existing) return res.status(404).json({ error: "Test not found" });
+    if (existing.status !== ARCHIVED_STATUS) {
+      return res.json({ message: "Test is not archived", data: existing });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.test.update({ where: { id: testId }, data: { status: "active" } });
+      await logAudit(
+        { entity: "Test", entityId: testId, action: "RESTORE", oldValue: { status: existing.status }, newValue: { status: "active" }, userId, ipAddress },
+        tx
+      );
+      return u;
+    });
+
+    return res.json({ message: "Test restored", data: updated });
+  } catch (error) {
+    console.error("Error restoring test:", error);
+    return res.status(500).json({ error: "Failed to restore test" });
   }
 };
 
@@ -1366,6 +1482,7 @@ export const getTestsByCategory = async (req, res) => {
 
     const rawTests = await prisma.test.findMany({
       where: {
+        NOT: { status: ARCHIVED_STATUS },
         OR: [
           { categoryId: catId },
           { otherCategories: { some: { categoryId: catId } } },
@@ -1405,7 +1522,7 @@ export const getTestsBySubCategory = async (req, res) => {
     const { subCategoryId } = req.params;
 
     const tests = await prisma.test.findMany({
-      where: { subCategoryId: Number(subCategoryId) },
+      where: { subCategoryId: Number(subCategoryId), NOT: { status: ARCHIVED_STATUS } },
       include: {
         category: true,
         subCategory: true,
@@ -1427,7 +1544,7 @@ export const getTestsByTestType = async (req, res) => {
     const { testType } = req.params;
 
     const tests = await prisma.test.findMany({
-      where: { testType: { equals: testType, mode: "insensitive" } },
+      where: { testType: { equals: testType, mode: "insensitive" }, NOT: { status: ARCHIVED_STATUS } },
       include: {
         category: true,
         subCategory: true,
@@ -1445,6 +1562,7 @@ export const getTestsByTestType = async (req, res) => {
 export const getHomeMostBooked = async (req, res) => {
   try {
     const tests = await prisma.test.findMany({
+      where: { NOT: { status: ARCHIVED_STATUS } },
       include: {
         departmentItem: { select: { id: true, name: true, type: true } }, // ✅
         _count: {

@@ -1052,7 +1052,8 @@ model OrderMemberPackage {
   orderMember   OrderMember @relation(fields: [orderMemberId], references: [id], onDelete: Cascade)
 
   packageId Int?
-  package   HealthPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  // Restrict: a billed package line must never lose its package (packages are archived, not deleted)
+  package   HealthPackage? @relation(fields: [packageId], references: [id], onDelete: Restrict)
 
   testId       Int?
   price         Float?

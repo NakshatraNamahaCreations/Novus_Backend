@@ -72,7 +72,7 @@ Novus Health Labs`,
       "{{2}}\n\n" +
       "📱 Access your reports, invoices, and health records anytime through our mobile app:\n" +
       "Android App: https://play.google.com/store/apps/details?id=com.novus.novushealthlab\n" +
-      "iOS: Launching Soon\n\n" +
+      "iOS:https://apps.apple.com/in/app/novus-health-labs/id6774508291\n\n" +
       "Regards,\n" +
       "Novus Health Labs",
     mapVariables: ({ customerName, invoiceUrl }) => [customerName, invoiceUrl],
@@ -260,7 +260,7 @@ View reports • Store health records • Track tests anytime
 
 Android: https://play.google.com/store/apps/details?id=com.novus.novus_health_lab
 
-🍎 iOS: Launching Soon
+🍎 iOS: https://apps.apple.com/in/app/novus-health-labs/id6774508291
 
 — Team Novus Health Labs`,
   mapVariables: () => [],
