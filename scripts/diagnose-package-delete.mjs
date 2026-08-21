@@ -46,7 +46,7 @@ try {
 
   await q("E. Orphaned bill lines — detail (latest 100) with order / patient / payment info", `
     select omp.id as omp_id, omp.price, omp."createdAt", o.id as order_id, o."orderNumber", o.source,
-           o."paymentStatus", o."paymentMode", o."finalAmount", o.status, p.name as patient, p."contactNo"
+           o."paymentStatus", o."paymentMode", o."finalAmount", o.status, p."fullName" as patient, p."contactNo"
     from "OrderMemberPackage" omp
     join "OrderMember" om on om.id = omp."orderMemberId"
     join "Order" o on o.id = om."orderId"
@@ -55,14 +55,14 @@ try {
     order by omp."createdAt" desc limit 100`);
 
   await q("F. ORDERS WITH NO LINE ITEMS AT ALL (online bookings whose OrderCheckup rows were cascade-deleted would look like this)", `
-    select o.id, o."orderNumber", o.source, o."paymentStatus", o."finalAmount", o.status, o."createdAt", p.name as patient
+    select o.id, o."orderNumber", o.source, o."paymentStatus", o."finalAmount", o.status, o."createdAt", p."fullName" as patient
     from "Order" o left join "Patient" p on p.id = o."patientId"
     where not exists (select 1 from "OrderCheckup" oc where oc."orderId" = o.id)
       and not exists (select 1 from "OrderMember" om join "OrderMemberPackage" omp on omp."orderMemberId" = om.id where om."orderId" = o.id)
     order by o."createdAt" desc limit 100`);
 
   await q("G. Orders per day since Aug 1 (orders themselves are NOT deleted by a package delete — confirm they are still here)", `
-    select date("createdAt" at time zone 'Asia/Kolkata') day, source, count(*) orders, sum("finalAmount") amount
+    select date("createdAt" at time zone 'Asia/Kolkata') as "day", source, count(*) orders, sum("finalAmount") amount
     from "Order" where "createdAt" >= '2026-08-01' group by 1,2 order by 1,2`);
 
   await q("H. Payments since Aug 1 (sanity: Payment has no FK to Checkup, so nothing here is touched by a package delete)", `

@@ -221,6 +221,7 @@ export const getAllPayments = async (req, res) => {
       page = 1,
       limit = 20,
       billId, // paymentId filter
+      orderId, // ✅ exact order id filter (the "Order: 2747" shown in the table)
       diagnosticCenterId, // ✅ NEW: diagnostic center filter from UI (optional)
       paymentMethod,
       paymentStatus,
@@ -262,6 +263,11 @@ export const getAllPayments = async (req, res) => {
       });
     }
 
+    // ✅ exact order id filter
+    if (orderId && /^[0-9]+$/.test(String(orderId).trim())) {
+      where.AND.push({ orderId: parseInt(String(orderId).trim(), 10) });
+    }
+
     if (paymentMethod) where.AND.push({ paymentMethod });
     if (paymentStatus) where.AND.push({ paymentStatus });
 
@@ -276,11 +282,14 @@ export const getAllPayments = async (req, res) => {
     // ✅ global search
     if (search) {
       const s = String(search).trim();
+      const asId = /^[0-9]+$/.test(s) ? Number(s) : null; // numeric search → match the order id shown in the table
       where.AND.push({
         OR: [
+          ...(asId ? [{ orderId: asId }] : []),
           { paymentId: { contains: s, mode: "insensitive" } },
           { referenceId: { contains: s, mode: "insensitive" } },
-          // ✅ FIX: order has orderNumber, not orderId
+          { invoiceNumber: { contains: s, mode: "insensitive" } },
+          // order number text (ORD2026…); numeric order id handled above
           { order: { orderNumber: { contains: s, mode: "insensitive" } } },
           {
             patient: {
