@@ -51,7 +51,7 @@ function extractSingle(phrase) {
  * Parse a label string into { minDays, maxDays } inclusive range in days.
  * Returns null if the label cannot be parsed into a numeric age range.
  */
-function parseLabel(label) {
+export function parseLabel(label) {
   const raw = String(label || "").trim();
   const lo = raw.toLowerCase();
 
@@ -125,6 +125,13 @@ function parseLabel(label) {
     let maxDays = rightHasUnit
       ? extractSingle(right)
       : parseDays(right.match(/(\d+(?:\.\d+)?)/)?.[1], leftUnit);
+
+    // Borrow the other side's unit for bare numbers ("0 to 30 Days" → 0 days)
+    const rightUnit = right.match(/(days?|weeks?|months?|years?|yr|yrs?)/i)?.[0] || "";
+    if (minDays === null && rightUnit) {
+      const ln = left.match(/^(\d+(?:\.\d+)?)$/)?.[1];
+      if (ln !== undefined) minDays = parseDays(ln, rightUnit);
+    }
 
     if (minDays !== null && maxDays !== null) {
       return { minDays, maxDays };
@@ -210,4 +217,83 @@ export function ageToKeyFromDob(dob) {
     console.error("ageToKeyFromDob error:", err);
     return "Any";
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* 4. Range picking for a specific patient (gender + age containment)   */
+/* ------------------------------------------------------------------ */
+
+const patientAgeInDays = ({ dob, ageYears }) => {
+  if (dob) {
+    const d = new Date(dob);
+    if (!Number.isNaN(d.getTime()) && d <= new Date()) {
+      return (Date.now() - d.getTime()) / 86400000;
+    }
+  }
+  const n = Number(ageYears);
+  if (Number.isFinite(n) && n >= 0) return n * YEAR + YEAR / 2; // mid-year to avoid band boundaries
+  return null;
+};
+
+const normGenderKey = (g) => {
+  const x = String(g || "").trim().toLowerCase();
+  if (x === "m" || x === "male") return "male";
+  if (x === "f" || x === "female") return "female";
+  if (x === "k" || x === "kid" || x === "kids") return "kids";
+  return ""; // Both / blank / unknown → generic
+};
+
+/**
+ * Pick the reference range rows that apply to a patient, considering BOTH gender
+ * and age together (an exclusive gender filter must not drop a "Both"-gender age
+ * band that matches the patient's age).
+ *
+ * Tiering (lower wins):
+ *   0 gender-exact + age-band contains age     2 gender-exact + "Any" band
+ *   1 gender-Both  + age-band contains age     3 gender-Both  + "Any" band
+ * Within a tier the narrowest band wins. Rows for the OTHER gender are excluded.
+ * Falls back to "Any"-band rows, then to the original list, so a parameter never
+ * loses all its ranges.
+ *
+ * Age containment parses each range's OWN label (never exact-label equality
+ * against the master list, which missed overlapping bands).
+ *
+ * Returns the eligible rows sorted best-first (callers typically use [0]).
+ */
+export function pickRangesForPatient(ranges, { dob = null, ageYears = null, gender = null } = {}) {
+  const list = Array.isArray(ranges) ? ranges.filter(Boolean) : [];
+  if (list.length <= 1) return list;
+
+  const isAny = (v) => { const s = String(v || "").trim().toLowerCase(); return !s || s === "any"; };
+  const pg = normGenderKey(gender);
+  const days = patientAgeInDays({ dob, ageYears });
+
+  const genderTier = (r) => {
+    const rg = normGenderKey(r.gender);
+    if (!rg) return 1;                 // Both / blank → generic
+    if (!pg) return 2;                 // patient gender unknown → gendered rows last
+    return rg === pg ? 0 : -1;         // exact match, or other gender (excluded)
+  };
+
+  const scored = list
+    .map((r) => {
+      const gTier = genderTier(r);
+      if (gTier < 0) return null;
+      const band = isAny(r.referenceRange) ? null : parseLabel(r.referenceRange);
+      const ageMatch = !!(band && days !== null && days >= band.minDays && days <= band.maxDays);
+      const anyBand = isAny(r.referenceRange) || !band; // unparseable labels behave like "Any"
+      if (!ageMatch && !anyBand) return null;           // specific band that does not contain the age
+      return {
+        r,
+        tier: (ageMatch ? 0 : 10) + gTier,
+        width: band ? band.maxDays - band.minDays : Infinity,
+      };
+    })
+    .filter(Boolean)
+    .sort((x, y) => x.tier - y.tier || x.width - y.width);
+
+  if (scored.length) return scored.map((x) => x.r);
+
+  const anyRows = list.filter((r) => isAny(r.referenceRange));
+  return anyRows.length ? anyRows : list;
 }

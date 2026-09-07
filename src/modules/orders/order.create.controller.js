@@ -49,16 +49,24 @@ const fetchTestsAndPackages = async (members) => {
     uniqueTestIds.length
       ? prisma.test.findMany({
           where: { id: { in: uniqueTestIds } },
-          select: { id: true, name: true, reportWithin: true, reportUnit: true },
+          select: { id: true, name: true, status: true, reportWithin: true, reportUnit: true },
         })
       : [],
     uniquePackageIds.length
       ? prisma.healthPackage.findMany({
           where: { id: { in: uniquePackageIds } },
-          select: { id: true, name: true, reportWithin: true, reportUnit: true },
+          select: { id: true, name: true, status: true, reportWithin: true, reportUnit: true },
         })
       : [],
   ]);
+
+  // Archived catalogue items cannot be booked
+  const archived = [...tests, ...packages].filter((x) => x.status === "archived");
+  if (archived.length) {
+    const err = new Error(`Not available for booking (archived): ${archived.map((x) => x.name).join(", ")}`);
+    err.statusCode = 400;
+    throw err;
+  }
 
   return {
     testMap: new Map(tests.map((t) => [t.id, t])),
@@ -279,7 +287,7 @@ export const createOrder = async (req, res) => {
     );
   } catch (err) {
     console.error("Create order error:", err);
-    res.status(500).json({ error: err.message || "Something went wrong" });
+    res.status(err.statusCode || 500).json({ error: err.message || "Something went wrong" });
   } finally {
     if (lock?.release) await lock.release();
   }
@@ -354,12 +362,22 @@ export const createAdminOrder = async (req, res) => {
 
     const [tests, packages] = await Promise.all([
       testIds.length
-        ? prisma.test.findMany({ where: { id: { in: testIds } }, select: { id: true, reportWithin: true, reportUnit: true } })
+        ? prisma.test.findMany({ where: { id: { in: testIds } }, select: { id: true, name: true, status: true, reportWithin: true, reportUnit: true } })
         : [],
       packageIds.length
-        ? prisma.healthPackage.findMany({ where: { id: { in: packageIds } }, select: { id: true, reportWithin: true, reportUnit: true } })
+        ? prisma.healthPackage.findMany({ where: { id: { in: packageIds } }, select: { id: true, name: true, status: true, reportWithin: true, reportUnit: true } })
         : [],
     ]);
+
+    // Archived catalogue items cannot be booked
+    const archivedItems = [...tests, ...packages].filter((x) => x.status === "archived");
+    if (archivedItems.length) {
+      return res.status(400).json({
+        success: false,
+        message: `Not available for booking (archived): ${archivedItems.map((x) => x.name).join(", ")}`,
+        archived: archivedItems.map((x) => x.id),
+      });
+    }
 
     const testMap = new Map(tests.map((t) => [t.id, t]));
     const pkgMap = new Map(packages.map((p) => [p.id, p]));

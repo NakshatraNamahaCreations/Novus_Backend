@@ -46,17 +46,21 @@ listByTest: async (req, res) => {
 
       let gender = "Both";
       let ageKey = "any";
+      let dob = null;
+      let age = null;
 
       // ✅ If patientId provided → derive gender + ageKey
       if (patientId && Number.isFinite(patientId)) {
         const patient = await prisma.patient.findUnique({
           where: { id: patientId }, // 🔥 change model name if needed
-          select: { gender: true, dob: true },
+          select: { gender: true, dob: true, age: true },
         });
 
         if (patient) {
           gender = patient.gender || "Both";
-          ageKey = ageToKeyFromDob(patient.dob);
+          ageKey = ageToKeyFromDob(patient.dob); // kept for the debug meta only
+          dob = patient.dob;
+          age = patient.age;
         }
       }
 
@@ -70,11 +74,7 @@ listByTest: async (req, res) => {
 
       console.log("ageKey---",ageKey)
 
-      const list = await ParameterService.listByTest(
-        testId,
-        gender,
-        ageKey
-      );
+      const list = await ParameterService.listByTest(testId, { gender, dob, ageYears: age });
 
       return res.json({
         success: true,

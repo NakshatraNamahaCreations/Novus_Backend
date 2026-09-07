@@ -72,6 +72,7 @@ export const addToCart = async (req, res) => {
 
     
       if (!t) return res.status(400).json({ error: `Invalid testId ${testId}` });
+      if (t.status === "archived") return res.status(400).json({ error: "This test is no longer available", archived: true });
     }
 
     // 🔥 Validate REAL HealthPackage
@@ -82,6 +83,7 @@ export const addToCart = async (req, res) => {
       if (!hp)
         
         return res.status(400).json({ error: `Invalid healthPackageId ${healthPackageId}` });
+      if (hp.status === "archived") return res.status(400).json({ error: "This package is no longer available", archived: true });
     }
 
     // 🛒 Get/create active cart

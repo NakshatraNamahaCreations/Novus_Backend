@@ -323,7 +323,7 @@ export const getOrderById = async (req, res) => {
         center: { select: { id: true, name: true, contactName: true, address: true, mobile: true } },
         orderMembers: {
           include: {
-            patient: { select: { id: true, fullName: true, contactNo: true, gender: true, age: true } },
+            patient: { select: { id: true, fullName: true, contactNo: true, gender: true, age: true, dob: true } },
             orderMemberPackages: {
               include: {
                 test: {
@@ -372,7 +372,7 @@ export const getOrderResultsById = async (req, res) => {
         orderMembers: {
           select: {
             id: true, orderId: true, patientId: true,
-            patient: { select: { id: true, fullName: true, contactNo: true, gender: true, age: true } },
+            patient: { select: { id: true, fullName: true, contactNo: true, gender: true, age: true, dob: true } },
             orderMemberPackages: {
               select: {
                 id: true, orderMemberId: true, packageId: true, testId: true, price: true,

@@ -1,5 +1,6 @@
 import prisma from '../../lib/prisma.js';
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
+import { invalidateCatalogueCaches } from "../../utils/cache.js";
 
 /** Packages are never hard-deleted once used — they are archived (status = "archived"). */
 export const ARCHIVED_STATUS = "archived";
@@ -746,6 +747,10 @@ export const getHealthPackageById = async (req, res) => {
     if (!rawData) {
       return res.status(404).json({ error: "HealthPackage not found" });
     }
+    // Archived packages are neither visible nor bookable in the app (admin passes ?includeArchived=true)
+    if (rawData.status === ARCHIVED_STATUS && String(req.query.includeArchived ?? "") !== "true") {
+      return res.status(404).json({ error: "This package is no longer available", archived: true });
+    }
 
     const tests = rawData.checkupPackages.map((cp) => ({
       id: cp.test.id,
@@ -860,6 +865,7 @@ export const deleteHealthPackage = async (req, res) => {
       if (pkg.imgUrl) {
         try { await deleteFromS3(pkg.imgUrl); } catch (e) { console.warn("S3 delete failed (ignored):", e?.message || e); }
       }
+      await invalidateCatalogueCaches();
       return res.json({ message: "HealthPackage permanently deleted (no orders referenced it)", deleted: true });
     }
 
@@ -889,6 +895,7 @@ export const deleteHealthPackage = async (req, res) => {
       return u;
     });
 
+    await invalidateCatalogueCaches();
     return res.json({
       message: "HealthPackage archived. It is hidden from the app and new orders; existing bills, bookings and patient records are untouched.",
       archived: true,
@@ -930,6 +937,7 @@ export const restoreHealthPackage = async (req, res) => {
       return u;
     });
 
+    await invalidateCatalogueCaches();
     return res.json({ message: "HealthPackage restored", data: updated });
   } catch (error) {
     console.error("Error restoring health package:", error);

@@ -2,6 +2,7 @@
 import { uploadToS3, deleteFromS3 } from "../../config/s3.js";
 import * as XLSX from "xlsx";
 import prisma from '../../lib/prisma.js';
+import { invalidateCatalogueCaches } from "../../utils/cache.js";
 
 /** Tests are never hard-deleted once used — they are archived (status = "archived"), same as packages. */
 export const ARCHIVED_STATUS = "archived";
@@ -1108,6 +1109,10 @@ export const getTestById = async (req, res) => {
     });
 
     if (!test) return res.status(404).json({ error: "Test not found" });
+    // Archived tests are neither visible nor bookable in the app (admin passes ?includeArchived=true)
+    if (test.status === ARCHIVED_STATUS && String(req.query.includeArchived ?? "") !== "true") {
+      return res.status(404).json({ error: "This test is no longer available", archived: true });
+    }
     return res.json(test);
   } catch (error) {
     console.error("Error fetching test:", error);
@@ -1382,6 +1387,7 @@ export const deleteTest = async (req, res) => {
       if (existing.imgUrl) {
         try { await deleteFromS3(existing.imgUrl); } catch (e) { console.warn("S3 delete failed (ignored):", e?.message || e); }
       }
+      await invalidateCatalogueCaches();
       return res.json({ message: "Test permanently deleted (nothing referenced it)", deleted: true });
     }
 
@@ -1415,6 +1421,7 @@ export const deleteTest = async (req, res) => {
       ? ` Note: it is still part of ${usage.inPackages} health package(s); remove it from those packages if it should no longer be offered there.`
       : "";
 
+    await invalidateCatalogueCaches();
     return res.json({
       message: `Test archived. It is hidden from the app and new orders; existing results, bills and bookings are untouched.${note}`,
       archived: true,
@@ -1456,6 +1463,7 @@ export const restoreTest = async (req, res) => {
       return u;
     });
 
+    await invalidateCatalogueCaches();
     return res.json({ message: "Test restored", data: updated });
   } catch (error) {
     console.error("Error restoring test:", error);

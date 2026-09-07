@@ -31,7 +31,7 @@ const keys = {
  * @param {string|null} dateStr  - pass to also clear a specific date key
  */
 const invalidateCaches = async (slotId = null, dateStr = null) => {
-  const toDelete = [keys.all()];
+  const toDelete = [keys.all(), keys.all() + ":all"]; // public + admin (includeInactive) variants
 
   // Always wipe all date + preview caches — a capacity change affects every date
   const [dateKeys, previewKeys] = await Promise.all([
@@ -199,11 +199,12 @@ export const deleteSlot = async (req, res) => {
 // ── CACHED ──────────────────────────────
 export const getSlots = async (req, res) => {
   try {
-    const data = await getOrSet(keys.all(), CACHE_TTL, async () => {
+    const includeInactive = String(req.query.includeInactive ?? "") === "true"; // admin slot management
+    const data = await getOrSet(keys.all() + (includeInactive ? ":all" : ""), CACHE_TTL, async () => {
       const today = new Date();
 
       const slots = await prisma.slot.findMany({
-        where:    { isActive: true },
+        where:    includeInactive ? {} : { isActive: true },
         orderBy:  { startTime: "asc" },
         include: {
           dayConfigs:    { orderBy: { dayOfWeek: "asc" } },
@@ -214,12 +215,23 @@ export const getSlots = async (req, res) => {
 
       return slots
         .map((slot) => {
-          const effectiveCapacity =
-            slot.dateOverrides?.[0]?.capacity ??
-            slot.dayConfigs?.[0]?.capacity     ??
-            slot.capacity;
+          // Effective capacity for TODAY: a date override for today, else an ACTIVE
+          // day-config for TODAY's weekday, else the slot default. A config for another
+          // weekday (e.g. Sunday = 0) must not hide the slot on other days.
+          const nowIST   = dayjs().tz(TZ);
+          const todayKey = nowIST.format("YYYY-MM-DD");
+          const dow      = nowIST.day();
+          const override = (slot.dateOverrides ?? []).find(
+            (o) => dayjs(o.date).tz(TZ).format("YYYY-MM-DD") === todayKey
+          );
+          const dayCfg = (slot.dayConfigs ?? []).find((c) => c.dayOfWeek === dow && c.isActive);
+          const effectiveCapacity = override
+            ? (override.isActive ? Number(override.capacity || 0) : 0)
+            : dayCfg
+            ? Number(dayCfg.capacity || 0)
+            : Number(slot.capacity || 0);
 
-          if (Number(effectiveCapacity || 0) <= 0) return null;
+          if (!includeInactive && Number(effectiveCapacity || 0) <= 0) return null;
 
           const booked    = (slot.orderSlots ?? []).reduce((sum, os) => sum + (os?.count || 0), 0);
           const remaining = Math.max(0, effectiveCapacity - booked);
@@ -232,6 +244,7 @@ export const getSlots = async (req, res) => {
             startTime:        slot.startTime,
             endTime:          slot.endTime,
             defaultCapacity:  slot.capacity,
+            isActive:         slot.isActive,
             effectiveCapacity,
             capacitySource:   slot.dateOverrides?.[0] ? "date_override" : slot.dayConfigs?.[0] ? "day_config" : "default",
             booked,
@@ -302,6 +315,7 @@ export const getSlotsByDate = async (req, res) => {
             startTime:        formatTime(slot.startTime),
             endTime:          formatTime(slot.endTime),
             defaultCapacity:  slot.capacity,
+            isActive:         slot.isActive,
             effectiveCapacity,
             capacitySource,
             booked,

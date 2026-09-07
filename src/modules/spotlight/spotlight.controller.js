@@ -9,15 +9,15 @@ import redis, { getOrSet } from '../../utils/cache.js';
 const CACHE_TTL = 60 * 60; // 1 hour
 
 const keys = {
-  all:      (showIn) => `spotlights:all:${showIn || ''}`,
-  byId:     (id)     => `spotlights:id:${id}`,
-  byPlace:  (place)  => `spotlights:place:${place}`,
+  all:      (showIn, inclArch = false) => `spotlights:v2:all:${showIn || ''}${inclArch ? ':incl-archived' : ''}`,
+  byId:     (id)     => `spotlights:v2:id:${id}`,
+  byPlace:  (place, inclArch = false)  => `spotlights:v2:place:${place}${inclArch ? ':incl-archived' : ''}`,
 };
 
 const invalidateCaches = async (id = null) => {
   const [allKeys, placeKeys] = await Promise.all([
-    redis.keys('spotlights:all:*'),
-    redis.keys('spotlights:place:*'),
+    redis.keys('spotlights:v2:all:*'),
+    redis.keys('spotlights:v2:place:*'),
   ]);
 
   const toDelete = [...allKeys, ...placeKeys];
@@ -57,8 +57,17 @@ const validateTargetOptional = ({ testId, packageId }) => {
 };
 
 const includeTarget = {
-  test:    { select: { id: true, name: true } },
-  package: { select: { id: true, name: true } },
+  test:    { select: { id: true, name: true, status: true } },
+  package: { select: { id: true, name: true, status: true } },
+};
+
+/* App-facing lists must not show a banner whose linked package/test has been archived.
+   Admin can still manage them with ?includeArchived=true. */
+const notArchivedTarget = {
+  AND: [
+    { OR: [{ packageId: null }, { package: { status: { not: "archived" } } }] },
+    { OR: [{ testId: null }, { test: { status: { not: "archived" } } }] },
+  ],
 };
 
 // ─────────────────────────────────────────
@@ -119,12 +128,13 @@ export const addSpotlight = async (req, res) => {
 export const getAllSpotlights = async (req, res) => {
   try {
     const showInFilter = req.query.showIn ? String(req.query.showIn) : null;
+    const inclArch = String(req.query.includeArchived ?? "") === "true"; // admin only
 
     const data = await getOrSet(
-      keys.all(showInFilter),
+      keys.all(showInFilter, inclArch),
       CACHE_TTL,
       () => prisma.spotlightBanner.findMany({
-        where:   showInFilter ? { showIn: { has: showInFilter } } : {},
+        where:   { ...(showInFilter ? { showIn: { has: showInFilter } } : {}), ...(inclArch ? {} : notArchivedTarget) },
         orderBy: { id: "desc" },
         include: includeTarget,
       })
@@ -256,12 +266,13 @@ export const deleteSpotlight = async (req, res) => {
 export const getSpotlightsByShowIn = async (req, res) => {
   try {
     const place = String(req.params.place);
+    const inclArch = String(req.query.includeArchived ?? "") === "true"; // admin only
 
     const data = await getOrSet(
-      keys.byPlace(place),
+      keys.byPlace(place, inclArch),
       CACHE_TTL,
       () => prisma.spotlightBanner.findMany({
-        where:   { showIn: { has: place } },
+        where:   { showIn: { has: place }, ...(inclArch ? {} : notArchivedTarget) },
         orderBy: { id: "desc" },
         include: includeTarget,
       })

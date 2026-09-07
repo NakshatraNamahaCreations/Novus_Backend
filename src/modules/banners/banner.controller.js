@@ -9,12 +9,12 @@ import redis, { getOrSet } from '../../utils/cache.js';
 const CACHE_TTL = 60 * 60; // 1 hour
 
 const keys = {
-  all:   () =>    'banners:all',
-  byId:  (id) => `banners:id:${id}`,
+  all:   (inclArch = false) => `banners:v2:all${inclArch ? ':incl-archived' : ''}`,
+  byId:  (id) => `banners:v2:id:${id}`,
 };
 
 const invalidateCaches = async (id = null) => {
-  const toDelete = [keys.all()];
+  const toDelete = [keys.all(), keys.all(true)];
   if (id) toDelete.push(keys.byId(id));
   await redis.del(...toDelete);
 };
@@ -34,8 +34,17 @@ const validateTargetOptional = ({ testId, packageId }) => {
 };
 
 const includeTarget = {
-  test:    { select: { id: true, name: true } },
-  package: { select: { id: true, name: true } },
+  test:    { select: { id: true, name: true, status: true } },
+  package: { select: { id: true, name: true, status: true } },
+};
+
+/* App-facing lists must not show a banner whose linked package/test has been archived.
+   Admin can still manage them with ?includeArchived=true. */
+const notArchivedTarget = {
+  AND: [
+    { OR: [{ packageId: null }, { package: { status: { not: "archived" } } }] },
+    { OR: [{ testId: null }, { test: { status: { not: "archived" } } }] },
+  ],
 };
 
 // ─────────────────────────────────────────
@@ -92,10 +101,13 @@ export const addBanner = async (req, res) => {
 
 export const getAllBanners = async (req, res) => {
   try {
+    const inclArch = String(req.query.includeArchived ?? "") === "true"; // admin only
+
     const data = await getOrSet(
-      keys.all(),
+      keys.all(inclArch),
       CACHE_TTL,
       () => prisma.banner.findMany({
+        where:   inclArch ? {} : notArchivedTarget,
         orderBy: { id: "desc" },
         include: includeTarget,
       })

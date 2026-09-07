@@ -1,4 +1,5 @@
 import prisma from '../../lib/prisma.js';
+import { pickRangesForPatient } from "../../utils/ageToKeyFromDob.js";
 
 export const ParameterService = {
   create: async (testId, data) => {
@@ -187,15 +188,9 @@ export const ParameterService = {
     });
   },
 
-  listByTest: async (testId, gender = "Both", ageKey = "any") => {
+  listByTest: async (testId, patientCtx = {}) => {
     try {
       const tId = Number(testId);
-      const g = String(gender || "Both").trim();
-      const a = String(ageKey || "any").trim().toLowerCase();
-
-      console.log(a, g)
-
-      const isAnyAge = (val) => String(val || "").trim().toLowerCase() === "any";
 
       const rows = await prisma.testParameter.findMany({
         where: { testId: tId },
@@ -216,40 +211,8 @@ export const ParameterService = {
       );
 
       const filtered = rows.map((p) => {
-        let ranges = [...(p.ranges || [])];
-
-        /* ---------------- GENDER FILTER (ranges only) ---------------- */
-        if (ranges.length > 0) {
-          if (g !== "Both") {
-            const specific = ranges.filter((r) => r.gender === g);
-            ranges = specific.length > 0 ? specific : ranges.filter((r) => r.gender === "Both");
-          } else {
-            ranges = ranges.filter((r) => r.gender === "Both");
-          }
-        }
-
-        /* ---------------- AGE FILTER (ranges only) ---------------- */
-        if (ranges.length > 0) {
-          if (a === "any") {
-            ranges = ranges.filter((r) => isAnyAge(r.referenceRange));
-          } else {
-
-
-            const specificAge = ranges.filter(
-              (r) =>
-                !isAnyAge(r.referenceRange) &&
-                String(r.referenceRange || "").trim().toLowerCase() === a
-            );
-
-
-
-            const anyAge = ranges.filter((r) => isAnyAge(r.referenceRange));
-
-            ranges = specificAge.length > 0 ? specificAge : anyAge;
-          }
-        }
-
-        // ✅ resultOpts untouched, return all
+        // Gender + age picked together (see pickRangesForPatient) — best match first.
+        const ranges = pickRangesForPatient([...(p.ranges || [])], patientCtx);
         return { ...p, ranges, resultOpts: p.resultOpts || [] };
       });
 

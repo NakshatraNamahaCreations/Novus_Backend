@@ -1,7 +1,7 @@
 
 import { safeTrim } from "../utils/stringUtils.js";
 import { SignatureService } from "./signatureService.js";
-import { ageToKeyFromDob } from "../../../utils/ageToKeyFromDob.js";
+import { ageToKeyFromDob, pickRangesForPatient } from "../../../utils/ageToKeyFromDob.js";
 
 import prisma from '../../../lib/prisma.js';
 
@@ -57,6 +57,7 @@ export class PatientService {
         patientId,
         patient.gender,
         patient.dob,
+        patient.age,
         testResultId
       );
 
@@ -161,7 +162,7 @@ export class PatientService {
   }
 
   // ✅ Age-wise filter removed
- static async getPatientResults(orderId, patientId, patientGender, patientDob, testResultId) {
+ static async getPatientResults(orderId, patientId, patientGender, patientDob, patientAge, testResultId) {
   try {
     const gender = normalizeGender(patientGender);
     const ageKey = ageToKeyFromDob(patientDob);
@@ -236,37 +237,10 @@ export class PatientService {
       if (it.parameter?.ranges?.length) {
         let ranges = [...it.parameter.ranges];
 
-        // 🔹 Gender filter
-        const genderFiltered =
-          gender !== "Both"
-            ? ranges.filter((r) => r.gender === gender)
-            : ranges.filter((r) => r.gender === "Both");
-
-        ranges =
-          genderFiltered.length > 0
-            ? genderFiltered
-            : ranges.filter((r) => r.gender === "Both");
-
-        // 🔹 Age filter
-        if (ageKey === "any") {
-          ranges = ranges.filter((r) => isAnyAge(r.referenceRange));
-        } else {
-
-        
-          const specific = ranges.filter(
-            (r) =>
-              !isAnyAge(r.referenceRange) &&
-              String(r.referenceRange || "")
-                .trim()
-                .toLowerCase() === ageKey
-          );
-
-          const anyAge = ranges.filter((r) =>
-            isAnyAge(r.referenceRange)
-          );
-
-          ranges = specific.length > 0 ? specific : anyAge;
-        }
+        // 🔹 Gender + age together — an exclusive gender filter must not drop a
+        // "Both"-gender age band (e.g. Both / "1 month to 1 year") for a gendered
+        // patient. Other-gender rows are excluded, narrowest matching band wins.
+        ranges = pickRangesForPatient(ranges, { dob: patientDob, ageYears: patientAge, gender });
 
         it.parameter.ranges = ranges;
       }
