@@ -53,7 +53,9 @@ function extractSingle(phrase) {
  */
 export function parseLabel(label) {
   const raw = String(label || "").trim();
-  const lo = raw.toLowerCase();
+  // Labels are free text and sometimes snake_case ("newborn_upto_1_month") —
+  // normalise separators before parsing.
+  const lo = raw.toLowerCase().replace(/_/g, " ").replace(/\s+/g, " ").trim();
 
   // ── Special / non-numeric labels ───────────────────────────────────
   if (lo === "any") return { minDays: 0, maxDays: Infinity };
@@ -276,21 +278,24 @@ export function pickRangesForPatient(ranges, { dob = null, ageYears = null, gend
   };
 
   const scored = list
-    .map((r) => {
+    .map((r, idx) => {
       const gTier = genderTier(r);
       if (gTier < 0) return null;
-      const band = isAny(r.referenceRange) ? null : parseLabel(r.referenceRange);
+      const anyBand = isAny(r.referenceRange);
+      const band = anyBand ? null : parseLabel(r.referenceRange);
       const ageMatch = !!(band && days !== null && days >= band.minDays && days <= band.maxDays);
-      const anyBand = isAny(r.referenceRange) || !band; // unparseable labels behave like "Any"
-      if (!ageMatch && !anyBand) return null;           // specific band that does not contain the age
+      // A specific band that does not contain the patient's age — or one we cannot
+      // parse at all — must never be applied ("Newborn" must not beat "Any" for an adult).
+      if (!ageMatch && !anyBand) return null;
       return {
         r,
         tier: (ageMatch ? 0 : 10) + gTier,
         width: band ? band.maxDays - band.minDays : Infinity,
+        idx,
       };
     })
     .filter(Boolean)
-    .sort((x, y) => x.tier - y.tier || x.width - y.width);
+    .sort((x, y) => x.tier - y.tier || x.width - y.width || x.idx - y.idx);
 
   if (scored.length) return scored.map((x) => x.r);
 
